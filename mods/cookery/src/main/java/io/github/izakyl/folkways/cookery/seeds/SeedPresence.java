@@ -1,6 +1,7 @@
 package io.github.izakyl.folkways.cookery.seeds;
 
 import com.github.ysbbbbbb.kaleidoscopecookery.init.ModItems;
+import io.github.izakyl.folkways.plugins.compost.SeedBudget;
 import com.github.ysbbbbbb.kaleidoscopecookery.init.tag.TagMod;
 import io.github.izakyl.folkways.core.api.colony.Closing;
 import io.github.izakyl.folkways.core.api.colony.Colony;

@@ -6,28 +6,21 @@ import com.github.ysbbbbbb.kaleidoscopecookery.api.blockentity.IStockpot;
 import com.github.ysbbbbbb.kaleidoscopecookery.blockentity.kitchen.ChoppingBoardBlockEntity;
 import com.github.ysbbbbbb.kaleidoscopecookery.blockentity.kitchen.StockpotBlockEntity;
 import com.github.ysbbbbbb.kaleidoscopecookery.init.ModBlocks;
-import io.github.izakyl.folkways.core.api.colony.Colonies;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
 import io.github.izakyl.folkways.core.api.work.Grown;
 import io.github.izakyl.folkways.core.api.work.Stances;
 import io.github.izakyl.folkways.core.api.work.Workshop;
 import io.github.izakyl.folkways.cookery.board.ChoppingBoardWorkshops;
-import io.github.izakyl.folkways.cookery.compost.CompostStation;
 import io.github.izakyl.folkways.cookery.pot.PotStation;
-import io.github.izakyl.folkways.cookery.seeds.SeedPresence;
 import io.github.izakyl.folkways.cookery.stockpot.StockpotWorkshops;
 import io.github.izakyl.folkways.cookery.teapot.TeapotStation;
 import io.github.izakyl.folkways.cookery.tray.TrayStation;
-import io.github.izakyl.folkways.plugins.farming.CropSeeds;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
-import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.state.BlockState;
-import net.neoforged.neoforge.server.ServerLifecycleHooks;
 
 final class BuiltinKitchenStations {
     private BuiltinKitchenStations() {
@@ -39,18 +32,6 @@ final class BuiltinKitchenStations {
         KitchenStations.register(new PotStation());
         KitchenStations.register(new TrayStation());
         KitchenStations.register(new TeapotStation());
-        KitchenStations.register(new CompostStation(colonyId -> {
-            var server = ServerLifecycleHooks.getCurrentServer();
-            return server == null ? Optional.empty() : Colonies.of(server, colonyId)
-                .flatMap(colony -> colony.service(SeedPresence.ID,
-                    SeedPresence.class))
-                .filter(SeedPresence::enabled)
-                .map(support -> support.budget(server.overworld()));
-        }, () -> {
-            var server = ServerLifecycleHooks.getCurrentServer();
-            return server == null ? Set.of()
-                : CropSeeds.catalogue(server.overworld(), BlockPos.ZERO);
-        }));
         KitchenStations.register(new io.github.izakyl.folkways.cookery.stove.StoveStation());
         KitchenStations.register(new io.github.izakyl.folkways.cookery.spit.SpitStation());
         KitchenStations.register(new io.github.izakyl.folkways.cookery.steamer.SteamerStation());

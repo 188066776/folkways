@@ -1,6 +1,5 @@
 package io.github.izakyl.folkways.cookery.seeds;
 
-import com.github.ysbbbbbb.kaleidoscopecookery.init.ModItems;
 import io.github.izakyl.folkways.FolkwaysMod;
 import io.github.izakyl.folkways.core.api.colony.Colonies;
 import io.github.izakyl.folkways.core.api.colony.Colony;
@@ -17,8 +16,8 @@ import io.github.izakyl.folkways.front.engine.Enrollments;
 import io.github.izakyl.folkways.front.engine.colony.ColonyFront;
 import io.github.izakyl.folkways.front.engine.colony.ColonySettings;
 import io.github.izakyl.folkways.cookery.CookeryContent;
-import io.github.izakyl.folkways.cookery.KitchenBookings;
-import io.github.izakyl.folkways.cookery.KitchenStations;
+import io.github.izakyl.folkways.plugins.compost.*;
+import io.github.izakyl.folkways.plugins.farming.FarmingContent;
 import io.github.izakyl.folkways.plugins.orders.Orders;
 import io.github.izakyl.folkways.plugins.orders.OrdersContent;
 import io.github.izakyl.folkways.plugins.person.PersonBody;
@@ -33,7 +32,6 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
@@ -55,7 +53,7 @@ public final class SeedSupportGameTests {
     public static void register(RegisterGameTestsEvent event) { event.register(SeedSupportGameTests.class); }
 
     @GameTest(template = "empty")
-    public static void mintingAColonyRegistersOneSeedServiceAndTaskPermissionEnablesSeedBudgets(GameTestHelper helper) {
+    public static void mintingAColonyRegistersOneSeedServiceAndCompostDoesNotRequireAHat(GameTestHelper helper) {
         try (var rig = new Fixture(helper)) {
             var delegation = Enrollments.of(CookeryContent.ID).delegations().stream()
                 .filter(choice -> choice.id().equals(SeedPresence.GRASS)).findFirst().orElseThrow();
@@ -68,21 +66,125 @@ public final class SeedSupportGameTests {
             rig.body.pack().setItem(0, new ItemStack(Items.WHEAT_SEEDS, 64));
             rig.body.pack().setItem(1, new ItemStack(Items.WHEAT_SEEDS, 64));
             rig.body.pack().setItem(2, new ItemStack(Items.WHEAT_SEEDS, 2));
-            rig.body.pack().setItem(3, new ItemStack(ModItems.STRAW_HAT.get()));
             BlockPos at = helper.absolutePos(new BlockPos(4, 1, 4));
             rig.level.setBlock(at, Blocks.COMPOSTER.defaultBlockState(), Block.UPDATE_ALL);
-            var station = KitchenStations.find(rig.level.getBlockState(at)).orElseThrow();
-            var bookings = new KitchenBookings();
+            var station = rig.colony.service(CompostContent.ID, CompostPresence.class).orElseThrow().station();
+            var bookings = new CompostBookings();
             ColonyFront.of(rig.colony).setSetting(CookeryContent.ID, "wear_hat", new ColonySettings.Value.Flag(false));
             helper.assertTrue(!seeds.enabled(), "disabling task hat borrowing disables autonomous seed support");
+            helper.assertTrue(!station.recovery(rig.colony.id(), rig.level, WorldPos.of(rig.level, at), Stances.WHEREVER,
+                bookings, () -> {}).isEmpty(), "the registered composter offers a batch with hat borrowing disabled and no hat owned");
+            CompostSettings.enabled(rig.colony, false);
             helper.assertTrue(station.recovery(rig.colony.id(), rig.level, WorldPos.of(rig.level, at), Stances.WHEREVER,
-                bookings, () -> {}).isEmpty(), "the registered composter does not feed while seed task support is disabled");
+                bookings, () -> {}).isEmpty(), "the dedicated automatic-compost setting disables new feed tasks");
+            CompostSettings.enabled(rig.colony, true);
             ColonyFront.of(rig.colony).setSetting(CookeryContent.ID, "wear_hat", new ColonySettings.Value.Flag(true));
-            helper.assertTrue(seeds.enabled(), "task permission enables the demand before a first shared hat is borrowed");
             helper.assertValueEqual(seeds.budget(rig.level).tally(Items.WHEAT_SEEDS).physical(), 130L,
                 "the single registered seed service exposes its actual physical stock budget");
             helper.assertTrue(!station.recovery(rig.colony.id(), rig.level, WorldPos.of(rig.level, at), Stances.WHEREVER,
                 bookings, () -> {}).isEmpty(), "the real provider sees surplus without requiring ineffective permanent armor for composting");
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void compostPreferencesPersistPerColonyAndDriveTheActualSeedBudget(GameTestHelper helper) {
+        try (var rig = new Fixture(helper)) {
+            rig.body.pack().setItem(0, new ItemStack(Items.WHEAT_SEEDS, 64));
+            rig.body.pack().setItem(1, new ItemStack(Items.WHEAT_SEEDS, 36));
+            helper.assertTrue(CompostSettings.enabled(rig.colony), "a new colony enables automatic compost by default");
+            helper.assertValueEqual(CompostSettings.defaultReserve(rig.colony), 64, "a new colony keeps sixty-four seeds by default");
+            var budget = rig.support.budget(rig.level);
+            helper.assertValueEqual(budget.tally(Items.WHEAT_SEEDS).compostable(), 36L,
+                "the actual fresh service budget preserves its sixty-four-seed default");
+            CompostSettings.defaultReserve(rig.colony, 32);
+            helper.assertValueEqual(budget.tally(Items.WHEAT_SEEDS).compostable(), 68L,
+                "an existing service budget observes a changed colony default");
+            CompostSettings.reserve(rig.colony, Items.WHEAT_SEEDS, 80);
+            helper.assertValueEqual(budget.tally(Items.WHEAT_SEEDS).compostable(), 20L,
+                "an individual setting replaces the default in the actual service");
+            CompostSettings.defaultReserve(rig.colony, 16);
+            helper.assertValueEqual(budget.tally(Items.WHEAT_SEEDS).compostable(), 20L,
+                "changing the default leaves an explicit individual setting intact");
+            CompostSettings.enabled(rig.colony, false);
+            var data = io.github.izakyl.folkways.core.engine.colony.ColonyData.find(rig.level.getServer(), rig.colony.id()).orElseThrow();
+            var saved = data.save(new net.minecraft.nbt.CompoundTag()).getCompound("keeps")
+                .getCompound(CompostSettings.ID.toString());
+            helper.assertTrue(saved.equals(rig.colony.kept(CompostSettings.ID)),
+                "the colony's serialized keeps contain all compost preferences");
+            Colony restored = Colonies.mint(rig.level.getServer());
+            try {
+                restored.keep(CompostSettings.ID, saved);
+                helper.assertTrue(!CompostSettings.enabled(restored), "the serialized automatic toggle survives preference restoration");
+                helper.assertValueEqual(CompostSettings.defaultReserve(restored), 16, "the serialized default reserve survives restoration");
+                helper.assertValueEqual(CompostSettings.reserve(restored, Items.WHEAT_SEEDS), 80,
+                    "the serialized individual reserve survives restoration");
+                CompostSettings.reset(restored, Items.WHEAT_SEEDS);
+                helper.assertTrue(!CompostSettings.overridden(restored, Items.WHEAT_SEEDS), "reset removes the individual setting");
+                helper.assertValueEqual(CompostSettings.reserve(restored, Items.WHEAT_SEEDS), 16,
+                    "reset uses the restored current default");
+                helper.assertValueEqual(CompostSettings.reserve(rig.colony, Items.WHEAT_SEEDS), 80,
+                    "another colony's reset cannot change the original preference");
+            } finally { restored.raze(); }
+            CompostSettings.reserve(rig.colony, Items.WHEAT_SEEDS, 0);
+            helper.assertValueEqual(budget.tally(Items.WHEAT_SEEDS).compostable(), 100L,
+                "an explicit zero reserve reaches the actual seed service allowance");
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void compostRowsDiscoverOnlyOwnedSeedsAndConfiguredCrops(GameTestHelper helper) {
+        try (var rig = new Fixture(helper)) {
+            helper.assertTrue(CompostSettings.discovered(rig.colony, rig.level.getServer()).isEmpty(),
+                "a colony without seeds or plots does not list the entire crop catalogue");
+            rig.body.pack().setItem(0, new ItemStack(Items.WHEAT_SEEDS, 8));
+            rig.body.pack().setItem(1, new ItemStack(Items.BONE_MEAL));
+            BlockPos storeAt = helper.absolutePos(new BlockPos(1, 1, 1));
+            rig.level.setBlock(storeAt, Blocks.BARREL.defaultBlockState(), Block.UPDATE_ALL);
+            Containers.at(rig.level, storeAt).orElseThrow().setItem(0, new ItemStack(Items.CARROT, 8));
+            rig.colony.stores(CookeryContent.ID, rig.level.dimension(), List.of(WorldPos.of(rig.level, storeAt)));
+            var front = ColonyFront.of(rig.colony);
+            helper.assertTrue(front.addZone(rig.level, FarmingContent.PLOT,
+                java.util.Set.of(helper.absolutePos(new BlockPos(4, 1, 4))), ColonySettings.empty().with(FarmingContent.CROP,
+                    new ColonySettings.Value.Choice(BuiltInRegistries.BLOCK.getKey(Blocks.BEETROOTS)))).isPresent(),
+                "a real colony plot is configured for beetroot without owning its seed");
+            var found = CompostSettings.discovered(rig.colony, rig.level.getServer());
+            helper.assertTrue(found.containsAll(List.of(Items.WHEAT_SEEDS, Items.CARROT, Items.BEETROOT_SEEDS)),
+                "carried seeds, edible stored seeds and the configured crop each receive an individual row");
+            helper.assertTrue(!found.contains(Items.BONE_MEAL) && !found.contains(Items.PUMPKIN_SEEDS),
+                "output and unowned unconfigured seed kinds do not appear");
+            rig.body.pack().setItem(0, ItemStack.EMPTY);
+            helper.assertTrue(!CompostSettings.discovered(rig.colony, rig.level.getServer()).contains(Items.WHEAT_SEEDS),
+                "a removed seed kind disappears when no remaining crop or inventory owns it");
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void riceSharesOneVisibleRowAndMigratesLegacyOverrides(GameTestHelper helper) {
+        try (var rig = new Fixture(helper)) {
+            var wild = com.github.ysbbbbbb.kaleidoscopecookery.init.ModItems.WILD_RICE_SEED.get();
+            var rice = com.github.ysbbbbbb.kaleidoscopecookery.init.ModItems.RICE_SEED.get();
+            rig.body.pack().setItem(0, new ItemStack(wild, 8));
+            rig.body.pack().setItem(1, new ItemStack(rice, 8));
+            helper.assertValueEqual(CompostSettings.discovered(rig.colony, rig.level.getServer()),
+                List.of(SeedReserves.canonical(wild)), "both rice alternatives share one visible configuration row");
+            var legacy = new net.minecraft.nbt.CompoundTag();
+            var overrides = new net.minecraft.nbt.CompoundTag();
+            overrides.putInt(BuiltInRegistries.ITEM.getKey(wild).toString(), 40);
+            overrides.putInt(BuiltInRegistries.ITEM.getKey(rice).toString(), 96);
+            legacy.put("reserves", overrides);
+            rig.colony.keep(CompostSettings.ID, legacy);
+            helper.assertValueEqual(CompostSettings.reserve(rig.colony, wild), 96, "the larger legacy rice reserve remains protected");
+            helper.assertValueEqual(CompostSettings.reserve(rig.colony, rice), 96, "both alternatives read the same legacy reserve");
+            CompostSettings.reserve(rig.colony, rice, 20);
+            helper.assertValueEqual(rig.colony.kept(CompostSettings.ID).getCompound("reserves").getAllKeys().size(), 1,
+                "editing either rice alternative stores only one canonical override");
+            helper.assertValueEqual(CompostSettings.reserve(rig.colony, wild), 20, "editing rice updates the shared reserve");
+            CompostSettings.reset(rig.colony, wild);
+            helper.assertTrue(!CompostSettings.overridden(rig.colony, rice), "resetting wild rice clears the shared override");
+            helper.assertValueEqual(CompostSettings.reserve(rig.colony, rice), 64, "both alternatives inherit the default again");
         }
         helper.succeed();
     }

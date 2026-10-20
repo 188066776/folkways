@@ -1,7 +1,9 @@
 import { expect, test } from "@playwright/test";
 import { writeFileSync } from "node:fs";
-import { defineTask, javaTask, screen, tick, world, type MinecraftServer } from "@izakyl/blockwright-minecraft";
-import { foundColonyFast, foundingBox, optInViaBook, waitForGroundedPlayer } from "../shared/colony/colony-founding";
+import { defineTask, javaTask, screen, tick, world, type MinecraftClient, type MinecraftServer } from "@izakyl/blockwright-minecraft";
+import { foundColonyFast, foundingBox, openColonyPanelViaBook, optInViaBook, waitForGroundedPlayer } from "../shared/colony/colony-founding";
+import { clickElement, scrollElementIntoView } from "../ldlib2";
+import { settlePanel, toggleCell, typeCell } from "../shared/ui/site-panel";
 import { runColonyTask } from "../shared/colony/colony-tasks";
 import { launchPair, type E2EPair } from "../shared/harness/pair";
 import { seededServer } from "../shared/harness/mod-settings";
@@ -13,10 +15,10 @@ import { twins, type Stage, type Vec } from "../shared/harness/stage";
 
 const BONE = "minecraft:bone_meal";
 const SEED = "minecraft:wheat_seeds";
-const HAT = "kaleidoscope_cookery:straw_hat";
 type Stack = { id: string; count: number };
 type State = { tick: number; fill: number; marked: boolean; activeFeed: boolean; activeId: string; awaitingSeed: boolean; stores: Stack[]; packs: Stack[]; drops: Stack[]; withdrawn: Stack[];
   residents: Array<{ id: string; walked: number; doing: string; balk: string; hat: boolean }>;
+  automatic: boolean; defaultReserve: number; wheatReserve: number; discovered: string[];
   seedBudget: { complete: boolean; physical: number; compostable: number }; stalls: string[] };
 type Cells = { supply: Vec; compost: Vec; withdrawn: Vec };
 
@@ -26,7 +28,7 @@ for (const stage of twins()) test(stage.title("compost recovery: discover player
   const evidence: Record<string, any> = { stage: stage.kind, samples: [], timings: [], fixtureChanges: [] };
   try {
     pair = await launchPair({
-      config: "blockwright.toml#" + (stage.kind === "ground" ? "cookery" : "cookery-sable"),
+      config: stage.config,
       server: { trace: tracePath("e2e", stage.name("compost-recovery-server-" + runId)), instance: seededServer(stage.name("compost-recovery-server-" + runId)) },
       client: { trace: tracePath("e2e", stage.name("compost-recovery-client-" + runId)), instance: stage.name("compost-recovery-client-" + runId) },
       snapshot: () => ({ containers: cells ? [stage.at(cells.supply), stage.at(cells.withdrawn)] : [], entityTypes: ["folkways:resident", "minecraft:item"] }),
@@ -66,22 +68,55 @@ for (const stage of twins()) test(stage.title("compost recovery: discover player
     expect(total(evidence.playerStable, BONE), "repeated forty-tick sweeps cannot collect a finished batch twice").toBe(1);
     expect(evidence.playerStable.fill).toBe(0);
 
-    // A second batch starts at zero and receives only warehouse seeds and an actual hat.
+    await openCompostSettings(server, client, player.name, founded.standBlock, stage);
+    expect((await read(server, stage, cells)).automatic).toBe(true);
+    evidence.automaticOff = await toggleCell(server, client, "folkways.settings.compost.enabled");
+    expect((await read(server, stage, cells)).automatic).toBe(false);
+    await closeCompostSettings(server, client);
+
+    // A second batch starts at zero and receives only warehouse seeds, without any hat.
     // There is no grass zone, so the product must reach storage rather than disappear into grass restoration.
-    await world.command(server, "item replace block " + block(cells.supply) + " container.26 with " + HAT + " 1");
     for (let slot = 20; slot < 24; slot++) await world.command(server, "item replace block " + block(cells.supply) + " container." + slot + " with " + SEED + " 64");
     evidence.residentInput = await read(server, stage, cells);
     expect(evidence.residentInput.fill).toBe(0); expect(total(evidence.residentInput, SEED)).toBe(256);
+    await openCompostSettings(server, client, player.name, founded.standBlock, stage);
+    const discovered = (await read(server, stage, cells)).discovered;
+    expect(discovered, "configuration rows come from the colony's actual seeds").toEqual([SEED]);
+    const wheatRow = "folkways.settings.compost.reserve." + discovered.indexOf(SEED);
+    expect(evidence.residentInput.defaultReserve, "new colonies retain a stack by default").toBe(64);
+    evidence.defaultReserve80 = await typeCell(server, client, "folkways.settings.compost.default_reserve", "80");
+    expect((await read(server, stage, cells)).wheatReserve, "an unconfigured seed inherits the default").toBe(80);
+    evidence.wheatReserve106 = await typeCell(server, client, wheatRow, "106");
+    evidence.defaultReserve96 = await typeCell(server, client, "folkways.settings.compost.default_reserve", "96");
+    expect((await read(server, stage, cells)).defaultReserve).toBe(96);
+    expect((await read(server, stage, cells)).wheatReserve, "individual seed settings survive a change to the default").toBe(106);
+    await scrollElementIntoView(client, { id: "folkways.settings.compost.reset.0" });
+    evidence.wheatUseDefault = await clickElement(client, { id: "folkways.settings.compost.reset.0" });
+    await settlePanel(server, client);
+    expect((await read(server, stage, cells)).wheatReserve, "reset restores inheritance").toBe(96);
+    evidence.restoreDefault = await typeCell(server, client, "folkways.settings.compost.default_reserve", "64");
+    await closeCompostSettings(server, client);
+    await tick.sprint(server, 200);
+    const disabled = await read(server, stage, cells); evidence.automaticDisabled = disabled;
+    expect(disabled.fill, "the colony switch prevents automatic input even with surplus seeds").toBe(0);
+    expect(total(disabled, SEED)).toBe(256);
+    await openCompostSettings(server, client, player.name, founded.standBlock, stage);
+    evidence.automaticOn = await toggleCell(server, client, "folkways.settings.compost.enabled");
+    expect((await read(server, stage, cells)).automatic).toBe(true);
+    await closeCompostSettings(server, client);
     const levels = new Set<number>(); let previous = 0; let completed = 0;
-    const residentBatch = await until(server, stage, cells, evidence, "resident batch: native filling, maturity, extraction and storage", sample => {
+    const residentBatch = await until(server, stage, cells, evidence, "resident batch: average-cost filling without hats, native maturity, extraction and storage", sample => {
       levels.add(sample.fill); if (previous === 8 && sample.fill === 0) completed++;
       previous = sample.fill;
-      expect(total(sample, SEED), "the standing seed reserve survives native composting").toBeGreaterThanOrEqual(64);
+      expect([0, 7, 8], "a resident fills the entire batch in one action").toContain(sample.fill);
+      expect((256 - total(sample, SEED)) % 21, "every empty composter batch consumes exactly 21 wheat seeds").toBe(0);
+      expect(sample.residents.every(resident => !resident.hat), "automatic composting does not require or fabricate a straw hat").toBe(true);
+      expect(total(sample, SEED), "the standing seed reserve survives average-cost composting").toBeGreaterThanOrEqual(64);
       expect(total(sample, BONE), "every observed native extraction produces exactly one physical item").toBe(1 + completed);
       return completed > 0 && count(sample.stores, BONE) >= 2 && count(sample.packs, BONE) === 0;
     }, 12000);
     evidence.levels = [...levels]; evidence.completed = completed;
-    expect(levels.has(7), "native resident input reaches the maturing state").toBe(true);
+    expect(levels.has(7), "average-cost resident input reaches the maturing state").toBe(true);
     expect(levels.has(8), "native scheduled ticking reaches collectable compost").toBe(true);
     expect(total(residentBatch, SEED)).toBeLessThan(256);
     expect(total(residentBatch, BONE)).toBe(1 + completed);
@@ -115,6 +150,17 @@ for (const stage of twins()) test(stage.title("compost recovery: discover player
     await testInfo.attach("compost-recovery-evidence", { path: file, contentType: "application/json" }); await pair?.teardown(testInfo);
   }
 });
+
+async function openCompostSettings(server: MinecraftServer, client: MinecraftClient, player: string, stand: Vec, stage: Stage) {
+  await openColonyPanelViaBook(server, client, player, stand, stage);
+  await scrollElementIntoView(client, { id: "folkways.page.compost_settings" });
+  await clickElement(client, { id: "folkways.page.compost_settings" });
+  await settlePanel(server, client);
+}
+
+async function closeCompostSettings(server: MinecraftServer, client: MinecraftClient) {
+  await screen.dismiss(client);
+}
 
 function count(stacks: Stack[], id: string): number { return stacks.reduce((sum, item) => sum + (item.id === id ? item.count : 0), 0); }
 function total(state: State, id: string): number { return count(state.stores, id) + count(state.packs, id) + count(state.drops, id); }
@@ -197,9 +243,9 @@ const READ_COMPOST = defineTask<{ compost: Vec; withdrawn: Vec }, State>({
   name: "folkways.e2e.read-autonomous-compost", side: "server", timeoutMs: 20000,
   source: javaTask({ imports: [
     "io.github.izakyl.folkways.core.api.colony.Colonies", "io.github.izakyl.folkways.core.api.resident.body.Bodies",
-    "io.github.izakyl.folkways.core.api.terms.WorldPos", "io.github.izakyl.folkways.cookery.seeds.SeedPresence",
-    "io.github.izakyl.folkways.cookery.KitchenStations", "io.github.izakyl.folkways.core.api.work.Node", "net.minecraft.world.Container",
-    "com.github.ysbbbbbb.kaleidoscopecookery.init.tag.TagMod", "net.minecraft.world.entity.EquipmentSlot",
+    "io.github.izakyl.folkways.core.api.terms.WorldPos", "io.github.izakyl.folkways.plugins.compost.CompostPresence",
+    "io.github.izakyl.folkways.plugins.compost.CompostSettings", "io.github.izakyl.folkways.plugins.compost.CompostContent", "io.github.izakyl.folkways.core.api.work.Node", "net.minecraft.world.Container",
+    "net.minecraft.world.entity.EquipmentSlot",
     "net.minecraft.core.BlockPos", "net.minecraft.core.registries.BuiltInRegistries", "net.minecraft.world.item.ItemStack",
     "net.minecraft.world.item.Items", "net.minecraft.world.entity.item.ItemEntity", "net.minecraft.world.level.block.ComposterBlock",
   ], members: `
@@ -211,18 +257,19 @@ for(var at:colony.storesIn(level.dimension())){var store=colony.store(level,at).
 for(var resident:colony.residents()){
  var entity=level.getEntity(resident.id());if(entity==null)throw new IllegalStateException("colony resident is not loaded");var body=Bodies.of(entity).orElseThrow();
  for(var stack:body.pack().contents())if(!stack.isEmpty())packs.add(item(stack));
- residents.add(Map.of("id",resident.id().toString(),"walked",entity.walkDist,"doing",body.doing().map(Object::toString).orElse(""),"balk",body.balk().map(Object::toString).orElse(""),"hat",body.mob().getItemBySlot(EquipmentSlot.HEAD).is(TagMod.STRAW_HAT)));
+ residents.add(Map.of("id",resident.id().toString(),"walked",entity.walkDist,"doing",body.doing().map(Object::toString).orElse(""),"balk",body.balk().map(Object::toString).orElse(""),"hat",!body.mob().getItemBySlot(EquipmentSlot.HEAD).isEmpty()));
 }
 for(var entity:level.getAllEntities())if(entity instanceof ItemEntity drop&&!drop.getItem().isEmpty())drops.add(item(drop.getItem()));
-var support=colony.service(SeedPresence.ID,SeedPresence.class).orElseThrow();var budget=support.budget(level);var wheat=budget.tally(Items.WHEAT_SEEDS);
+var support=colony.service(CompostContent.ID,CompostPresence.class).orElseThrow();var budget=support.budget(level);var wheat=budget.tally(Items.WHEAT_SEEDS);
 var detached=(Map<?,?>)args.value("withdrawn");var isolatedAt=new BlockPos(((Number)detached.get("x")).intValue(),((Number)detached.get("y")).intValue(),((Number)detached.get("z")).intValue());
 var withdrawn=new ArrayList<Object>();if(!(level.getBlockEntity(isolatedAt) instanceof Container isolated))throw new IllegalStateException("missing physical isolation chest");
 for(int slot=0;slot<isolated.getContainerSize();slot++)if(!isolated.getItem(slot).isEmpty())withdrawn.add(item(isolated.getItem(slot)));
-boolean activeFeed=false;String activeId="";var provider=KitchenStations.find(level.getBlockState(cell)).orElseThrow();
+boolean activeFeed=false;String activeId="";var provider=support.station();
 var activeField=provider.getClass().getDeclaredField("active");activeField.setAccessible(true);
 for(var value:((Map<?,?>)activeField.get(provider)).values())if(value instanceof Node node&&node.spec().site().where().equals(WorldPos.of(level,cell))){activeFeed=!node.spec().needs().isEmpty();activeId=node.id().toString();}
 var out=new LinkedHashMap<String,Object>();out.put("tick",level.getGameTime());out.put("fill",level.getBlockState(cell).getValue(ComposterBlock.LEVEL));out.put("marked",colony.holdingAt(WorldPos.of(level,cell)).isPresent());
 out.put("stores",stores);out.put("packs",packs);out.put("drops",drops);out.put("residents",residents);out.put("withdrawn",withdrawn);out.put("activeFeed",activeFeed);out.put("activeId",activeId);boolean awaitingSeed=false;for(var claim:colony.reservedInputs(level))if(claim.node().toString().equals(activeId))awaitingSeed=true;out.put("awaitingSeed",awaitingSeed);
+out.put("automatic",CompostSettings.enabled(colony));out.put("defaultReserve",CompostSettings.defaultReserve(colony));out.put("wheatReserve",CompostSettings.reserve(colony,Items.WHEAT_SEEDS));out.put("discovered",CompostSettings.discovered(colony,ctx.server()).stream().map(item->BuiltInRegistries.ITEM.getKey(item).toString()).toList());
 out.put("seedBudget",Map.of("complete",budget.complete(),"physical",wheat.physical(),"compostable",wheat.compostable()));out.put("stalls",colony.stallsIn(level.dimension()).stream().map(Object::toString).filter(text->text.contains("compost")||text.contains("wheat_seeds")).toList());return out;
 ` }),
 });

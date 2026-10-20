@@ -1,4 +1,4 @@
-package io.github.izakyl.folkways.cookery.compost;
+package io.github.izakyl.folkways.plugins.compost;
 
 import io.github.izakyl.folkways.FolkwaysMod;
 import io.github.izakyl.folkways.effect.Effects;
@@ -15,8 +15,8 @@ import io.github.izakyl.folkways.core.api.work.Stances;
 import io.github.izakyl.folkways.core.api.work.ToolNeed;
 import io.github.izakyl.folkways.core.api.work.Worker;
 import io.github.izakyl.folkways.core.engine.labor.Commit;
-import io.github.izakyl.folkways.cookery.KitchenBookings;
-import io.github.izakyl.folkways.cookery.seeds.SeedBudget;
+
+
 import io.github.izakyl.folkways.plugins.person.PersonBody;
 import java.util.List;
 import java.util.Map;
@@ -49,7 +49,7 @@ import net.neoforged.neoforge.event.VanillaGameEvent;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 
-@EventBusSubscriber(modid = "folkways_cookery", bus = EventBusSubscriber.Bus.MOD)
+@EventBusSubscriber(modid = "folkways_vanilla", bus = EventBusSubscriber.Bus.MOD)
 @GameTestHolder(FolkwaysMod.MOD_ID)
 @PrefixGameTestTemplate(false)
 public final class CompostGameTests {
@@ -57,19 +57,85 @@ public final class CompostGameTests {
     public static void register(RegisterGameTestsEvent event) { event.register(CompostGameTests.class); }
 
     @GameTest(template = "empty")
-    public static void nativeChanceFailureStillConsumesExactlyOneSurplusSeed(GameTestHelper helper) {
+    public static void averageBatchFillsSevenAndConsumesExactlyItsCalculatedInputs(GameTestHelper helper) {
         try (Fixture fixture = new Fixture(helper)) {
-            fixture.step(fixture.node());
-            helper.assertValueEqual(fixture.fill(), 1, "the native composter always accepts its first valid input");
+            helper.assertValueEqual(CompostStation.averageInputs(Items.WHEAT_SEEDS.getDefaultInstance(), 0), 21,
+                "the guaranteed first layer plus six thirty-percent layers costs twenty-one seeds");
+            helper.assertValueEqual(CompostStation.averageInputs(Items.WHEAT_SEEDS.getDefaultInstance(), 3), 14,
+                "a partially filled bucket needs the rounded-up average of only its missing layers");
+            helper.assertValueEqual(CompostStation.averageInputs(Items.CAKE.getDefaultInstance(), 0), 7,
+                "native probabilities above one still accept only one layer per item");
             long before = fixture.seeds();
-            // Choose a reproducible roll through the real ServerLevel random source, without replacing
-            // either the native composter or its probability/data-map implementation.
-            fixture.level.random.setSeed(0L);
             fixture.step(fixture.node());
-            helper.assertValueEqual(fixture.fill(), 1, "the actual 30-percent wheat-seed roll fails");
-            helper.assertValueEqual(fixture.seeds(), before - 1, "native chance failure consumes rather than refunds one seed");
+            helper.assertValueEqual(fixture.fill(), 7, "one operation fills the composter to its maturing state");
+            helper.assertValueEqual(fixture.seeds(), before - 21, "the calculated batch is consumed once");
             helper.assertValueEqual(Goods.countIn(fixture.pack, Goods.specOf(Items.BONE_MEAL.getDefaultInstance())), 0L,
-                "neither a successful fill layer nor a failed roll invents bone meal");
+                "filling does not bypass native maturity or invent bone meal");
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void insufficientWholeBatchDoesNotCreateAFeedTask(GameTestHelper helper) {
+        try (Fixture fixture = new Fixture(helper)) {
+            fixture.pack.clearContent();
+            fixture.pack.setItem(0, new ItemStack(Items.WHEAT_SEEDS, 64));
+            fixture.pack.setItem(1, new ItemStack(Items.WHEAT_SEEDS, 20));
+            helper.assertTrue(fixture.goals().isEmpty(), "twenty surplus seeds cannot fund a twenty-one-seed batch");
+            helper.assertValueEqual(fixture.seeds(), 84L, "waiting for enough surplus leaves every seed intact");
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void playerPartialFillReturnsUnusedEscrowAndAPlayerEmptyingCannotUnderpay(GameTestHelper helper) {
+        try (Fixture fixture = new Fixture(helper)) {
+            Node feed = fixture.node();
+            long before = fixture.seeds();
+            fixture.level.setBlock(fixture.pos, Blocks.COMPOSTER.defaultBlockState().setValue(ComposterBlock.LEVEL, 3), Block.UPDATE_ALL);
+            fixture.step(feed);
+            helper.assertValueEqual(fixture.fill(), 7, "a player's added layers are respected at commit");
+            helper.assertValueEqual(fixture.seeds(), before - 14, "seven unneeded seeds return from the planned twenty-one-seed escrow");
+            fixture.level.setBlock(fixture.pos, Blocks.COMPOSTER.defaultBlockState().setValue(ComposterBlock.LEVEL, 6), Block.UPDATE_ALL);
+            Node cheap = fixture.node();
+            fixture.level.setBlock(fixture.pos, Blocks.COMPOSTER.defaultBlockState(), Block.UPDATE_ALL);
+            long afterFirst = fixture.seeds();
+            fixture.step(cheap);
+            helper.assertValueEqual(fixture.fill(), 0, "four planned seeds cannot fill a now-empty bucket");
+            helper.assertValueEqual(fixture.seeds(), afterFirst, "a changed bucket returns its entire insufficient escrow");
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void disablingAutomaticCompostReturnsPlannedInputs(GameTestHelper helper) {
+        try (Fixture fixture = new Fixture(helper)) {
+            Node feed = fixture.node();
+            long before = fixture.seeds();
+            fixture.enabled = false;
+            fixture.step(feed);
+            helper.assertValueEqual(fixture.fill(), 0, "disabling compost after planning blocks the pending feed");
+            helper.assertValueEqual(fixture.seeds(), before, "disabling returns every planned input");
+            helper.assertTrue(fixture.goals().isEmpty(), "disabled automation offers no new feed");
+            fixture.enabled = true;
+            fixture.step(fixture.node());
+            helper.assertValueEqual(fixture.fill(), 7, "reenabling permits a newly checked batch");
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void changingRetentionBeforeArrivalRechecksTheWholeBatch(GameTestHelper helper) {
+        try (Fixture fixture = new Fixture(helper)) {
+            fixture.pack.clearContent();
+            fixture.pack.setItem(0, new ItemStack(Items.WHEAT_SEEDS, 64));
+            fixture.pack.setItem(1, new ItemStack(Items.WHEAT_SEEDS, 21));
+            Node feed = fixture.node();
+            fixture.retained = 65;
+            fixture.step(feed);
+            helper.assertValueEqual(fixture.fill(), 0, "an increased live seed reserve blocks the previously affordable batch");
+            helper.assertValueEqual(fixture.seeds(), 85L, "the entire stale batch returns to physical inventory");
+            helper.assertTrue(fixture.goals().isEmpty(), "the new reserve cannot fund another whole batch");
         }
         helper.succeed();
     }
@@ -78,7 +144,8 @@ public final class CompostGameTests {
     public static void sevenWaitsForNativeMaturityThenCollectsOneActualBoneMeal(GameTestHelper helper) {
         Fixture fixture = new Fixture(helper);
         fixture.fillNative();
-        helper.assertValueEqual(fixture.fill(), 7, "only native insertItem advances the composter to seven");
+        fixture.enabled = false;
+        helper.assertValueEqual(fixture.fill(), 7, "the average batch advances the composter to seven");
         helper.assertTrue(fixture.goals().isEmpty(), "maturing compost supplies no feed or premature collect task");
         helper.runAfterDelay(25, () -> {
             try (fixture) {
@@ -99,13 +166,13 @@ public final class CompostGameTests {
         try (Fixture fixture = new Fixture(helper)) {
             fixture.pack.clearContent();
             fixture.pack.setItem(0, new ItemStack(Items.WHEAT_SEEDS, 64));
-            fixture.pack.setItem(1, new ItemStack(Items.WHEAT_SEEDS));
+            fixture.pack.setItem(1, new ItemStack(Items.WHEAT_SEEDS, 21));
             Node feed = fixture.node();
             fixture.claims = List.of(new SeedBudget.Claim(UUID.randomUUID(), SeedBudget.Location.pack(fixture.body.id()),
                 Goods.specOf(Items.WHEAT_SEEDS.getDefaultInstance()), 1));
             fixture.step(feed);
             helper.assertValueEqual(fixture.fill(), 0, "fresh sowing priority blocks the old planned compost input");
-            helper.assertValueEqual(fixture.seeds(), 65L, "the real escrow is returned once, not consumed or duplicated");
+            helper.assertValueEqual(fixture.seeds(), 85L, "the real escrow is returned once, not consumed or duplicated");
             helper.assertTrue(fixture.goals().isEmpty(), "the reserved final seed does not produce another destructive goal");
         }
         helper.succeed();
@@ -125,7 +192,7 @@ public final class CompostGameTests {
             helper.assertValueEqual(fixture.fill(), 0, "old work never feeds the station");
             old.ended(fixture.level, Ending.REVOKED);
             fixture.step(fixture.node());
-            helper.assertValueEqual(fixture.fill(), 1, "a genuinely new station task can feed normally");
+            helper.assertValueEqual(fixture.fill(), 7, "a genuinely new station task can feed normally");
         }
         helper.succeed();
     }
@@ -139,8 +206,8 @@ public final class CompostGameTests {
             NeoForge.EVENT_BUS.addListener(EventPriority.LOWEST, false, VanillaGameEvent.class, listener);
             long before = fixture.seeds();
             try { fixture.step(fixture.node()); } finally { NeoForge.EVENT_BUS.unregister(listener); }
-            helper.assertValueEqual(fixture.fill(), 1, "the real composter layer remains committed");
-            helper.assertValueEqual(fixture.seeds(), before - 1, "its seed is spent despite the intervening event exception");
+            helper.assertValueEqual(fixture.fill(), 7, "the real composter batch remains committed");
+            helper.assertValueEqual(fixture.seeds(), before - 21, "its entire batch is spent despite the intervening event exception");
         }
         helper.succeed();
     }
@@ -171,8 +238,8 @@ public final class CompostGameTests {
         try (Fixture fixture = new Fixture(helper)) {
             long before = fixture.seeds();
             commitAfterRepeatedOffers(helper, fixture);
-            helper.assertValueEqual(fixture.fill(), 1, "the retained original feed performs exactly one native compost insertion");
-            helper.assertValueEqual(fixture.seeds(), before - 1, "only one actual seed is consumed after travel");
+            helper.assertValueEqual(fixture.fill(), 7, "the retained original feed performs exactly one calculated batch");
+            helper.assertValueEqual(fixture.seeds(), before - 21, "only one actual batch is consumed after travel");
         }
         helper.succeed();
     }
@@ -180,7 +247,7 @@ public final class CompostGameTests {
     @GameTest(template = "empty", timeoutTicks = 80)
     public static void aNativeMatureCompostCollectionStaysWantedUntilTheFarResidentArrives(GameTestHelper helper) {
         Fixture fixture = new Fixture(helper); fixture.fillNative();
-        helper.assertValueEqual(fixture.fill(), 7, "native insertion reaches seven without a synthetic mature state");
+        helper.assertValueEqual(fixture.fill(), 7, "the average batch reaches seven before native maturity");
         helper.runAfterDelay(25, () -> {
             try (fixture) {
                 helper.assertValueEqual(fixture.fill(), 8, "the actual native scheduled tick matures the same compost");
@@ -235,7 +302,7 @@ public final class CompostGameTests {
                 fixture.station.stop(fixture.colony, io.github.izakyl.folkways.core.api.colony.Closing.SHUTDOWN);
                 fixture.bookings.clear();
                 fixture.pack.clearContent();
-                KitchenBookings restoredBookings = new KitchenBookings();
+                CompostBookings restoredBookings = new CompostBookings();
                 restoredBookings.admit(fixture.at);
                 CompostStation restored = new CompostStation(ignored -> Optional.empty(), Set::of);
                 Node resumed = restored.recovery(fixture.colony, fixture.level, fixture.at, Stances.WHEREVER,
@@ -266,7 +333,7 @@ public final class CompostGameTests {
                 public void offered() { }
             });
             var asking = new io.github.izakyl.folkways.core.api.colony.Asking(colony,
-                io.github.izakyl.folkways.cookery.CookeryContent.ID, () -> { });
+                CompostContent.ID, () -> { });
             helper.assertTrue(fixture.station.activeRecovery(fixture.colony, fixture.level, fixture.at, fixture.bookings).isEmpty(),
                 "a blocked-stance query cannot create fresh unplanned compost work");
             asking.offer(Map.of(fixture.level.dimension(), fixture.goals()));
@@ -299,10 +366,12 @@ public final class CompostGameTests {
         final WorldPos at;
         final Body body;
         final SimpleContainer pack = new SimpleContainer(8);
-        final KitchenBookings bookings = new KitchenBookings();
+        final CompostBookings bookings = new CompostBookings();
         final SeedBudget budget;
         final CompostStation station;
         List<SeedBudget.Claim> claims = List.of();
+        boolean enabled = true;
+        int retained = 64;
 
         Fixture(GameTestHelper helper) {
             this.helper = helper;
@@ -318,8 +387,8 @@ public final class CompostGameTests {
             for (int slot = 0; slot < 7; slot++) pack.setItem(slot, new ItemStack(Items.WHEAT_SEEDS, 64));
             budget = new SeedBudget(() -> new SeedBudget.Snapshot(List.of(new SeedBudget.Stock("real resident pack",
                 SeedBudget.Location.pack(body.id()), IntStream.range(0, pack.getContainerSize()).mapToObj(pack::getItem).toList())),
-                claims, List.of(), Map.of()), () -> Set.of(Items.WHEAT_SEEDS));
-            station = new CompostStation(ignored -> Optional.of(budget), () -> Set.of(Items.WHEAT_SEEDS));
+                claims, List.of(), Map.of()), () -> Set.of(Items.WHEAT_SEEDS), ignored -> retained);
+            station = new CompostStation(ignored -> Optional.of(budget), () -> Set.of(Items.WHEAT_SEEDS), ignored -> enabled);
             bookings.admit(at);
         }
 
@@ -330,7 +399,7 @@ public final class CompostGameTests {
         int fill() { return level.getBlockState(pos).getValue(ComposterBlock.LEVEL); }
         long seeds() { return Goods.countIn(pack, Goods.specOf(Items.WHEAT_SEEDS.getDefaultInstance())); }
         void fillNative() {
-            for (int attempt = 0; attempt < 380 && fill() < 7; attempt++) step(node());
+            step(node());
             helper.assertValueEqual(fill(), 7, "real surplus seeds fill the native composter");
         }
         void step(Node node) {

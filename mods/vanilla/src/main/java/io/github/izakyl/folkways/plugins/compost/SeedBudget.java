@@ -1,4 +1,4 @@
-package io.github.izakyl.folkways.cookery.seeds;
+package io.github.izakyl.folkways.plugins.compost;
 
 import io.github.izakyl.folkways.core.api.terms.Goods;
 import io.github.izakyl.folkways.core.api.terms.ItemSpec;
@@ -12,6 +12,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
+import java.util.function.ToIntFunction;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 
@@ -89,10 +90,20 @@ public final class SeedBudget {
 
     private final Supplier<Snapshot> snapshots;
     private final Supplier<Set<Item>> seeds;
+    private final ToIntFunction<Item> retained;
 
     public SeedBudget(Supplier<Snapshot> snapshots, Supplier<Set<Item>> seeds) {
+        this(snapshots, seeds, item -> item.getDefaultInstance().getMaxStackSize());
+    }
+
+    public SeedBudget(Supplier<Snapshot> snapshots, Supplier<Set<Item>> seeds, ToIntFunction<Item> retained) {
         this.snapshots = Objects.requireNonNull(snapshots);
         this.seeds = Objects.requireNonNull(seeds);
+        this.retained = Objects.requireNonNull(retained);
+    }
+
+    private long reserve(List<Item> alternatives) {
+        return alternatives.stream().mapToLong(item -> Math.max(0, retained.applyAsInt(item))).max().orElse(0);
     }
 
     public Tally tally(Item seed) { return tally(seed, ItemStack.EMPTY, Set.of()); }
@@ -104,7 +115,7 @@ public final class SeedBudget {
         return purposes(seeds.get()).stream().map(alternatives -> {
             Item first = alternatives.getFirst();
             return new Reserve(alternatives, ItemSpec.anyOf(alternatives.stream()
-                .map(item -> Goods.specOf(item.getDefaultInstance())).toList()), first.getDefaultInstance().getMaxStackSize(),
+                .map(item -> Goods.specOf(item.getDefaultInstance())).toList()), reserve(alternatives),
                 tally(first).missing());
         }).toList();
     }
@@ -152,7 +163,7 @@ public final class SeedBudget {
         Map<Item, Long> baseline = new LinkedHashMap<>();
         long missing = 0;
         for (List<Item> purpose : purposes(seeds.get())) {
-            long left = purpose.getFirst().getDefaultInstance().getMaxStackSize();
+            long left = reserve(purpose);
             for (Item alternative : purpose) {
                 long kept = Math.min(left, available.getOrDefault(alternative, 0L));
                 baseline.put(alternative, kept);
@@ -188,17 +199,7 @@ public final class SeedBudget {
     }
 
     private static List<List<Item>> purposes(Set<Item> seeds) {
-        List<List<Item>> purposes = new ArrayList<>();
-        Set<Item> remaining = new java.util.LinkedHashSet<>(seeds);
-        Item wild = com.github.ysbbbbbb.kaleidoscopecookery.init.ModItems.WILD_RICE_SEED.get();
-        Item rice = com.github.ysbbbbbb.kaleidoscopecookery.init.ModItems.RICE_SEED.get();
-        if (remaining.contains(wild) && remaining.contains(rice)) {
-            purposes.add(List.of(wild, rice));
-            remaining.remove(wild);
-            remaining.remove(rice);
-        }
-        remaining.forEach(item -> purposes.add(List.of(item)));
-        return List.copyOf(purposes);
+        return SeedReserves.purposes(seeds);
     }
 
     private static void allocate(List<Unit> units, Location where, ItemSpec goods, long count) {

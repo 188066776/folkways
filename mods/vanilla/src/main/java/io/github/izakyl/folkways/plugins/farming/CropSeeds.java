@@ -8,6 +8,7 @@ import java.util.Set;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.LevelReader;
 
@@ -28,6 +29,11 @@ public final class CropSeeds {
             });
         }
         return java.util.Collections.unmodifiableSet(seeds);
+    }
+
+    public static List<Item> forCrop(LevelReader level, BlockPos at, ResourceLocation cropId) {
+        return Crop.of(level, at, cropId).map(crop -> crop.behavior()
+            .map(CropBehavior::seeds).orElseGet(() -> List.of(crop.seed()))).orElseGet(List::of);
     }
 
     public static List<Sowing> sowing(Colony colony, ServerLevel level) {

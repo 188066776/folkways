@@ -1,4 +1,4 @@
-package io.github.izakyl.folkways.cookery.compost;
+package io.github.izakyl.folkways.plugins.compost;
 
 import io.github.izakyl.folkways.core.api.colony.Closing;
 import io.github.izakyl.folkways.core.api.terms.Goods;
@@ -18,11 +18,6 @@ import io.github.izakyl.folkways.core.api.work.Stances;
 import io.github.izakyl.folkways.core.api.work.WorkSite;
 import io.github.izakyl.folkways.core.api.work.Worker;
 import io.github.izakyl.folkways.core.api.work.Workload;
-import io.github.izakyl.folkways.cookery.CookeryContent;
-import io.github.izakyl.folkways.cookery.CookeryRefusal;
-import io.github.izakyl.folkways.cookery.KitchenBookings;
-import io.github.izakyl.folkways.cookery.KitchenStation;
-import io.github.izakyl.folkways.cookery.seeds.SeedBudget;
 import io.github.izakyl.folkways.plugins.farming.FarmingContent;
 import java.nio.charset.StandardCharsets;
 import java.util.Comparator;
@@ -33,6 +28,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
@@ -40,28 +36,44 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.ComposterBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.gameevent.GameEvent;
 import net.minecraft.world.phys.AABB;
 
-/** Native composter work is autonomous and only consumes a fresh, surplus seed allowance. */
-public final class CompostStation implements KitchenStation {
+/** Fills native composters in average-cost batches, using only a fresh surplus seed allowance. */
+public final class CompostStation {
     private final Function<UUID, Optional<SeedBudget>> budgets;
     private final Supplier<Set<Item>> seeds;
+    private final Predicate<UUID> enabled;
     private record Site(UUID colony, WorldPos at) { }
     private final Map<Site, Work> active = new LinkedHashMap<>();
 
     public CompostStation(Function<UUID, Optional<SeedBudget>> budgets, Supplier<Set<Item>> seeds) {
-        this.budgets = budgets;
-        this.seeds = seeds;
+        this(budgets, seeds, ignored -> true);
     }
 
-    @Override
+    public CompostStation(Function<UUID, Optional<SeedBudget>> budgets, Supplier<Set<Item>> seeds, Predicate<UUID> enabled) {
+        this.budgets = budgets;
+        this.seeds = seeds;
+        this.enabled = enabled;
+    }
+
+    // Vanilla always accepts the first item in an empty composter. Remaining layers take
+    // 1 / chance items on average; round the entire remaining batch up to whole items.
+    public static int averageInputs(ItemStack stack, int fill) {
+        float chance = ComposterBlock.getValue(stack);
+        if (!Float.isFinite(chance) || chance <= 0 || fill < 0 || fill >= 7) return 0;
+        double probability = Math.min(1.0, chance);
+        double expected = fill == 0 ? 1 + 6 / probability : (7 - fill) / probability;
+        return (int) Math.min(Integer.MAX_VALUE, Math.ceil(expected));
+    }
+
     public boolean matches(BlockState state) { return state.is(Blocks.COMPOSTER); }
 
-    @Override
     public List<Grown> recovery(UUID colony, ServerLevel level, WorldPos at, Stances stances,
-            KitchenBookings bookings, Runnable changed) {
+            CompostBookings bookings, Runnable changed) {
         BlockState state = level.getBlockState(at.block(level));
         if (!matches(state)) return List.of();
         Site site = new Site(colony, at);
@@ -69,31 +81,28 @@ public final class CompostStation implements KitchenStation {
         if (!running.isEmpty()) return running;
         if (!bookings.free(at)) return List.of();
         int fill = state.getValue(ComposterBlock.LEVEL);
-        if (fill == 8) return List.of(Grown.of(new Work(site, stances, bookings, changed, Optional.empty(), Optional.empty())));
-        if (fill >= 7) return List.of();
+        if (fill == 8) return List.of(Grown.of(new Work(site, stances, bookings, changed, Optional.empty(), 0)));
+        if (fill >= 7 || !enabled.test(colony)) return List.of();
         Optional<SeedBudget> budget = budgets.apply(colony);
         if (budget.isEmpty()) return List.of();
         return seeds.get().stream().sorted(Comparator.comparing(item -> BuiltInRegistries.ITEM.getKey(item).toString()))
-            .filter(item -> ComposterBlock.getValue(item.getDefaultInstance()) > 0.0F
-                && budget.get().tally(item).compostable() > 0)
+            .filter(item -> averageInputs(item.getDefaultInstance(), fill) > 0
+                && budget.get().tally(item).compostable() >= averageInputs(item.getDefaultInstance(), fill))
             .findFirst().map(item -> List.of(Grown.of(new Work(site, stances, bookings, changed,
-                Optional.of(item), budget)))).orElseGet(List::of);
+                Optional.of(item), averageInputs(item.getDefaultInstance(), fill))))).orElseGet(List::of);
     }
 
-    @Override
-    public List<Grown> activeRecovery(UUID colony, ServerLevel level, WorldPos at, KitchenBookings bookings) {
+    public List<Grown> activeRecovery(UUID colony, ServerLevel level, WorldPos at, CompostBookings bookings) {
         Work running = active.get(new Site(colony, at));
         return running != null && running.bookings == bookings && !bookings.cancelled(at, running.id(), running.generation)
             ? List.of(Grown.of(running)) : List.of();
     }
 
-    @Override
     public void release(UUID colony, ServerLevel level, WorldPos at) {
         Work work = active.remove(new Site(colony, at));
         if (work != null) work.hold.release(Ending.REVOKED);
     }
 
-    @Override
     public void stop(UUID colony, Closing why) {
         for (Site site : List.copyOf(active.keySet())) {
             if (site.colony().equals(colony)) {
@@ -103,40 +112,39 @@ public final class CompostStation implements KitchenStation {
         }
     }
 
-    @Override
     public Component status(ServerLevel level, WorldPos at) {
         BlockState state = level.getBlockState(at.block(level));
         return Component.translatable(matches(state) && state.getValue(ComposterBlock.LEVEL) == 7
-            ? "folkways.page.cookery.compost_maturing" : "folkways.page.cookery.compost");
+            ? "folkways.compost.status.maturing" : "folkways.compost.status.active");
     }
 
     private final class Work implements Node {
         private final Site site;
         private final NodeSpec spec;
         private final WorldPos at;
-        private final KitchenBookings bookings;
+        private final CompostBookings bookings;
         private final Hold hold;
         private final long generation;
         private final Runnable changed;
         private final Optional<Item> seed;
-        private final Optional<SeedBudget> budget;
+        private final int inputs;
 
-        Work(Site site, Stances stances, KitchenBookings bookings, Runnable changed,
-                Optional<Item> seed, Optional<SeedBudget> budget) {
+        Work(Site site, Stances stances, CompostBookings bookings, Runnable changed,
+                Optional<Item> seed, int inputs) {
             this.site = site;
             this.at = site.at();
             this.bookings = bookings;
             this.changed = changed;
             this.seed = seed;
-            this.budget = budget;
+            this.inputs = inputs;
             UUID id = UUID.nameUUIDFromBytes(("folkways:compost/" + at + "/"
                 + seed.map(item -> BuiltInRegistries.ITEM.getKey(item).toString()).orElse("collect"))
                 .getBytes(StandardCharsets.UTF_8));
             generation = bookings.generation(at);
             hold = bookings.hold(at, id);
-            spec = NodeSpec.of(id, CookeryContent.ID, new WorkSite.AtBlock(at), stances, Workload.Once.of(10))
+            spec = NodeSpec.of(id, CompostContent.ID, new WorkSite.AtBlock(at), stances, Workload.Once.of(10))
                 .vocation(FarmingContent.trade()).leaves(Leaves.room(1))
-                .needs(seed.map(item -> List.of(new Need(Goods.specOf(item.getDefaultInstance()), 1, true))).orElseGet(List::of))
+                .needs(seed.map(item -> List.of(new Need(Goods.specOf(item.getDefaultInstance()), inputs, true))).orElseGet(List::of))
                 .doing(net.minecraft.resources.ResourceLocation.fromNamespaceAndPath("folkways", "composting")).done();
         }
 
@@ -148,7 +156,7 @@ public final class CompostStation implements KitchenStation {
         }
         public boolean ready(ServerLevel level) { return bookings.first(at, id()); }
         public Optional<io.github.izakyl.folkways.core.api.terms.RefusalKind> refusal(ServerLevel level) {
-            return bookings.cancelled(at, id(), generation) ? Optional.of(CookeryRefusal.STATION_CHANGED) : Optional.empty();
+            return bookings.cancelled(at, id(), generation) ? Optional.of(CompostRefusal.STATION_CHANGED) : Optional.empty();
         }
         public void ended(ServerLevel level, Ending how) { active.remove(site, this); hold.release(how); nudge(); }
 
@@ -160,27 +168,44 @@ public final class CompostStation implements KitchenStation {
                         .flatMap(feet -> WorldSpaces.storage(level, new WorldPos(at.realm(), feet)))
                         .filter(feet -> Reach.withinReach(feet, at.block(level))
                             && Reach.inSight(level, feet, at.block(level))).isPresent()) {
-                return Outcome.failed(CookeryRefusal.STATION_CHANGED);
+                return Outcome.failed(CompostRefusal.STATION_CHANGED);
             }
             BlockState before = level.getBlockState(at.block(level));
-            if (!before.is(Blocks.COMPOSTER)) return Outcome.failed(CookeryRefusal.NOT_A_STATION);
+            if (!before.is(Blocks.COMPOSTER)) return Outcome.failed(CompostRefusal.NOT_A_STATION);
             if (seed.isEmpty()) return collect(level, who, before);
-            if (before.getValue(ComposterBlock.LEVEL) >= 7) return Outcome.failed(CookeryRefusal.STATION_CHANGED);
+            if (before.getValue(ComposterBlock.LEVEL) >= 7) return Outcome.failed(CompostRefusal.STATION_CHANGED);
             List<ItemStack> supplied = who.supplied().stream().map(ItemStack::copy).toList();
-            ItemStack single = supplied.stream().filter(stack -> stack.is(seed.get())).findFirst().orElse(ItemStack.EMPTY);
-            if (single.getCount() != 1 || budget.isEmpty() || budgets.apply(site.colony()).isEmpty() || !budget.get().permits(id(), single)
-                    || ComposterBlock.getValue(single) <= 0.0F) {
+            int required = averageInputs(seed.get().getDefaultInstance(), before.getValue(ComposterBlock.LEVEL));
+            long provided = supplied.stream().filter(stack -> stack.is(seed.get())).mapToLong(ItemStack::getCount).sum();
+            Optional<SeedBudget> fresh = budgets.apply(site.colony());
+            // The full escrow is still physical stock: restore it to the snapshot, then test only
+            // the amount this batch will consume (a player may have partly filled the bucket).
+            ItemStack escrow = new ItemStack(seed.get(), inputs);
+            if (!enabled.test(site.colony()) || provided != inputs || required <= 0 || required > inputs
+                    || fresh.isEmpty() || fresh.get().tally(seed.get(), escrow, Set.of(id())).compostable() < required) {
                 return new Outcome.Done(List.of(), List.of(), Optional.empty(), supplied);
             }
+            BlockState filled = before.setValue(ComposterBlock.LEVEL, 7);
             try {
-                ComposterBlock.insertItem(who.body(), before, level, single, at.block(level));
+                // Schedule before notifying neighbors so a notification failure cannot strand a
+                // committed level-seven batch without its normal native maturity tick.
+                level.scheduleTick(at.block(level), Blocks.COMPOSTER, 20);
+                if (!level.setBlock(at.block(level), filled, Block.UPDATE_ALL)) {
+                    return new Outcome.Done(List.of(), List.of(), Optional.empty(), supplied);
+                }
+                level.gameEvent(GameEvent.BLOCK_CHANGE, at.block(level), GameEvent.Context.of(who.body(), filled));
+                level.levelEvent(1500, at.block(level), 1);
             } catch (RuntimeException | LinkageError broken) {
-                // Native addItem mutates the level before it shrinks the input. If notification fails
-                // in between, settle that real mutation instead of refunding a free compost layer.
-                if (single.getCount() == 1 && !level.getBlockState(at.block(level)).equals(before)) single.shrink(1);
-                if (!single.isEmpty()) throw broken;
-                org.slf4j.LoggerFactory.getLogger("folkways-cookery")
-                    .warn("composter {} consumed its seed before notification failed", at, broken);
+                if (!level.getBlockState(at.block(level)).equals(filled)) throw broken;
+                org.slf4j.LoggerFactory.getLogger("folkways-compost")
+                    .warn("composter {} filled its batch before notification failed", at, broken);
+            }
+            int left = required;
+            for (ItemStack stack : supplied) {
+                if (!stack.is(seed.get())) continue;
+                int taken = Math.min(left, stack.getCount());
+                stack.shrink(taken);
+                left -= taken;
             }
             nudge();
             return new Outcome.Done(List.of(), List.of(), Optional.empty(), supplied.stream().filter(stack -> !stack.isEmpty()).toList());
@@ -188,12 +213,12 @@ public final class CompostStation implements KitchenStation {
 
         private void nudge() {
             try { changed.run(); } catch (RuntimeException | LinkageError broken) {
-                org.slf4j.LoggerFactory.getLogger("folkways-cookery").warn("compost refresh failed after settlement", broken);
+                org.slf4j.LoggerFactory.getLogger("folkways-compost").warn("compost refresh failed after settlement", broken);
             }
         }
 
         private Outcome collect(ServerLevel level, Worker who, BlockState before) {
-            if (before.getValue(ComposterBlock.LEVEL) != 8) return Outcome.failed(CookeryRefusal.STATION_CHANGED);
+            if (before.getValue(ComposterBlock.LEVEL) != 8) return Outcome.failed(CompostRefusal.STATION_CHANGED);
             List<ItemStack> items;
             try {
                 List<AABB> bounds = new java.util.ArrayList<>();
@@ -207,7 +232,7 @@ public final class CompostStation implements KitchenStation {
                 // real composter was emptied; otherwise discarding it leaves the original batch intact.
                 if (level.getBlockState(at.block(level)).equals(before)) throw broken;
                 items = broken.items();
-                org.slf4j.LoggerFactory.getLogger("folkways-cookery")
+                org.slf4j.LoggerFactory.getLogger("folkways-compost")
                     .warn("composter {} emptied before notification failed", at, broken.getCause());
             }
             nudge();

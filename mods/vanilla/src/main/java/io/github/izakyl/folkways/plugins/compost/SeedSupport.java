@@ -1,6 +1,5 @@
-package io.github.izakyl.folkways.cookery.seeds;
+package io.github.izakyl.folkways.plugins.compost;
 
-import com.github.ysbbbbbb.kaleidoscopecookery.init.tag.TagMod;
 import io.github.izakyl.folkways.core.api.colony.Colony;
 import io.github.izakyl.folkways.core.api.resident.body.Bodies;
 import io.github.izakyl.folkways.core.api.resident.body.Body;
@@ -10,7 +9,6 @@ import io.github.izakyl.folkways.core.api.terms.ItemSpec;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
 import io.github.izakyl.folkways.core.api.work.ReservedInput;
 import io.github.izakyl.folkways.plugins.farming.CropSeeds;
-import io.github.izakyl.folkways.plugins.farming.FarmingContent;
 import io.github.izakyl.folkways.plugins.orders.Orders;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -24,7 +22,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
-import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.ChestBlock;
 import net.minecraft.world.level.block.state.properties.ChestType;
@@ -38,16 +35,12 @@ public final class SeedSupport {
     public SeedSupport(Colony colony, MinecraftServer server) {
         this.colony = colony;
         this.server = server;
-        budget = new SeedBudget(this::snapshot, this::catalogue);
+        budget = new SeedBudget(this::snapshot, this::catalogue,
+            item -> CompostSettings.reserve(colony, item));
     }
 
     public SeedBudget budget(ServerLevel level) { return budget; }
     public Set<Item> catalogue() { return CropSeeds.catalogue(server.overworld(), BlockPos.ZERO); }
-
-    public boolean enabled() {
-        return loadedBodies().values().stream().anyMatch(body ->
-            io.github.izakyl.folkways.cookery.gear.CookeryGear.permitsSeeds(colony, body));
-    }
 
     private Map<UUID, Body> loadedBodies() {
         Map<UUID, Body> found = new LinkedHashMap<>();

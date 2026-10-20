@@ -22,6 +22,9 @@ Saves, data pack formats and the Java API may still change between versions.
   how many head to keep. Frame a riverbank as a fishery, or draw a patrol route.
 - **Orders keep things stocked.** Name an item and an amount for a chest, and the colony
   crafts, smelts, harvests or hauls until it holds that much.
+- **Surplus seeds become bone meal.** Mark a native composter with the Colony Book and
+  configure automatic composting and seed reserves on its own Composting settings page.
+  Sowing, reserved inputs and stock orders remain protected. This works with Folkways Vanilla.
 - **Containers have their own rules.** Choose whether residents may take goods or use a
   container for ordinary storage. Orders still deliver to containers that refuse ordinary
   storage.
@@ -77,7 +80,7 @@ Folkways has four base jars and a Cookery extension. Install the first two; add 
 | Folkways × Kaleidoscope Cookery (`folkways-cookery-*.jar`) | With Kaleidoscope Cookery 1.6.0: crops, appliances and shared kitchen tools |
 
 The Cookery extension supplies native appliance production, flooded-rice farming, shared tools,
-kitchen racks, seed reserves and thirteen lessons. The creative supply box belongs to
+kitchen racks, grass-seed gathering and thirteen lessons. The creative supply box belongs to
 Folkways Vanilla and also works without Cookery.
 
 All installed Folkways jars must be the same version. Folkways also needs these mods installed alongside it:
