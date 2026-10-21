@@ -829,7 +829,7 @@ public final class Roaming {
         boolean fresh = false;
         long first = Long.MIN_VALUE;
         for (WorldPos cell : footings.cells()) {
-            if (!cell.sameRealm(anchor)) {
+            if (!cell.sameRealm(anchor) || shut(cell)) {
 
                 continue;
             }
@@ -851,7 +851,7 @@ public final class Roaming {
     private void site(Map<ResourceLocation, Sort> sorts, Collection<WorldPos> sites, long now) {
         LongOpenHashSet held = new LongOpenHashSet();
         for (WorldPos site : sites) {
-            if (site.realm().equals(home)) {
+            if (site.realm().equals(home) && !shut(site)) {
                 held.add(site.cell().asLong());
             }
         }
@@ -874,6 +874,7 @@ public final class Roaming {
                     }
                     reckoned++;
                     footings = Reach.workableCells(level, BlockPos.of(site)).stream()
+                        .filter(cell -> !shut(new WorldPos(home, cell)))
                         .mapToLong(BlockPos::asLong).toArray();
                     footingsOf.put(site, footings);
                 }
@@ -898,6 +899,10 @@ public final class Roaming {
             }
             return fresh;
         });
+    }
+
+    private boolean shut(WorldPos cell) {
+        return closed.stream().anyMatch(one -> one.holds(cell));
     }
 
     // Ground closed since the last tick has its ways taken up; ground opened again may be come through once more,

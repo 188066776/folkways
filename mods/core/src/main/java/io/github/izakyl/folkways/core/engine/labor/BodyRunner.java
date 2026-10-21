@@ -198,6 +198,13 @@ final class BodyRunner {
     }
 
     void tick(ColonyLabor labor, ServerLevel level, Body body) {
+        if (within != null && (own == null || own.urge() == null)) {
+            try {
+                ((Workload.Within) within.spec().workload()).tick(level, labor.hands(body, withinPlan));
+            } catch (RuntimeException | LinkageError broken) {
+                Labor.LOGGER.error("node {} threw during its presentation", within.id(), broken);
+            }
+        }
         if (current == null && within != null) {
             inside(labor, level, body);
             return;
