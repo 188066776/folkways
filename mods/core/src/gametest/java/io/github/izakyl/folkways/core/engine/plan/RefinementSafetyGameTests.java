@@ -15,6 +15,8 @@ import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.event.RegisterGameTestsEvent;
@@ -139,12 +141,12 @@ public final class RefinementSafetyGameTests {
     public static void overloadedRecoverySurvivesTheRefinementFallback(GameTestHelper helper) throws Exception {
         Scheduler scheduler = new Scheduler();
         Scheduler.Scheduled empty = scheduler.handle(List.of(Scheduler.Input.wake(0)));
-        helper.assertTrue(empty.overloaded().isEmpty() && !empty.timing().limited(),
+        helper.assertTrue(empty.stow().isEmpty() && !empty.timing().limited(),
             "before ways arrive, there is no cargo recovery or refinement fallback to publish");
         field(Scheduler.class, "tours").set(scheduler, new Tours(3000, 8, 0));
         WorldPos at = WorldPos.of(helper.getLevel(), helper.absolutePos(new BlockPos(1, 1, 1)));
         Crew.Hand full = new Crew.Hand(new Resident(UUID.randomUUID(), OWNER), at, 0, 1, 1,
-            List.of(), List.of(), Optional.empty());
+            List.of(), List.of(), Optional.empty(), List.of(new ItemStack(Items.STONE, 64)));
         Crew.Hand free = hand(at, 1);
         Node blocked = action(at, Workload.Once.of(10));
         Node ready = action(at, Workload.Once.of(10));
@@ -156,7 +158,7 @@ public final class RefinementSafetyGameTests {
             Map.of(blocked.id(), full.id(), ready.id(), free.id()), nodes.keySet());
         Scheduler.Scheduled laid = scheduler.handle(List.of(
             new Scheduler.Input(delta, new Crew(List.of(full, free)), ways(), false, 1)));
-        helper.assertTrue(laid.overloaded().equals(Set.of(full.id())),
+        helper.assertTrue(laid.stow().equals(Set.of(full.id())),
             "the resident waiting on a full pack is still reported for stowing after a fallback");
         helper.assertTrue(laid.timing().limited(), "the zero refinement budget really takes the fallback");
         helper.assertTrue(laid.all().get(free.id()).nodes().equals(List.of(ready.id())),
