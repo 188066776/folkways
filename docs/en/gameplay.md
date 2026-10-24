@@ -71,6 +71,18 @@ Route optimization has a work budget and, in the normal planning mode, a
 publishes its initial valid assignment so residents can work while further
 improvement waits for another schedule.
 
+## Pastures
+
+The target is the number of grown animals to retain. Residents breed ready adult
+pairs while the total is below or at the target. At the target, one additional
+birth is allowed; feeding waits while surplus young grow. Only adults above the
+retained count are culled, so a newborn does not replace a breeding adult.
+
+For example, retain two cows: two adults breed, their calf grows, then one of
+the three adults is culled and the cycle can repeat after the normal breeding
+cooldown. A target of zero disables breeding and culls all adults. One animal
+has no breeding partner; keep at least two for continued meat production.
+
 ## Trades, levels and perks
 
 Residents learn automatically. Each completed second of active work earns one
