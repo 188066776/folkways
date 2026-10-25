@@ -7,6 +7,7 @@ import io.github.izakyl.folkways.core.api.colony.Sweep;
 import io.github.izakyl.folkways.base.persist.Reader;
 import io.github.izakyl.folkways.base.persist.Writer;
 import io.github.izakyl.folkways.core.api.terms.ItemSpec;
+import io.github.izakyl.folkways.core.api.terms.WorldPos;
 import io.github.izakyl.folkways.core.api.work.Grown;
 import io.github.izakyl.folkways.front.api.Facing;
 import io.github.izakyl.folkways.front.api.FrontView;
@@ -45,6 +46,7 @@ import net.minecraft.world.level.block.state.BlockState;
 final class GroundPresence implements Facing {
 
     private static final String TAG_MADE = "made";
+    private static final int FORAGE_VERSION = 3;
 
     // Targets are discovered once; later sweeps only update access to the remaining work.
     private final class Site {
@@ -52,6 +54,8 @@ final class GroundPresence implements Facing {
         private final UUID zone;
         private final Map<String, Set<String>> targets = new LinkedHashMap<>();
         private boolean discovering;
+        private boolean rediscoverForage;
+        private boolean rekeyForage;
         private boolean loaded;
         private String configuration;
         private final Map<String, Chores> works = new LinkedHashMap<>();
@@ -74,15 +78,59 @@ final class GroundPresence implements Facing {
             if (discovering) {
                 survey.discovering();
             }
+            Predicate<BlockPos> member = cell -> colony.holdingAt(WorldPos.of(level, cell)).isPresent();
+            Predicate<BlockPos> spared = member;
+            // Trees and fallen logs claim their decorations before forage and weeding.
+            Set<BlockPos> claimed = new HashSet<>();
             if (settings.flag(GroundworkContent.FELL)) {
-                List<Job> trees = survey.fell();
-                settle(GroundworkContent.FELL, (at, chore) -> new FellNode(at, chore), trees);
+                List<Job> trees = new ArrayList<>(survey.fell());
+                trees.forEach(tree -> {
+                    claimed.addAll(tree.cells());
+                    claimed.addAll(tree.canopy());
+                });
+                List<Job> fallen = survey.fallen(member, state -> false, claimed);
+                fallen.forEach(log -> {
+                    claimed.addAll(log.cells());
+                    claimed.addAll(log.canopy());
+                });
+                trees.addAll(fallen);
+                settle(GroundworkContent.FELL, (at, chore) -> chore.job().key().startsWith("fallen:")
+                    ? new BreakNode(at, chore, BreakNode.Way.FALLEN, at.getBlockState(chore.job().cell()),
+                        FallenLogs::horizontal, (cell, state) -> member.test(cell)
+                            || FallenLogs.horizontal(state)
+                                && !new FallenLogs(at, member).at(cell))
+                    : new FellNode(at, chore), trees);
+            }
+            if (settings.flag(GroundworkContent.FORAGE)) {
+                List<Job> forage = survey.forage(spared, claimed);
+                if (discovering && rekeyForage) {
+                    Set<String> wanted = targets.get(GroundworkContent.FORAGE);
+                    if (wanted != null) {
+                        Set<String> keys = new LinkedHashSet<>();
+                        for (Job job : forage) {
+                            if (wanted.contains(job.key()) || Foraging.vine(level.getBlockState(job.cell()))
+                                    && job.cells().stream().anyMatch(cell -> wanted.contains(Job.keyOf(cell)))) {
+                                keys.add(job.key());
+                            }
+                        }
+                        targets.put(GroundworkContent.FORAGE, keys);
+                    }
+                }
+                forage.forEach(plant -> claimed.addAll(plant.cells()));
+                settle(GroundworkContent.FORAGE, (at, chore) -> new ForageNode(at, chore, spared, view.cells()), forage);
             }
             if (grass || flowers) {
                 Predicate<BlockState> pulled = Survey.weeds(grass, flowers);
-                List<Job> weeds = survey.weed(pulled);
+                List<Job> weeds = survey.weed(pulled).stream()
+                    .filter(weed -> !claimed.contains(weed.cell())).toList();
+                weeds.forEach(weed -> {
+                    claimed.add(weed.cell());
+                    claimed.add(weed.cell().above());
+                });
                 settle(GroundworkContent.WEED,
-                    (at, chore) -> new BreakNode(chore, at.getBlockState(chore.job().cell()), pulled), weeds);
+                    (at, chore) -> new BreakNode(at, chore, BreakNode.Way.WEED, at.getBlockState(chore.job().cell()),
+                        pulled, (cell, state) -> false),
+                    weeds);
             }
             if (settings.flag(GroundworkContent.HAUL)) {
                 settle(GroundworkContent.HAUL, (at, chore) -> new HaulNode(at, chore), survey.haul(view::at));
@@ -94,7 +142,7 @@ final class GroundPresence implements Facing {
         private void settle(String work, Chores.Maker maker, List<Job> jobs) {
             if (discovering) {
                 Set<String> found = new LinkedHashSet<>(jobs.stream().map(Job::key).toList());
-                if (initialized.contains(zone)) {
+                if (initialized.contains(zone) && !(work.equals(GroundworkContent.FORAGE) && rediscoverForage)) {
                     Set<String> wanted = targets.get(work);
                     if (wanted != null) {
                         wanted.retainAll(found);
@@ -118,7 +166,7 @@ final class GroundPresence implements Facing {
         void update(ServerLevel level, ZoneView zone) {
             Settings settings = zone.settings();
             String configured = List.of(GroundworkContent.CLEAR, GroundworkContent.FILL, GroundworkContent.WEED,
-                    GroundworkContent.FLOWERS, GroundworkContent.FELL, GroundworkContent.HAUL).stream()
+                    GroundworkContent.FLOWERS, GroundworkContent.FELL, GroundworkContent.HAUL, GroundworkContent.FORAGE).stream()
                 .map(key -> key + "=" + settings.flag(key)).collect(java.util.stream.Collectors.joining(","))
                 + settings.items(GroundworkContent.BLOCK).map(ItemSpec::describe).orElse("")
                 + zone.cells().stream().map(BlockPos::asLong).sorted().toList();
@@ -142,6 +190,8 @@ final class GroundPresence implements Facing {
                 return;
             }
             scan(level, zone);
+            rediscoverForage = false;
+            rekeyForage = false;
             initialized.add(this.zone);
             targets.keySet().removeIf(work -> work.equals(GroundworkContent.WEED)
                 ? !zone.settings().flag(GroundworkContent.WEED) && !zone.settings().flag(GroundworkContent.FLOWERS)
@@ -222,6 +272,13 @@ final class GroundPresence implements Facing {
             saved.uuid("zone").ifPresent(id -> {
                 Site site = new Site(id);
                 site.configuration = saved.string("configuration").orElse(null);
+                // In-place harvesting recorded only ripe roots. Rebuild just forage's targets for plant removal.
+                site.rediscoverForage = saved.integer("forage_version").orElse(0) < 2;
+                site.rekeyForage = saved.integer("forage_version").orElse(0) < FORAGE_VERSION;
+                // Older sites had no forage switch. Preserve their already discovered targets when it stays off.
+                if (site.configuration != null && !site.configuration.contains(",forage=")) {
+                    site.configuration = site.configuration.replaceFirst("(haul=(?:true|false))", "$1,forage=false");
+                }
                 saved.blob("targets").ifPresent(targets -> {
                     for (String kind : targets.getAllKeys()) {
                         if (kind.equals(GroundworkContent.CLEAR) || kind.equals(GroundworkContent.FILL)) {
@@ -295,7 +352,7 @@ final class GroundPresence implements Facing {
                     targets.put(kind, keys);
                 });
                 return Writer.of().uuid("zone", site.zone).string("configuration", site.configuration)
-                    .blob("targets", targets).tag();
+                    .integer("forage_version", FORAGE_VERSION).blob("targets", targets).tag();
             }).tag();
         if (!saved.equals(colony.kept(GroundworkContent.ID))) {
             colony.keep(GroundworkContent.ID, saved);

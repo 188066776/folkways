@@ -30,13 +30,18 @@ public final class GroundworkContent {
     public static final String FLOWERS = "flowers";
     public static final String FELL = "fell";
     public static final String HAUL = "haul";
+    public static final String FORAGE = "forage";
     public static final String BLOCK = "block";
 
     public static final ResourceLocation WEEDING = ResourceLocation.fromNamespaceAndPath("folkways", "weeding");
     public static final ResourceLocation FELLING = ResourceLocation.fromNamespaceAndPath("folkways", "felling");
     public static final ResourceLocation PICKING_UP = ResourceLocation.fromNamespaceAndPath("folkways", "picking_up");
+    public static final ResourceLocation FORAGING = ResourceLocation.fromNamespaceAndPath("folkways", "foraging");
 
     static final int CELL_TICKS = 10;
+    static final int BREAK_TICKS = 10;
+    static final int TICKS_PER_HARDNESS = 6;
+    static final int MOST_BREAK_TICKS = 80;
 
     static final int FELL_TICKS_PER_LOG = 12;
     static final int FELL_TICKS_PER_LEAF = 2;
@@ -64,6 +69,7 @@ public final class GroundworkContent {
                 work(FLOWERS, "poppy", false),
                 work(FELL, "iron_axe", false),
                 work(HAUL, "chest", false),
+                work(FORAGE, "sweet_berries", false),
                 Schema.Setting.Items.oneBlock(BLOCK, "folkways.settings.fill_block", icon("dirt"), icon("dirt")))),
             icon("iron_shovel")))));
     }

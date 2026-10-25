@@ -56,12 +56,49 @@ final class Survey {
         this.cells = cells;
     }
 
+    // Fallen wood needs no canopy. Only its marked logs go; their small decorations come away first.
+    List<Job> fallen(Predicate<BlockPos> member, Predicate<BlockState> kept, Set<BlockPos> claimed) {
+        Predicate<BlockPos> spared = cell -> member.test(cell) || kept.test(level.getBlockState(cell));
+        FallenLogs fallen = new FallenLogs(level, member);
+        List<Job> jobs = new ArrayList<>();
+        for (BlockPos cell : sorted(UPWARD)) {
+            if (claimed.contains(cell) || !level.isLoaded(cell) || !FallenLogs.horizontal(level.getBlockState(cell))
+                || spared.test(cell) || !fallen.at(cell)) {
+                continue;
+            }
+            List<BlockPos> decorations = fallen.decorations(cell);
+            if (decorations.stream().anyMatch(spared)) {
+                continue;
+            }
+            stances(cell).ifPresent(where -> jobs.add(new Job("fallen:" + Job.keyOf(cell), site(cell),
+                cell, List.of(cell), decorations, where)));
+        }
+        return jobs;
+    }
+
     List<Job> weed(Predicate<BlockState> pulled) {
         List<Job> jobs = new ArrayList<>();
         for (BlockPos cell : sorted(UPWARD)) {
             if (level.isLoaded(cell) && weedAt(level.getBlockState(cell), pulled)) {
                 stances(cell).ifPresent(where -> jobs.add(Job.at(cell, site(cell), where)));
             }
+        }
+        return jobs;
+    }
+
+    List<Job> forage(Predicate<BlockPos> spared, Set<BlockPos> claimed) {
+        List<Job> jobs = new ArrayList<>();
+        Set<BlockPos> found = new HashSet<>();
+        for (BlockPos cell : sorted(UPWARD)) {
+            if (found.contains(cell) || !level.isLoaded(cell) || !Foraging.root(level.getBlockState(cell))) continue;
+            List<BlockPos> plant = Foraging.cells(level, cell, cells);
+            if (plant.isEmpty() || plant.stream().anyMatch(at -> claimed.contains(at) || spared.test(at)
+                    || level.getBlockState(at).getDestroySpeed(level, at) < 0.0F)) continue;
+            BlockPos root = Foraging.vine(level.getBlockState(cell)) ? plant.getLast() : cell;
+            stances(root).ifPresent(where -> {
+                found.addAll(plant);
+                jobs.add(new Job(Job.keyOf(root), site(root), root, plant, List.of(), where));
+            });
         }
         return jobs;
     }
@@ -81,7 +118,7 @@ final class Survey {
                 continue;
             }
             List<BlockPos> canopy = Felling.canopy(level, tree);
-            if (canopy.isEmpty()) {
+            if (canopy.stream().noneMatch(leaf -> Felling.leaf(level.getBlockState(leaf)))) {
                 continue;
             }
             Optional<Stances> where = stances(cell);
