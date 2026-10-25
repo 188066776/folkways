@@ -31,6 +31,7 @@ import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.Mob;
@@ -148,6 +149,16 @@ public class ResidentEntity extends PathfinderMob implements Body {
     public void aiStep() {
         updateSwingTime();
         super.aiStep();
+    }
+
+    // Only social pushing uses the smaller box; blocks and the shared route graph still see the full body.
+    @Override
+    public void push(Entity other) {
+        if (other instanceof ResidentEntity
+                && (Math.abs(getX() - other.getX()) >= 0.36D || Math.abs(getZ() - other.getZ()) >= 0.36D)) {
+            return;
+        }
+        super.push(other);
     }
 
     @Override
