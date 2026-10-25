@@ -36,6 +36,7 @@ import io.github.izakyl.folkways.front.api.ui.Pages;
 import io.github.izakyl.folkways.plugins.FolkwaysVanillaConfig;
 import io.github.izakyl.folkways.plugins.patrol.Wards;
 import io.github.izakyl.folkways.plugins.person.PersonContent;
+import io.github.izakyl.folkways.plugins.person.ResidentEntity;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -186,6 +187,9 @@ final class LivingPresence implements Facing {
                         MoodSparks.show(level, living, shift > 0);
                     }
                     unwritten = true;
+                }
+                if (living instanceof ResidentEntity person) {
+                    person.foodLevel(20.0F * his.foodLevel() / Hunger.MAX_FOOD_LEVEL);
                 }
             }
         }

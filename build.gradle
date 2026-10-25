@@ -107,6 +107,8 @@ dependencies {
     }
     runtimeOnly ldlib2Coordinate
     runtimeOnly core.lib("create")
+    // Maid expression regressions bake and evaluate the converted clips with the real GeckoLib parser.
+    if (!gameTestMod || gameTestMod == "vanilla") { runtimeOnly core.lib("geckolib") }
     if (cookeryTests) { runtimeOnly core.lib("kaleidoscope_cookery") }
     if (tavernTests) { runtimeOnly core.lib("kaleidoscope_tavern") }
     if (modularGolemsTests) {

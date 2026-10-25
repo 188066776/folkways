@@ -69,6 +69,14 @@ public class ResidentEntity extends PathfinderMob implements Body {
     private static final EntityDataAccessor<Integer> DATA_LEISURE_PHASE =
         SynchedEntityData.defineId(ResidentEntity.class, EntityDataSerializers.INT);
 
+    private static final EntityDataAccessor<Float> DATA_FOOD_LEVEL =
+        SynchedEntityData.defineId(ResidentEntity.class, EntityDataSerializers.FLOAT);
+
+    // A presentation copy of LivingPresence's authoritative Hunger, on the 0..20 scale TLM models read.
+    // Entity data also reaches observers who never open the resident's book UI. A new/unbound resident is fed.
+    public float foodLevel() { return entityData.get(DATA_FOOD_LEVEL); }
+    public void foodLevel(float level) { entityData.set(DATA_FOOD_LEVEL, Math.clamp(level, 0.0F, 20.0F)); }
+
     public void leisureMotion(String motion) { leisureMotion(motion, 0); }
     public void leisureMotion(String motion, int phase) {
         entityData.set(DATA_LEISURE, motion);
@@ -101,6 +109,7 @@ public class ResidentEntity extends PathfinderMob implements Body {
         builder.define(DATA_CAST_LINE, Optional.empty());
         builder.define(DATA_LEISURE, "");
         builder.define(DATA_LEISURE_PHASE, 0);
+        builder.define(DATA_FOOD_LEVEL, 20.0F);
     }
 
     public static AttributeSupplier.Builder createAttributes() {
