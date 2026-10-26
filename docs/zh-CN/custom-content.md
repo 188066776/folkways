@@ -41,6 +41,8 @@
 | `data/<配方命名空间>/crafting_perks/<配方路径>.json`                                                   | 让某个配方参与「节料」返还和「副产物」，例如 `{"refund": true, "byproduct": "minecraft:stick", "count": 1}` |
 | `folkways:gameplay/fishing_discoveries` 战利品表                                                       | 「寻宝」的发现，带有实际钓鱼位置，可按生物群系和维度设置条件                                                |
 
+住房陈设标签包括储物、织物、装饰、桌子和照明。照明也会在地面上方、屋顶下方的房间空间内检测。
+
 容器和方块名称的后备规则也能识别常见的储物、地毯、盆栽和桌子方块。默认的制作特长规则只覆盖部分普通配方，可逆的存储和打包配方不参与。
 
 居民皮肤有专门的娱乐动作。自定义模型清单和外观条目可以通过 `leisure_animations` 对象映射 `chatting`、`petting`、`relaxing` 和 `strolling`；

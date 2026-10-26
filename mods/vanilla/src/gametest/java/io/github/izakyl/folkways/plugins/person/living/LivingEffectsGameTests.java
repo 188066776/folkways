@@ -3,15 +3,34 @@ package io.github.izakyl.folkways.plugins.person.living;
 import io.github.izakyl.folkways.FolkwaysMod;
 import io.github.izakyl.folkways.plugins.FolkwaysVanillaMod;
 import io.github.izakyl.folkways.base.persist.Reader;
+import io.github.izakyl.folkways.core.api.colony.Colonies;
+import io.github.izakyl.folkways.core.api.colony.Colony;
+import io.github.izakyl.folkways.core.api.colony.Held;
+import io.github.izakyl.folkways.core.api.colony.Release;
+import io.github.izakyl.folkways.core.api.terms.WorldPos;
+import io.github.izakyl.folkways.front.engine.colony.ColonyFront;
+import io.github.izakyl.folkways.front.engine.colony.ColonySettings;
+import io.github.izakyl.folkways.plugins.person.PersonBody;
+import io.github.izakyl.folkways.plugins.person.PersonContent;
+import io.github.izakyl.folkways.plugins.person.ResidentEntity;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.DoorBlock;
+import net.minecraft.world.level.block.LanternBlock;
+import net.minecraft.world.level.block.WallSignBlock;
+import net.minecraft.world.level.block.WallHangingSignBlock;
+import net.minecraft.world.level.block.WallTorchBlock;
+import net.minecraft.world.level.block.entity.SignBlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BedPart;
 import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -201,6 +220,338 @@ public final class LivingEffectsGameTests {
             helper.assertFalse(rooms.comfortableAt(level, barrel), "the barrel leaves with the last room");
             helper.succeed();
         });
+    }
+
+    @GameTest(template = "empty")
+    public static void lightingCountsAboveTheFloorAndLanternsAreWalkable(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        BlockPos origin = helper.absolutePos(new BlockPos(2, 22, 2));
+        BlockPos bed = bedroom(level, origin);
+        BlockPos torch = origin.offset(1, 1, 3);
+        BlockPos lantern = origin.offset(3, 0, 2);
+        for (BlockPos at : BlockPos.betweenClosed(origin.above(3), origin.offset(5, 3, 5))) {
+            level.setBlockAndUpdate(at, Blocks.STONE.defaultBlockState());
+        }
+        level.setBlockAndUpdate(torch, Blocks.WALL_TORCH.defaultBlockState().setValue(WallTorchBlock.FACING, Direction.EAST));
+        HousingRooms rooms = new HousingRooms();
+        rooms.get(level, bed);
+        helper.runAfterDelay(4, () -> {
+            for (int i = 0; i < 40; i++) { rooms.tick(); }
+            helper.assertValueEqual(rooms.get(level, bed).furnishings(), 2, "storage and a wall torch above feet level");
+            level.setBlockAndUpdate(lantern, Blocks.LANTERN.defaultBlockState());
+            rooms.changed(level, lantern); rooms.get(level, bed);
+            for (int i = 0; i < 40; i++) { rooms.tick(); }
+            helper.assertValueEqual(rooms.get(level, bed).area(), 16, "a floor lantern remains walkable room area");
+            helper.assertValueEqual(rooms.get(level, bed).furnishings(), 2, "more lighting is still one category");
+            level.setBlockAndUpdate(torch, Blocks.AIR.defaultBlockState());
+            level.setBlockAndUpdate(lantern, Blocks.AIR.defaultBlockState());
+            level.setBlockAndUpdate(lantern.above(2), Blocks.LANTERN.defaultBlockState().setValue(LanternBlock.HANGING, true));
+            rooms.changed(level, lantern); rooms.get(level, bed);
+            for (int i = 0; i < 40; i++) { rooms.tick(); }
+            helper.assertValueEqual(rooms.get(level, bed).furnishings(), 2, "a ceiling lantern supplies lighting");
+            level.setBlockAndUpdate(lantern.above(2), Blocks.AIR.defaultBlockState());
+            level.setBlockAndUpdate(lantern.above(3), Blocks.GLOWSTONE.defaultBlockState());
+            rooms.changed(level, lantern); rooms.get(level, bed);
+            for (int i = 0; i < 40; i++) { rooms.tick(); }
+            helper.assertValueEqual(rooms.get(level, bed).furnishings(), 2, "a glowstone ceiling supplies lighting");
+            level.setBlockAndUpdate(lantern.above(3), Blocks.STONE.defaultBlockState());
+            rooms.changed(level, lantern); rooms.get(level, bed);
+            for (int i = 0; i < 40; i++) { rooms.tick(); }
+            helper.assertValueEqual(rooms.get(level, bed).furnishings(), 1, "a stone ceiling without fixtures gives no lighting");
+            helper.succeed();
+        });
+    }
+
+    @GameTest(template = "empty")
+    public static void outsideWallSignNamesOccupantsAndClearsAfterReload(GameTestHelper helper) {
+        try (Nameplates fixture = new Nameplates(helper)) {
+            fixture.add("Ada");
+            fixture.inspect();
+            helper.assertValueEqual(fixture.sign().getText(true).getMessage(0, false).getString(), "Ada",
+                "an empty sign on the outside face of the bedroom wall names its resident");
+            helper.assertValueEqual(fixture.unrelated().getText(true).getMessage(0, false).getString(), "",
+                "a sign attached to another wall is left empty");
+            helper.assertValueEqual(fixture.saved().children("nameplates").size(), 1, "the chosen sign is owned");
+            fixture.living = new LivingPresence(fixture.colony);
+            fixture.add("Bea");
+            fixture.inspect();
+            helper.assertValueEqual(fixture.sign().getText(true).getMessage(1, false).getString(), "Bea",
+                "saved ownership allows rewriting when another resident moves in");
+            fixture.leave();
+            fixture.living.refresh(fixture.level.getServer());
+            helper.assertTrue(blank(fixture.sign()), "the last occupant leaving clears both sides of our sign");
+            helper.assertTrue(fixture.saved().children("nameplates").isEmpty(), "the empty sign is no longer owned");
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void roomSignsIncludeHangingSignsAndTheDoorLintel(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        BlockPos origin = helper.absolutePos(new BlockPos(2, 22, 2));
+        BlockPos bed = bedroom(level, origin);
+        BlockPos standing = origin.offset(3, 0, 2);
+        BlockPos hanging = origin.offset(3, 2, 3);
+        BlockPos lintel = origin.offset(2, 2, -1);
+        BlockPos crossbar = origin.offset(-1, 1, 3);
+        BlockPos aboveRoof = origin.offset(3, 4, 3);
+        level.setBlockAndUpdate(standing, Blocks.OAK_SIGN.defaultBlockState());
+        level.setBlockAndUpdate(hanging, Blocks.OAK_HANGING_SIGN.defaultBlockState());
+        level.setBlockAndUpdate(lintel, Blocks.OAK_WALL_SIGN.defaultBlockState()
+            .setValue(WallSignBlock.FACING, Direction.NORTH));
+        level.setBlockAndUpdate(crossbar, Blocks.OAK_WALL_HANGING_SIGN.defaultBlockState()
+            .setValue(WallHangingSignBlock.FACING, Direction.NORTH));
+        level.setBlockAndUpdate(aboveRoof, Blocks.OAK_SIGN.defaultBlockState());
+        HousingRooms rooms = new HousingRooms();
+        rooms.get(level, bed);
+        for (int i = 0; i < 40; i++) { rooms.tick(); }
+        Set<BlockPos> signs = rooms.signsOf(level).get(rooms.surveyed(level).getFirst());
+        helper.assertTrue(signs.containsAll(Set.of(standing, hanging, lintel, crossbar)),
+            "standing, ceiling, lintel and crossbar attachments all belong to the room: " + signs);
+        helper.assertFalse(signs.contains(aboveRoof), "a sign above the roof is outside the room");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void insidePartitionSignBelongsToItsBedroom(GameTestHelper helper) {
+        try (Nameplates fixture = new Nameplates(helper)) {
+            BlockPos otherBed = adjacentBedroom(fixture);
+            BlockPos sign = fixture.origin.offset(6, 1, 2);
+            fixture.level.setBlockAndUpdate(sign, Blocks.OAK_WALL_SIGN.defaultBlockState()
+                .setValue(WallSignBlock.FACING, Direction.EAST));
+            fixture.add("Ada");
+            fixture.colony.hold(LivingContent.BED, new Held.Block(WorldPos.of(fixture.level, otherBed))).orElseThrow();
+            fixture.add("Bea", otherBed);
+            fixture.claim();
+            fixture.inspect();
+            SignBlockEntity plate = (SignBlockEntity) fixture.level.getBlockEntity(sign);
+            helper.assertValueEqual(plate.getText(true).getMessage(0, false).getString(), "Bea",
+                "a sign inside the eastern bedroom names its resident, not the western neighbour");
+            helper.assertValueEqual(fixture.saved().children("nameplates").size(), 1, "the shared-wall sign has one owner");
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void northFacingCorridorSignNamesTheWesternRoom(GameTestHelper helper) {
+        corridorNameplate(helper, Direction.NORTH);
+    }
+
+    @GameTest(template = "empty")
+    public static void southFacingCorridorSignTransfersToTheEasternRoom(GameTestHelper helper) {
+        corridorNameplate(helper, Direction.SOUTH);
+    }
+
+    private static void corridorNameplate(GameTestHelper helper, Direction facing) {
+        try (Nameplates fixture = new Nameplates(helper)) {
+            BlockPos otherBed = adjacentBedroom(fixture);
+            BlockPos sign = fixture.origin.offset(5, 1, facing == Direction.NORTH ? 0 : 5);
+            fixture.level.setBlockAndUpdate(sign, Blocks.OAK_WALL_SIGN.defaultBlockState()
+                .setValue(WallSignBlock.FACING, facing));
+            fixture.add("Ada");
+            fixture.inspect();
+            SignBlockEntity plate = (SignBlockEntity) fixture.level.getBlockEntity(sign);
+            helper.assertValueEqual(plate.getText(true).getMessage(0, false).getString(), "Ada",
+                "a sign attached to the only surveyed bedroom belongs to it");
+            fixture.colony.hold(LivingContent.BED, new Held.Block(WorldPos.of(fixture.level, otherBed))).orElseThrow();
+            fixture.add("Bea", otherBed);
+            fixture.claim();
+            fixture.inspect();
+            helper.assertValueEqual(plate.getText(true).getMessage(0, false).getString(),
+                facing == Direction.NORTH ? "Ada" : "Bea", "the corridor sign names the room on the viewer's right");
+            helper.assertValueEqual(fixture.saved().children("nameplates").size(), 1, "the corridor sign has one owner");
+            fixture.living.refresh(fixture.level.getServer());
+            helper.assertValueEqual(plate.getText(true).getMessage(0, false).getString(),
+                facing == Direction.NORTH ? "Ada" : "Bea", "the rightful room keeps its nameplate on later refreshes");
+        }
+        helper.succeed();
+    }
+
+    private static BlockPos adjacentBedroom(Nameplates fixture) {
+        fixture.level.setBlockAndUpdate(fixture.outside, Blocks.AIR.defaultBlockState());
+        fixture.level.setBlockAndUpdate(fixture.origin.offset(4, 0, 4), Blocks.AIR.defaultBlockState());
+        return bedroom(fixture.level, fixture.origin.east(5));
+    }
+
+    @GameTest(template = "empty")
+    public static void playerEditedNameplateIsNeverReclaimed(GameTestHelper helper) {
+        try (Nameplates fixture = new Nameplates(helper)) {
+            fixture.add("Ada");
+            fixture.inspect();
+            SignBlockEntity sign = fixture.sign();
+            sign.setText(sign.getText(false).setMessage(2, Component.literal("Private")), false);
+            fixture.leave();
+            fixture.living.refresh(fixture.level.getServer());
+            helper.assertValueEqual(sign.getText(true).getMessage(0, false).getString(), "Ada",
+                "a player edit prevents clearing even when the resident leaves");
+            helper.assertValueEqual(sign.getText(false).getMessage(2, false).getString(), "Private",
+                "edits on the back are preserved");
+            helper.assertTrue(fixture.saved().children("nameplates").isEmpty(), "edited signs lose ownership");
+            for (boolean front : List.of(true, false)) {
+                for (int line = 0; line < 4; line++) {
+                    final int index = line;
+                    sign.updateText(text -> text.setMessage(index, Component.empty()), front);
+                }
+            }
+            fixture.living = new LivingPresence(fixture.colony);
+            fixture.add("Bea");
+            fixture.inspect();
+            helper.assertTrue(blank(sign), "a previously edited sign stays untouched after it is emptied and reloaded");
+            BlockState placed = fixture.level.getBlockState(fixture.outside);
+            fixture.level.setBlockAndUpdate(fixture.outside, Blocks.AIR.defaultBlockState());
+            fixture.living.refresh(fixture.level.getServer());
+            fixture.level.setBlockAndUpdate(fixture.outside, placed);
+            fixture.inspect();
+            helper.assertValueEqual(fixture.sign().getText(true).getMessage(0, false).getString(), "Bea",
+                "a sign placed again where the edited one stood is a new nameplate");
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void nameplatesSortNamesAndContinueOnTheBack(GameTestHelper helper) {
+        try (Nameplates fixture = new Nameplates(helper)) {
+            for (String name : List.of("Eve", "Ada", "Dia", "Bea", "Cam")) { fixture.add(name); }
+            fixture.inspect();
+            SignBlockEntity sign = fixture.sign();
+            helper.assertValueEqual(sign.getText(true).getMessage(0, false).getString(), "Ada", "names sort alphabetically");
+            helper.assertValueEqual(sign.getText(true).getMessage(3, false).getString(), "Dia", "four names on the front");
+            helper.assertValueEqual(sign.getText(false).getMessage(0, false).getString(), "Eve", "overflow goes on the back");
+            fixture.leave();
+            fixture.living.refresh(fixture.level.getServer());
+            helper.assertTrue(blank(sign), "leaving clears the back as well as the front");
+        }
+        helper.succeed();
+    }
+
+    private static boolean blank(SignBlockEntity sign) {
+        for (boolean front : List.of(true, false)) {
+            for (int line = 0; line < 4; line++) {
+                if (!sign.getText(front).getMessage(line, false).getString().isEmpty()) { return false; }
+            }
+        }
+        return true;
+    }
+
+    private static BlockPos bedroom(ServerLevel level, BlockPos origin) {
+        for (int x = 0; x <= 5; x++) {
+            for (int z = 0; z <= 5; z++) {
+                level.setBlockAndUpdate(origin.offset(x, -1, z), Blocks.STONE.defaultBlockState());
+                level.setBlockAndUpdate(origin.offset(x, 3, z), Blocks.GLOWSTONE.defaultBlockState());
+                for (int y = 0; y < 3; y++) {
+                    level.setBlockAndUpdate(origin.offset(x, y, z), (x == 0 || x == 5 || z == 0 || z == 5)
+                        ? Blocks.STONE.defaultBlockState() : Blocks.AIR.defaultBlockState());
+                }
+            }
+        }
+        BlockPos bed = origin.offset(1, 0, 1);
+        level.setBlockAndUpdate(bed, Blocks.RED_BED.defaultBlockState()
+            .setValue(BedBlock.FACING, Direction.SOUTH).setValue(BedBlock.PART, BedPart.FOOT));
+        level.setBlockAndUpdate(bed.south(), Blocks.RED_BED.defaultBlockState()
+            .setValue(BedBlock.FACING, Direction.SOUTH).setValue(BedBlock.PART, BedPart.HEAD));
+        BlockPos door = origin.offset(2, 0, 0);
+        level.setBlockAndUpdate(door.north().below(), Blocks.STONE.defaultBlockState());
+        level.setBlockAndUpdate(door, Blocks.OAK_DOOR.defaultBlockState().setValue(DoorBlock.HALF, DoubleBlockHalf.LOWER));
+        level.setBlockAndUpdate(door.above(), Blocks.OAK_DOOR.defaultBlockState()
+            .setValue(DoorBlock.HALF, DoubleBlockHalf.UPPER));
+        level.setBlockAndUpdate(origin.offset(4, 0, 4), Blocks.CHEST.defaultBlockState());
+        return bed;
+    }
+
+    private static final class Nameplates implements AutoCloseable {
+        final ServerLevel level;
+        final Colony colony;
+        final BlockPos origin;
+        final BlockPos bed;
+        final BlockPos outside;
+        final BlockPos elsewhere;
+        final List<ResidentEntity> residents = new ArrayList<>();
+        LivingPresence living;
+
+        Nameplates(GameTestHelper helper) {
+            level = helper.getLevel();
+            origin = helper.absolutePos(new BlockPos(2, 22, 2));
+            bed = bedroom(level, origin);
+            outside = origin.offset(-1, 1, 2);
+            elsewhere = origin.offset(8, 1, 2);
+            level.setBlockAndUpdate(outside, Blocks.OAK_WALL_SIGN.defaultBlockState()
+                .setValue(WallSignBlock.FACING, Direction.WEST));
+            level.setBlockAndUpdate(elsewhere.east(), Blocks.STONE.defaultBlockState());
+            level.setBlockAndUpdate(elsewhere, Blocks.OAK_WALL_SIGN.defaultBlockState()
+                .setValue(WallSignBlock.FACING, Direction.WEST));
+            colony = Colonies.mint(level.getServer());
+            ColonyFront.of(colony).setSetting(LivingContent.ID, LivingContent.FOOD.key(),
+                new ColonySettings.Value.Items(List.of()));
+            colony.hold(LivingContent.BED, new Held.Block(WorldPos.of(level, bed))).orElseThrow();
+            living = new LivingPresence(colony);
+        }
+
+        void add(String name) {
+            if (!residents.isEmpty()) {
+                int index = residents.size();
+                BlockPos foot = origin.offset(1 + index % 4, 0, 1 + index / 4 * 2);
+                level.setBlockAndUpdate(foot, Blocks.RED_BED.defaultBlockState()
+                    .setValue(BedBlock.FACING, Direction.SOUTH).setValue(BedBlock.PART, BedPart.FOOT));
+                level.setBlockAndUpdate(foot.south(), Blocks.RED_BED.defaultBlockState()
+                    .setValue(BedBlock.FACING, Direction.SOUTH).setValue(BedBlock.PART, BedPart.HEAD));
+                colony.hold(LivingContent.BED, new Held.Block(WorldPos.of(level, foot))).orElseThrow();
+                living.changed(level, foot);
+            }
+            add(name, bed);
+        }
+
+        void add(String name, BlockPos foot) {
+            ResidentEntity person = PersonBody.RESIDENT.get().create(level);
+            person.setNoAi(true);
+            person.setCustomName(Component.literal(name));
+            person.moveTo(foot.getX() + 0.5, foot.getY(), foot.getZ() + 0.5);
+            level.addFreshEntity(person);
+            colony.hold(PersonContent.ID, Held.Entity.of(person)).orElseThrow();
+            person.joinColony(colony.id());
+            colony.entered(person);
+            residents.add(person);
+        }
+
+        void inspect() {
+            living.refresh(level.getServer());
+            for (BlockPos foot : colony.view(level).blocks(LivingContent.BED).stream().sorted().toList()) {
+                living.blockLines(foot, colony.view(level));
+                for (int i = 0; i < 40; i++) { living.tick(level.getServer()); }
+            }
+            living.refresh(level.getServer());
+        }
+
+        void claim() {
+            Beds claimed = new Beds();
+            for (ResidentEntity person : residents) {
+                claimed.claim(person.getUUID(), WorldPos.of(level, person.blockPosition()));
+            }
+            colony.keep(LivingContent.ID, colony.kept(LivingContent.ID).merge(claimed.save()));
+            living = new LivingPresence(colony);
+        }
+
+        SignBlockEntity sign() { return (SignBlockEntity) level.getBlockEntity(outside); }
+
+        SignBlockEntity unrelated() { return (SignBlockEntity) level.getBlockEntity(elsewhere); }
+
+        Reader saved() { return Reader.of(colony.kept(LivingContent.ID)); }
+
+        void leave() {
+            for (ResidentEntity person : residents) {
+                colony.release(colony.holdingOf(person.getUUID()).orElseThrow().id(), Release.LET_GO);
+                person.discard();
+            }
+            residents.clear();
+        }
+
+        @Override
+        public void close() {
+            leave();
+            colony.raze();
+            for (BlockPos at : BlockPos.betweenClosed(origin.offset(-1, -1, -1), origin.offset(10, 3, 5))) {
+                level.setBlockAndUpdate(at, Blocks.AIR.defaultBlockState());
+            }
+        }
     }
 
     @GameTest(template = "empty")

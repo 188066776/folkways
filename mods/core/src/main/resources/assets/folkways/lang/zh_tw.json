@@ -1108,7 +1108,7 @@
   "folkways.housing.reason.light": "改善照明：室內亮度至少為8",
   "folkways.housing.reason.area": "各級住房每張床分別需要4 / 6 / 9格室內面積",
   "folkways.housing.reason.beds": "更高等級要求每間最多4 / 2張床",
-  "folkways.housing.reason.furnishings": "增加不同配套：儲物、地毯、裝飾或桌面",
+  "folkways.housing.reason.furnishings": "增加不同配套：儲物、地毯、裝飾、桌面或照明",
   "folkways.housing.reason.mixed": "將生產設施移出臥室，才能達到最高等級",
   "folkways.housing.reason.complete": "已滿足優質臥室要求",
   "folkways.housing.sleeper": "住戶：%s",

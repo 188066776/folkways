@@ -1108,7 +1108,7 @@
   "folkways.housing.reason.light": "Light the room: brightness at least 8",
   "folkways.housing.reason.area": "Allow 4 / 6 / 9 floor blocks per bed for each housing grade",
   "folkways.housing.reason.beds": "For higher grades, limit each room to 4 / 2 beds",
-  "folkways.housing.reason.furnishings": "Add different amenities: storage, carpets, decoration or tables",
+  "folkways.housing.reason.furnishings": "Add different amenities: storage, carpets, decoration, tables or lighting",
   "folkways.housing.reason.mixed": "Move production stations out for an excellent bedroom",
   "folkways.housing.reason.complete": "Excellent bedroom requirements met",
   "folkways.housing.sleeper": "Sleeper: %s",

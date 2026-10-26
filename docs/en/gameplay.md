@@ -199,13 +199,15 @@ improvement.
 | Comfortable housing | 6+                 | Up to 4       | 2+                                                    | +6   |
 | Excellent bedroom   | 9+                 | Up to 2       | 3+, including decoration, without production stations | +10  |
 
-Furnishing categories are storage, textiles, decoration and tables; duplicates of
+Furnishing categories are storage, textiles, decoration, tables and lighting; duplicates of
 one category do not count again. Crafting tables, furnaces and similar stations
 count as production equipment. A resident without a bed receives −12. Room
 surveys are bounded to 1,024 floor cells, 32 blocks from the bed and a roof within
 12 blocks above; unloaded or oversized rooms wait for inspection. Block edits
 refresh nearby surveys, and periodic inspection catches command and machine
-changes.
+changes. Empty signs inside a room or attached to its walls automatically display
+the occupants’ names. Player edits are preserved, and owned nameplates are cleared
+when the last occupant leaves.
 
 Human residents have a mood from 0 to 100. Food, housing, rest, recreation,
 company, safety and surroundings set its target, and mood moves gradually toward

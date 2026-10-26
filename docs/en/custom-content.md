@@ -44,6 +44,8 @@ Data packs can tune how residents eat, live and use their perks:
 | `data/<recipe namespace>/crafting_perks/<recipe path>.json`                                              | Opts a recipe into Frugal refunds and Byproducts, for example `{"refund": true, "byproduct": "minecraft:stick", "count": 1}` |
 | `folkways:gameplay/fishing_discoveries` loot table                                                       | Treasure finds, with the actual fishing origin for biome and dimension conditions                                            |
 
+Housing furnishing tags cover storage, textiles, decoration, tables and lighting.
+Lighting also counts above floor level, up to the room’s roof.
 Container and block-name fallbacks also recognize common storage, carpet,
 potted-plant and table blocks. Default crafting perk rules cover selected ordinary
 recipes and exclude reversible storage and packing recipes.

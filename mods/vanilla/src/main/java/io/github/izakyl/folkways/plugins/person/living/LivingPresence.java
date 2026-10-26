@@ -39,6 +39,7 @@ import io.github.izakyl.folkways.plugins.person.PersonContent;
 import io.github.izakyl.folkways.plugins.person.ResidentEntity;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -63,6 +64,9 @@ import net.minecraft.world.food.FoodProperties;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.GameRules;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.entity.SignBlockEntity;
+import net.minecraft.world.level.block.entity.SignText;
 import net.minecraft.world.level.block.state.BlockState;
 
 final class LivingPresence implements Facing {
@@ -101,6 +105,9 @@ final class LivingPresence implements Facing {
 
     private final Map<UUID, Mood> moods = new LinkedHashMap<>();
     private final HousingRooms rooms = new HousingRooms();
+    private record Nameplate(List<String> lines, Set<WorldPos> beds) { }
+    private final Map<WorldPos, Nameplate> nameplates = new LinkedHashMap<>();
+    private final Set<WorldPos> editedSigns = new LinkedHashSet<>();
     private final ColonyPets pets;
     private final Leisure leisure;
     private final Dining dining;
@@ -147,7 +154,141 @@ final class LivingPresence implements Facing {
         leisure.retain(belonging);
         hunger.retain(belonging);
         tiredness.retain(belonging);
+        nameplates(server);
         write();
+    }
+
+    private void nameplates(MinecraftServer server) {
+        Map<ServerLevel, Map<HousingRooms.Cached, Set<BlockPos>>> signs = new LinkedHashMap<>();
+        for (ColonyView view : colony.views(server)) { signs.put(view.level(), rooms.signsOf(view.level())); }
+        // A sign broken and placed again is a new sign, not the one a player edited.
+        unwritten |= editedSigns.removeIf(at -> at.level(server)
+            .filter(level -> level.isLoaded(at.block(level)))
+            .filter(level -> !(level.getBlockEntity(at.block(level)) instanceof SignBlockEntity)).isPresent());
+        for (WorldPos at : List.copyOf(nameplates.keySet())) {
+            Optional<ServerLevel> where = at.level(server);
+            if (where.isEmpty() || !where.get().isLoaded(at.block(where.get()))) { continue; }
+            ServerLevel level = where.get();
+            Nameplate plate = nameplates.get(at);
+            if (!(level.getBlockEntity(at.block(level)) instanceof SignBlockEntity sign)) {
+                nameplates.remove(at);
+                unwritten = true;
+            } else if (!matches(level, sign, plate.lines())) {
+                nameplates.remove(at);
+                editedSigns.add(at);
+                unwritten = true;
+            } else if (plate.beds().stream().noneMatch(bed -> beds.sleeperOf(bed).isPresent())
+                    || misplaced(level, at, plate, signs.getOrDefault(level, Map.of()))) {
+                lettering(level, sign, List.of());
+                nameplates.remove(at);
+                unwritten = true;
+            }
+        }
+        Set<WorldPos> used = new LinkedHashSet<>();
+        for (var in : signs.entrySet()) {
+            ServerLevel level = in.getKey();
+            for (var owned : in.getValue().entrySet()) {
+                HousingRooms.Cached room = owned.getKey();
+                if (!level.isLoaded(room.anchor())) { continue; }
+                Set<WorldPos> members = new LinkedHashSet<>();
+                List<Component> names = new ArrayList<>();
+                boolean resolved = true;
+                for (BlockPos bed : room.beds().stream().sorted().toList()) {
+                    WorldPos member = WorldPos.of(level, bed);
+                    members.add(member);
+                    Optional<UUID> sleeper = beds.sleeperOf(member);
+                    if (sleeper.isEmpty()) { continue; }
+                    Entity found = level.getEntity(sleeper.get());
+                    if (found == null || !level.isLoaded(bed)) {
+                        resolved = false;
+                    } else {
+                        names.add(found.getDisplayName());
+                    }
+                }
+                if (!resolved || names.isEmpty()) { continue; }
+                boolean waiting = nameplates.entrySet().stream().anyMatch(entry -> entry.getKey().in(level)
+                    && !level.isLoaded(entry.getKey().block(level))
+                    && entry.getValue().beds().stream().anyMatch(members::contains));
+                if (waiting) { continue; }
+                names.sort(Comparator.comparing(Component::getString));
+                List<WorldPos> candidates = owned.getValue().stream()
+                    .sorted(Comparator.<BlockPos>comparingDouble(at -> at.distSqr(room.anchor()))
+                        .thenComparing(Comparator.naturalOrder()))
+                    .map(at -> WorldPos.of(level, at))
+                    .filter(at -> !used.contains(at) && !editedSigns.contains(at)).toList();
+                Optional<WorldPos> chosen = candidates.stream().filter(at -> nameplates.containsKey(at)
+                    && nameplates.get(at).beds().stream().anyMatch(members::contains)).findFirst();
+                if (chosen.isEmpty()) {
+                    chosen = candidates.stream().filter(at -> !nameplates.containsKey(at))
+                        .filter(at -> level.isLoaded(at.block(level)))
+                        .filter(at -> level.getBlockEntity(at.block(level)) instanceof SignBlockEntity)
+                        .filter(at -> empty((SignBlockEntity) level.getBlockEntity(at.block(level)))).findFirst();
+                }
+                if (chosen.isEmpty()) { continue; }
+                WorldPos at = chosen.get();
+                if (!level.isLoaded(at.block(level))) { continue; }
+                used.add(at);
+                List<String> lines = new ArrayList<>();
+                for (int line = 0; line < 8; line++) {
+                    Component name = line < names.size() ? names.get(line) : Component.empty();
+                    lines.add(Component.Serializer.toJson(name, level.registryAccess()));
+                }
+                Nameplate plate = new Nameplate(List.copyOf(lines), Set.copyOf(members));
+                if (!plate.equals(nameplates.get(at))) {
+                    lettering(level, (SignBlockEntity) level.getBlockEntity(at.block(level)), lines);
+                    nameplates.put(at, plate);
+                    unwritten = true;
+                }
+            }
+        }
+    }
+
+    private static boolean misplaced(ServerLevel level, WorldPos at, Nameplate plate,
+                                      Map<HousingRooms.Cached, Set<BlockPos>> signs) {
+        boolean surveyed = false;
+        for (var entry : signs.entrySet()) {
+            if (entry.getKey().beds().stream().map(bed -> WorldPos.of(level, bed))
+                    .noneMatch(plate.beds()::contains)) { continue; }
+            surveyed = true;
+            if (entry.getValue().contains(at.block(level))) { return false; }
+        }
+        return surveyed;
+    }
+
+    private static boolean empty(SignBlockEntity sign) {
+        for (boolean front : List.of(true, false)) {
+            for (int line = 0; line < 4; line++) {
+                if (!sign.getText(front).getMessage(line, false).getString().isBlank()
+                        || !sign.getText(front).getMessage(line, true).getString().isBlank()) { return false; }
+            }
+        }
+        return true;
+    }
+
+    private static boolean matches(ServerLevel level, SignBlockEntity sign, List<String> lines) {
+        for (int line = 0; line < 8; line++) {
+            SignText text = sign.getText(line < 4);
+            for (boolean filtered : List.of(false, true)) {
+                String current = Component.Serializer.toJson(text.getMessage(line % 4, filtered), level.registryAccess());
+                if (!current.equals(lines.get(line))) { return false; }
+            }
+        }
+        return true;
+    }
+
+    private static void lettering(ServerLevel level, SignBlockEntity sign, List<String> lines) {
+        for (boolean front : List.of(true, false)) {
+            SignText text = sign.getText(front);
+            for (int line = 0; line < 4; line++) {
+                int index = front ? line : line + 4;
+                Component name = index < lines.size()
+                    ? Component.Serializer.fromJson(lines.get(index), level.registryAccess()) : Component.empty();
+                text = text.setMessage(line, name);
+            }
+            sign.setText(text, front);
+        }
+        sign.setChanged();
+        level.sendBlockUpdated(sign.getBlockPos(), sign.getBlockState(), sign.getBlockState(), Block.UPDATE_CLIENTS);
     }
 
     public void tick(MinecraftServer server) {
@@ -440,6 +581,8 @@ final class LivingPresence implements Facing {
             bellies.clear();
             wear.clear();
             moods.clear();
+            nameplates.clear();
+            editedSigns.clear();
             leisure.clear();
             pets.clear();
             hunger.forget();
@@ -630,6 +773,11 @@ final class LivingPresence implements Facing {
     private CompoundTag save() {
         return Writer.of(beds.save())
             .blob("pets", pets.save())
+            .children("nameplates", nameplates.entrySet(), entry -> Writer.of()
+                .blob("sign", entry.getKey().save())
+                .children("lines", entry.getValue().lines(), line -> Writer.of().string("text", line).tag())
+                .children("beds", entry.getValue().beds(), WorldPos::save).tag())
+            .children("edited_signs", editedSigns, WorldPos::save)
             .children("hunger", bellies.entrySet(),
                 entry -> stamped(entry.getKey(), entry.getValue().save()))
             .children("rest", wear.entrySet(),
@@ -645,6 +793,16 @@ final class LivingPresence implements Facing {
     private void load(Reader reader) {
         beds.load(reader);
         reader.child("pets").ifPresent(pets::load);
+        for (Reader saved : reader.children("nameplates")) {
+            List<String> lines = saved.children("lines").stream().map(line -> line.string("text").orElse("")).toList();
+            Set<WorldPos> members = new LinkedHashSet<>();
+            for (Reader bed : saved.children("beds")) { WorldPos.load(bed).ifPresent(members::add); }
+            if (lines.size() == 8) {
+                saved.child("sign").flatMap(WorldPos::load)
+                    .ifPresent(at -> nameplates.put(at, new Nameplate(lines, Set.copyOf(members))));
+            }
+        }
+        for (Reader saved : reader.children("edited_signs")) { WorldPos.load(saved).ifPresent(editedSigns::add); }
         for (Reader saved : reader.children("moods")) {
             saved.uuid("resident").ifPresent(id -> { Mood mood = new Mood(); mood.load(saved); moods.put(id, mood); });
         }
