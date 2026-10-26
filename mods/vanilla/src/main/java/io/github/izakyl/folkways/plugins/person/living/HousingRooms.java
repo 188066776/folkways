@@ -48,7 +48,8 @@ final class HousingRooms {
 
     private record Cached(Room room, Set<BlockPos> cells, long checked) { }
     private final Map<ResourceKey<Level>, Map<BlockPos, Cached>> rooms = new HashMap<>();
-    private final Map<ResourceKey<Level>, Map<BlockPos, Grade>> interiors = new HashMap<>();
+    // A cell can belong to more than one room, e.g. a barrel in a shared partition wall; each room counts it.
+    private final Map<ResourceKey<Level>, Map<BlockPos, Set<Cached>>> interiors = new HashMap<>();
     private Survey survey;
     private static final Room PENDING = new Room(Grade.PENDING, 0, 0, 0, false, false, false, "pending");
 
@@ -73,18 +74,30 @@ final class HousingRooms {
         var inside = interiors.computeIfAbsent(survey.level.dimension(), ignored -> new HashMap<>());
         Cached previous = in.get(survey.anchor);
         if (previous != null) {
-            previous.cells().forEach(inside::remove);
+            leave(inside, previous);
             in.entrySet().removeIf(entry -> entry.getValue() == previous);
         }
         for (BlockPos bed : survey.beds) { in.put(bed, result); }
         in.put(survey.anchor, result);
-        result.cells().forEach(at -> inside.put(at, result.room().grade()));
+        enter(inside, result);
         survey = null;
     }
 
     boolean comfortableAt(ServerLevel level, BlockPos at) {
-        Grade grade = interiors.getOrDefault(level.dimension(), Map.of()).get(at);
-        return grade != null && grade.ordinal() >= Grade.COMFORTABLE.ordinal();
+        Set<Cached> by = interiors.getOrDefault(level.dimension(), Map.of()).getOrDefault(at, Set.of());
+        return by.stream().anyMatch(cached -> cached.room().grade().ordinal() >= Grade.COMFORTABLE.ordinal());
+    }
+
+    private static void enter(Map<BlockPos, Set<Cached>> inside, Cached cached) {
+        cached.cells().forEach(at -> inside.computeIfAbsent(at, ignored -> Collections.newSetFromMap(new IdentityHashMap<>()))
+            .add(cached));
+    }
+
+    private static void leave(Map<BlockPos, Set<Cached>> inside, Cached cached) {
+        cached.cells().forEach(at -> inside.computeIfPresent(at, (ignored, by) -> {
+            by.remove(cached);
+            return by.isEmpty() ? null : by;
+        }));
     }
 
     void retain(ServerLevel level, Set<BlockPos> registered) {
@@ -92,7 +105,9 @@ final class HousingRooms {
         if (in != null && in.keySet().retainAll(registered)) {
             var inside = interiors.computeIfAbsent(level.dimension(), ignored -> new HashMap<>());
             inside.clear();
-            in.values().forEach(cached -> cached.cells().forEach(at -> inside.put(at, cached.room().grade())));
+            Set<Cached> kept = Collections.newSetFromMap(new IdentityHashMap<>());
+            kept.addAll(in.values());
+            kept.forEach(cached -> enter(inside, cached));
         }
     }
 
@@ -102,7 +117,7 @@ final class HousingRooms {
         if (in != null) {
             Set<Cached> invalid = Collections.newSetFromMap(new IdentityHashMap<>());
             in.forEach((bed, cached) -> { if (near(bed, at)) { invalid.add(cached); } });
-            if (inside != null) { invalid.forEach(cached -> cached.cells().forEach(inside::remove)); }
+            if (inside != null) { invalid.forEach(cached -> leave(inside, cached)); }
             in.entrySet().removeIf(entry -> invalid.contains(entry.getValue()));
         }
         if (survey != null && survey.level == level && near(survey.anchor, at)) {
@@ -157,6 +172,11 @@ final class HousingRooms {
                 }
                 collect(at, state);
                 boolean furniture = furniture(state) || state.getBlock() instanceof BedBlock;
+                if (furniture && Footing.nearlyFullHeight(state.getCollisionShape(level, at))) {
+                    // Full-height furniture counts as room area but forms a boundary like a wall.
+                    if (Footing.holdsAbove(level, at.below())) { cells.add(at); }
+                    continue;
+                }
                 if (!furniture && !state.getCollisionShape(level, at).isEmpty()) { continue; }
                 if (!furniture && !level.getBlockState(at.above()).getCollisionShape(level, at.above()).isEmpty()) { continue; }
                 if (!Footing.holdsAbove(level, at.below())) {

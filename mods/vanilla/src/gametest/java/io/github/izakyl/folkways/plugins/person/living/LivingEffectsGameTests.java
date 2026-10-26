@@ -3,6 +3,7 @@ package io.github.izakyl.folkways.plugins.person.living;
 import io.github.izakyl.folkways.FolkwaysMod;
 import io.github.izakyl.folkways.plugins.FolkwaysVanillaMod;
 import io.github.izakyl.folkways.base.persist.Reader;
+import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.gametest.framework.GameTest;
@@ -126,6 +127,8 @@ public final class LivingEffectsGameTests {
             for (int i = 0; i < 40; i++) { rooms.tick(); }
             HousingRooms.Room room = rooms.get(level, bed);
             helper.assertTrue(room.grade() == HousingRooms.Grade.PRIVATE, "single furnished enclosed bedroom: " + room);
+            helper.assertValueEqual(room.area(), 16, "the chest still counts toward bedroom area");
+            helper.assertTrue(rooms.comfortableAt(level, origin.offset(3, 0, 3)), "the chest receives the interior grade");
             // Opening the door does not merge this room with the outside.
             level.setBlockAndUpdate(door, level.getBlockState(door).setValue(DoorBlock.OPEN, true));
             rooms.changed(level, door); rooms.get(level, bed);
@@ -142,6 +145,60 @@ public final class LivingEffectsGameTests {
             rooms.changed(level, roof); rooms.get(level, bed);
             for (int i = 0; i < 40; i++) { rooms.tick(); }
             helper.assertTrue(rooms.get(level, bed).grade() == HousingRooms.Grade.EXPOSED, "roof gap removes bedroom benefit");
+            helper.succeed();
+        });
+    }
+
+    @GameTest(template = "empty")
+    public static void stackedBarrelsSeparateBedroomsAndCountAsArea(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        BlockPos origin = helper.absolutePos(new BlockPos(2, 2, 2));
+        for (int x = 0; x <= 10; x++) {
+            for (int z = 0; z <= 5; z++) {
+                level.setBlockAndUpdate(origin.offset(x, -1, z), Blocks.STONE.defaultBlockState());
+                level.setBlockAndUpdate(origin.offset(x, 3, z), Blocks.GLOWSTONE.defaultBlockState());
+                for (int y = 0; y < 3; y++) {
+                    level.setBlockAndUpdate(origin.offset(x, y, z), (x == 0 || x == 5 || x == 10 || z == 0 || z == 5)
+                        ? Blocks.STONE.defaultBlockState() : Blocks.AIR.defaultBlockState());
+                }
+            }
+        }
+        BlockPos bed = origin.offset(1, 0, 1);
+        for (int x : new int[] {1, 6}) {
+            BlockPos foot = origin.offset(x, 0, 1);
+            level.setBlockAndUpdate(foot, Blocks.RED_BED.defaultBlockState()
+                .setValue(BedBlock.FACING, Direction.SOUTH).setValue(BedBlock.PART, BedPart.FOOT));
+            level.setBlockAndUpdate(foot.south(), Blocks.RED_BED.defaultBlockState()
+                .setValue(BedBlock.FACING, Direction.SOUTH).setValue(BedBlock.PART, BedPart.HEAD));
+            BlockPos door = origin.offset(x + 1, 0, 0);
+            level.setBlockAndUpdate(door.north().below(), Blocks.STONE.defaultBlockState());
+            level.setBlockAndUpdate(door, Blocks.OAK_DOOR.defaultBlockState()
+                .setValue(DoorBlock.HALF, DoubleBlockHalf.LOWER));
+            level.setBlockAndUpdate(door.above(), Blocks.OAK_DOOR.defaultBlockState()
+                .setValue(DoorBlock.HALF, DoubleBlockHalf.UPPER));
+            level.setBlockAndUpdate(origin.offset(x + 2, 0, 4), Blocks.RED_CARPET.defaultBlockState());
+        }
+        BlockPos otherBed = origin.offset(6, 0, 1);
+        BlockPos barrel = origin.offset(5, 0, 2);
+        level.setBlockAndUpdate(barrel, Blocks.BARREL.defaultBlockState());
+        level.setBlockAndUpdate(barrel.above(), Blocks.BARREL.defaultBlockState());
+        HousingRooms rooms = new HousingRooms();
+        rooms.get(level, bed);
+        helper.runAfterDelay(4, () -> {
+            for (int i = 0; i < 40; i++) { rooms.tick(); }
+            HousingRooms.Room room = rooms.get(level, bed);
+            helper.assertValueEqual(room.beds(), 1, "barrel partition keeps the neighbouring bed separate");
+            helper.assertTrue(room.grade() != HousingRooms.Grade.EXPOSED, "enclosed lit bedroom: " + room);
+            helper.assertValueEqual(room.area(), 4 * 4 + 1, "sixteen interior cells plus the barrel standing on the floor");
+            helper.assertTrue(room.grade() == HousingRooms.Grade.COMFORTABLE, "carpet and barrel furnish the room: " + room);
+            rooms.get(level, otherBed);
+            for (int i = 0; i < 40; i++) { rooms.tick(); }
+            helper.assertTrue(rooms.get(level, otherBed).grade() == HousingRooms.Grade.COMFORTABLE, "the other room is surveyed");
+            // Dropping one room leaves the shared barrel to the other.
+            rooms.retain(level, Set.of(otherBed));
+            helper.assertTrue(rooms.comfortableAt(level, barrel), "both rooms share the partition barrel");
+            rooms.retain(level, Set.of());
+            helper.assertFalse(rooms.comfortableAt(level, barrel), "the barrel leaves with the last room");
             helper.succeed();
         });
     }

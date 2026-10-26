@@ -55,11 +55,11 @@ public final class Footing {
     // top of the block finds nothing there, yet whoever stands on it has their feet in the cell above, as on a full
     // block. Without this, a cell of farmland with farmland all round has nowhere to stand to sow it.
     private static boolean nearlyFull(VoxelShape shape) {
-        if (shape.isEmpty()) {
-            return false;
-        }
-        double top = shape.max(Direction.Axis.Y);
-        return top >= NEARLY_FULL && top <= 1.0D;
+        return nearlyFullHeight(shape) && shape.max(Direction.Axis.Y) <= 1.0D;
+    }
+
+    public static boolean nearlyFullHeight(VoxelShape shape) {
+        return !shape.isEmpty() && shape.max(Direction.Axis.Y) >= NEARLY_FULL;
     }
 
     public static boolean isPassable(BlockGetter blocks, BlockPos pos) {
