@@ -7,9 +7,9 @@ import net.minecraft.core.Direction;
 // The cells a field covers, with the box around them for where a cell sits in its rows.
 record Plot(Set<BlockPos> cells, int minX, int minZ, int width, int depth) {
 
-    // A crop that stands in the way is sown in pairs of rows with a row left bare between them, so every stalk is
-    // in reach from somewhere a body can walk out of.
-    private static final int AISLE_EVERY = 3;
+    // A crop that stands in the way is sown in single rows with a row left bare between them, so every stalk
+    // borders an aisle a body can walk out by.
+    private static final int AISLE_EVERY = 2;
     private static final int AISLE = 1;
 
     static Plot of(Set<BlockPos> cells) {

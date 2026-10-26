@@ -11,8 +11,11 @@ import io.github.izakyl.folkways.core.api.work.Workload;
 import io.github.izakyl.folkways.core.api.work.Xp;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
@@ -67,7 +70,8 @@ final class HarvestNode extends FarmNode {
         boolean replants = who.effects().has(FarmingContent.REPLANTS);
         boolean cut = false;
         int broken = 0;
-        for (BlockPos cell : tending.neighbors(job, (int) who.effects().value(FarmingContent.CHAIN))) {
+        List<BlockPos> cells = tending.neighbors(job, (int) who.effects().value(FarmingContent.CHAIN));
+        for (BlockPos cell : currentColumn(level, cells)) {
             if (!level.isLoaded(cell)) {
                 continue;
             }
@@ -105,6 +109,24 @@ final class HarvestNode extends FarmNode {
         }
         return new Outcome.Done(List.copyOf(heard), List.copyOf(yielded),
             Optional.of(new Xp(FarmingContent.trade(), Math.max(1, broken))));
+    }
+
+    // A stalk can grow while the worker comes to it; the new top must come away before anything below it.
+    private List<BlockPos> currentColumn(ServerLevel level, List<BlockPos> cells) {
+        if (!(crop.habit() instanceof Habit.Cane) || crop.behavior().isPresent()) {
+            return cells;
+        }
+        Set<BlockPos> column = new LinkedHashSet<>(cells);
+        for (BlockPos cell : cells) {
+            BlockPos above = cell.above();
+            while (level.isLoaded(above) && crop.grows(level.getBlockState(above))) {
+                if (!column.add(above)) {
+                    break;
+                }
+                above = above.above();
+            }
+        }
+        return column.stream().sorted(Comparator.comparingInt((BlockPos cell) -> cell.getY()).reversed()).toList();
     }
 
     private Optional<WorkNoise> replant(ServerLevel level, Worker who, BlockPos cell, List<ItemStack> taken) {

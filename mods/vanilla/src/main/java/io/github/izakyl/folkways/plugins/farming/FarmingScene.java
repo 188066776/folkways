@@ -123,7 +123,9 @@ public final class FarmingScene {
         resident.hold(scene, new ItemStack(Items.SUGAR_CANE, 2));
         scene.overlay().showOutline(PonderPalette.BLUE, caneBase, util.select().position(caneBase), 90);
         scene.overlay().showText(90)
-            .text("Sugar cane is cut once it stands three tall, bamboo at four, and only down to the bottom stalk. What stays keeps growing on its own. Bamboo is sown two rows at a time with an aisle left between, so nobody is walled in.")
+            .text("Sugar cane is cut once it stands three tall, bamboo at four, and only down to the bottom stalk. "
+                + "What stays keeps growing on its own. Bamboo is sown in single rows with an aisle left between, "
+                + "so nobody is walled in.")
             .pointAt(util.vector().topOf(caneBase))
             .placeNearTarget()
             .attachKeyFrame();

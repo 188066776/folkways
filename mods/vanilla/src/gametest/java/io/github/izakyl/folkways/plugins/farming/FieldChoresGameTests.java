@@ -6,10 +6,14 @@ import io.github.izakyl.folkways.core.api.colony.Colony;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
 import io.github.izakyl.folkways.core.api.work.Grown;
 import io.github.izakyl.folkways.core.api.work.Node;
+import io.github.izakyl.folkways.core.api.work.Outcome;
+import io.github.izakyl.folkways.core.api.work.Worker;
+import io.github.izakyl.folkways.effect.Effects;
 import io.github.izakyl.folkways.front.api.PastDay;
 import io.github.izakyl.folkways.front.api.Settings;
 import io.github.izakyl.folkways.front.api.ZoneView;
 import io.github.izakyl.folkways.plugins.FolkwaysVanillaMod;
+import io.github.izakyl.folkways.plugins.person.PersonBody;
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -24,6 +28,9 @@ import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -33,6 +40,7 @@ import net.minecraft.world.level.block.SnowLayerBlock;
 import net.minecraft.world.level.block.SnowyDirtBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
+import net.minecraft.world.phys.AABB;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.event.RegisterGameTestsEvent;
@@ -221,7 +229,7 @@ public final class FieldChoresGameTests {
         helper.succeed();
     }
 
-    // Bamboo is a stalk nobody walks through. A plot of it is sown two rows at a time with an aisle between, and
+    // Bamboo is a stalk nobody walks through. A plot of it is sown in single rows with an aisle between, and
     // never in the cell the sower stands in: a plot sown wall to wall shut in whoever stood in it.
     @GameTest(template = "empty", timeoutTicks = 100)
     public static void bambooIsSownWithAislesToWalkOutBy(GameTestHelper helper) throws ReflectiveOperationException {
@@ -245,9 +253,11 @@ public final class FieldChoresGameTests {
             }
         }
         for (BlockPos cell : cells) {
-            boolean aisle = (cell.getX() - origin.getX()) % 3 == 1;
+            boolean aisle = (cell.getX() - origin.getX()) % 2 == 1;
             helper.assertTrue(sown.contains(cell) != aisle,
                 (aisle ? "an aisle is left bare: " : "a row beside an aisle is sown: ") + cell);
+            helper.assertFalse(sown.containsAll(List.of(cell, cell.east(), cell.south(), cell.east().south())),
+                "no square of four stalks can shut someone in: " + cell);
         }
 
         Set<BlockPos> sugar = new LinkedHashSet<>();
@@ -260,6 +270,63 @@ public final class FieldChoresGameTests {
         Set<BlockPos> cane = cellsOf(sweep(level, zone(level, sugar), sugar, "sugar_cane", 2));
         helper.assertTrue(cane.equals(sugar), "cane is walked through and wants no aisle, got " + cane);
         helper.succeed();
+    }
+
+    // A stalk that grew since the field was surveyed still comes away whole, leaving only its foot to grow again.
+    @GameTest(template = "empty", timeoutTicks = 20)
+    public static void bambooThatGrewAfterPlanningIsTakenToTheTop(GameTestHelper helper)
+            throws ReflectiveOperationException {
+        ServerLevel level = helper.getLevel();
+        BlockPos ground = helper.absolutePos(new BlockPos(3, 1, 3));
+        for (BlockPos cell : BlockPos.betweenClosed(ground.offset(-1, 0, -1), ground.offset(1, 0, 1))) {
+            level.setBlockAndUpdate(cell, Blocks.DIRT.defaultBlockState());
+        }
+        for (int up = 1; up <= 4; up++) {
+            level.setBlockAndUpdate(ground.above(up), Blocks.BAMBOO.defaultBlockState());
+        }
+        Set<BlockPos> cells = Set.of(ground);
+        List<Job> jobs = jobsOf(sweep(level, zone(level, cells), cells, "bamboo", 1));
+        helper.assertTrue(jobs.size() == 1, "the stalk is one harvest job: " + jobs);
+        Job job = jobs.getFirst();
+        helper.assertTrue(job.cells().equals(List.of(ground.above(4), ground.above(3), ground.above(2))),
+            "the planned cut keeps the base and starts at the top: " + job.cells());
+        Crop crop = Crop.of(level, ground, ResourceLocation.withDefaultNamespace("bamboo")).orElseThrow();
+        FieldChores chores = new FieldChores("harvest", HarvestNode::new, () -> { }, new PastDay());
+        chores.settle(crop, jobs, cells);
+        FarmNode.Chore chore = new FarmNode.Chore(UUID.randomUUID(), crop, job, chores);
+        chores.planned(chore);
+        HarvestNode node = new HarvestNode(chore);
+        for (int up = 5; up <= 6; up++) {
+            level.setBlockAndUpdate(ground.above(up), Blocks.BAMBOO.defaultBlockState());
+        }
+        var body = PersonBody.RESIDENT.get().create(level);
+        try {
+            Worker worker = (Worker) Proxy.newProxyInstance(Worker.class.getClassLoader(),
+                new Class<?>[] {Worker.class}, (proxy, method, args) -> switch (method.getName()) {
+                    case "body" -> body.mob();
+                    case "effects" -> Effects.NONE;
+                    default -> throw new AssertionError(method.getName());
+                });
+            Outcome outcome = node.work(level, worker, job);
+            helper.assertTrue(outcome instanceof Outcome.Done, "the stalk is harvested");
+            Outcome.Done done = (Outcome.Done) outcome;
+            int bamboo = done.made().stream().filter(stack -> stack.is(Items.BAMBOO))
+                .mapToInt(ItemStack::getCount).sum();
+            helper.assertTrue(bamboo == 5, "all five cut segments go into the harvest, got " + bamboo);
+            helper.assertTrue(done.xp().orElseThrow().amount() == 5, "each cut segment counts toward experience");
+        } finally {
+            body.mob().discard();
+        }
+        helper.runAfterDelay(5, () -> {
+            helper.assertTrue(level.getBlockState(ground.above()).is(Blocks.BAMBOO), "the base keeps growing");
+            for (int up = 2; up <= 6; up++) {
+                helper.assertTrue(level.getBlockState(ground.above(up)).isAir(), "nothing remains above the base");
+            }
+            helper.assertTrue(level.getEntitiesOfClass(ItemEntity.class,
+                new AABB(ground).expandTowards(0, 7, 0).inflate(2), item -> item.getItem().is(Items.BAMBOO)).isEmpty(),
+                "no bamboo falls onto the ground");
+            helper.succeed();
+        });
     }
 
     @GameTest(template = "empty", timeoutTicks = 20)

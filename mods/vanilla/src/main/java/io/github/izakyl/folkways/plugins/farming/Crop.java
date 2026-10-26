@@ -224,8 +224,8 @@ record Crop(ResourceLocation id, Block block, Set<Block> standing, Item seed, It
         return (standing0.isAir() || standing0.canBeReplaced()) && sown().canSurvive(level, base);
     }
 
-    // Bamboo, unlike cane or a sapling, is a stalk nobody walks through: a field of it sown wall to wall shut in
-    // whoever stood in it.
+    // Bamboo, unlike cane or a sapling, is a stalk nobody walks through: single rows with an aisle between
+    // leave whoever stands in the field a way out.
     boolean inTheWay(LevelReader level, BlockPos base) {
         return !sown().getCollisionShape(level, base).isEmpty();
     }
