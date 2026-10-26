@@ -5,6 +5,7 @@ import { clickTab } from "../shared/ui/colony-pages";
 import { launchPair, type E2EPair } from "../shared/harness/pair";
 import { ensureOut, reportPath, shotPath, tracePath } from "../shared/harness/out-paths";
 import { newRunId } from "../shared/harness/run-id";
+import { waitForResourceReload } from "../shared/harness/resource-reload";
 import { BUDGET } from "../shared/harness/budgets";
 import { frames } from "../shared/harness/bw-helpers";
 import { writeFileSync } from "node:fs";
@@ -117,10 +118,7 @@ test("folded navigation replaces the page at Auto and 4x and restores both colum
     await server.run(SETUP, {});
     await tick.sprint(server, 15);
     await client.run(LANGUAGE, {});
-    for (let attempt = 0; attempt < 120; attempt++) {
-      if (!(await client.run(DISPLAY, {})).loading) break;
-      await frames(client, 5);
-    }
+    await waitForResourceReload(client);
     expect((await client.run(DISPLAY, {})).language).toBe("zh_cn");
     await player.useItem(client);
     await screen.waitFor(client, "ModularUIContainerScreen", { timeoutMs: 15000 });

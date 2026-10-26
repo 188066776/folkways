@@ -9,6 +9,7 @@ import com.lowdragmc.lowdraglib2.gui.ui.elements.Button;
 import com.lowdragmc.lowdraglib2.gui.ui.elements.Label;
 import com.lowdragmc.lowdraglib2.gui.ui.elements.TextField;
 import com.lowdragmc.lowdraglib2.gui.ui.elements.Toggle;
+import com.lowdragmc.lowdraglib2.gui.ui.event.UIEvents;
 import io.github.izakyl.folkways.core.api.colony.Colony;
 import io.github.izakyl.folkways.front.api.ui.ChoicePicker;
 import io.github.izakyl.folkways.front.api.ui.Draw;
@@ -18,6 +19,8 @@ import io.github.izakyl.folkways.front.api.ui.Tokens;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.BiConsumer;
+import java.util.function.Supplier;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -29,6 +32,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import org.lwjgl.glfw.GLFW;
 
 /** Server-authorized controls for composting and its dynamically discovered seed reserves. */
 public final class CompostPage implements Draw {
@@ -39,8 +43,8 @@ public final class CompostPage implements Draw {
     private final List<UIElement> icons = new ArrayList<>();
     private final List<Label> names = new ArrayList<>();
     private final String[] drawn = new String[ROW_SLOTS];
-    private final String[] echoed = new String[ROW_SLOTS];
-    private final List<TextField> numbers = new ArrayList<>();
+    private final List<ReserveInput> numbers = new ArrayList<>();
+    private ReserveInput defaultCount;
     private final List<Label> sources = new ArrayList<>();
     private final Label counter = Rows.value(Component.empty());
     private final Label empty = Rows.note(Component.translatable("folkways.settings.compost.empty"));
@@ -52,11 +56,9 @@ public final class CompostPage implements Draw {
         enabled.bind(DataBindingBuilder.bool(() -> colony(player).map(CompostSettings::enabled).orElse(false),
             on -> colony(player).ifPresent(colony -> CompostSettings.enabled(colony, on))).build());
         Tokens.name(enabled, "folkways.settings.compost.enabled");
-        TextField defaultCount = number();
-        defaultCount.bind(DataBindingBuilder.string(
-            () -> Integer.toString(colony(player).map(CompostSettings::defaultReserve).orElse(CompostSettings.DEFAULT_RESERVE)),
-            typed -> parse(typed).ifPresent(count -> colony(player).ifPresent(colony -> CompostSettings.defaultReserve(colony, count)))).build());
-        Tokens.name(defaultCount, "folkways.settings.compost.default_reserve");
+        defaultCount = new ReserveInput(() -> "default", (key, count) ->
+            colony(player).ifPresent(colony -> CompostSettings.defaultReserve(colony, count)));
+        Tokens.name(defaultCount.field, "folkways.settings.compost.default_reserve");
         UIElement table = Rows.table();
         ChoicePicker.Asking resets = new ChoicePicker.Asking(table, (key, ignored) ->
             colony(player).ifPresent(colony -> window.stream()
@@ -67,28 +69,21 @@ public final class CompostPage implements Draw {
             UIElement icon = Rows.icon(ItemStack.EMPTY);
             Label name = Rows.name(Component.empty());
             Label source = Rows.value(Component.empty());
-            TextField count = number();
-            SimpleBinding<String> binding = DataBindingBuilder.stringC2S(sealed -> {
-                String[] parts = sealed.split("\\|", 3);
-                if (parts.length != 3 || parts[1].equals(parts[2])) return;
-                item(index).filter(item -> BuiltInRegistries.ITEM.getKey(item).toString().equals(parts[0]))
-                    .ifPresent(item -> parse(parts[2]).ifPresent(value -> colony(player)
-                        .ifPresent(colony -> {
-                            if (value != CompostSettings.reserve(colony, item)) CompostSettings.reserve(colony, item, value);
-                        })));
-            }).build();
-            binding.setRemoteDataSource(IDataSource.of(ignored -> { },
-                () -> (drawn[index] == null ? "" : drawn[index]) + "|"
-                    + (echoed[index] == null ? "" : echoed[index]) + "|" + count.getValue()));
-            count.addSyncValue(binding.getSyncValue());
-            Tokens.name(count, "folkways.settings.compost.reserve." + slot);
+            ReserveInput count = new ReserveInput(() -> drawn[index], (key, value) ->
+                item(index).filter(item -> BuiltInRegistries.ITEM.getKey(item).toString().equals(key))
+                    .ifPresent(item -> colony(player).ifPresent(colony -> {
+                        if (value != CompostSettings.reserve(colony, item)) {
+                            CompostSettings.reserve(colony, item, value);
+                        }
+                    })));
+            Tokens.name(count.field, "folkways.settings.compost.reserve." + slot);
             Button reset = new Button().setText(Component.translatable("folkways.settings.compost.use_default"))
                 .setOnClick(event -> {
                     if (drawn[index] != null) resets.ask(drawn[index], ResourceLocation.withDefaultNamespace("air"));
                 });
             reset.layout(layout -> layout.flexShrink(0));
             Tokens.name(reset, "folkways.settings.compost.reset." + slot);
-            UIElement row = Rows.row().addChildren(icon, name, source, count, reset);
+            UIElement row = Rows.row().addChildren(icon, name, source, count.field, reset);
             slots.add(row);
             icons.add(icon);
             names.add(name);
@@ -102,7 +97,7 @@ public final class CompostPage implements Draw {
             Rows.row().addChildren(Rows.icon(Items.COMPOSTER.getDefaultInstance()),
                 Rows.name(Component.translatable("folkways.settings.compost.enabled")), enabled),
             Rows.row().addChildren(Rows.icon(Items.WHEAT_SEEDS.getDefaultInstance()),
-                Rows.name(Component.translatable("folkways.settings.compost.default_reserve")), defaultCount),
+                Rows.name(Component.translatable("folkways.settings.compost.default_reserve")), defaultCount.field),
             Rows.strip().addChildren(Rows.name(Component.translatable("folkways.settings.compost.seeds")),
                 pager("<", -1), pager(">", 1), counter), scroll);
         Rows.fills(page);
@@ -139,6 +134,8 @@ public final class CompostPage implements Draw {
             rows.add(row);
         }
         tag.put("rows", rows);
+        tag.putInt("default", colony(player).map(CompostSettings::defaultReserve)
+            .orElse(CompostSettings.DEFAULT_RESERVE));
         tag.putInt("total", all.size());
         tag.putInt("page", offset / ROW_SLOTS + 1);
         tag.putInt("pages", Math.max(1, (all.size() + ROW_SLOTS - 1) / ROW_SLOTS));
@@ -147,20 +144,21 @@ public final class CompostPage implements Draw {
 
     private void fill(Tag value) {
         CompoundTag tag = value instanceof CompoundTag compound ? compound : new CompoundTag();
+        defaultCount.receive(Integer.toString(tag.getInt("default")));
         ListTag rows = tag.getList("rows", Tag.TAG_COMPOUND);
         counter.setText(Component.translatable("folkways.settings.compost.page", tag.getInt("page"), tag.getInt("pages")));
         empty.setDisplay(tag.getInt("total") == 0);
         for (int slot = 0; slot < ROW_SLOTS; slot++) {
             boolean shown = slot < rows.size();
             slots.get(slot).setDisplay(shown);
-            if (!shown) { drawn[slot] = null; echoed[slot] = null; continue; }
+            if (!shown) {
+                drawn[slot] = null;
+                continue;
+            }
             CompoundTag row = rows.getCompound(slot);
             String key = row.getString("item");
             String count = Integer.toString(row.getInt("count"));
-            if (!key.equals(drawn[slot]) || !count.equals(echoed[slot])) {
-                numbers.get(slot).setValue(count, false);
-                echoed[slot] = count;
-            }
+            numbers.get(slot).receive(count);
             drawn[slot] = key;
             ResourceLocation id = ResourceLocation.tryParse(row.getString("item"));
             Item item = id == null ? Items.AIR : BuiltInRegistries.ITEM.get(id);
@@ -185,6 +183,48 @@ public final class CompostPage implements Draw {
         field.setNumbersOnlyInt(0, CompostSettings.MAX_RESERVE);
         field.layout(layout -> layout.width(48).flexShrink(0));
         return field;
+    }
+
+    private static final class ReserveInput {
+        private final TextField field = number();
+        private String echoed = "";
+        private String editing;
+        private String sent = "";
+        private int sequence;
+
+        private ReserveInput(Supplier<String> key, BiConsumer<String, Integer> received) {
+            SimpleBinding<String> binding = DataBindingBuilder.stringC2S(sealed -> {
+                String[] parts = sealed.split("\\|", 3);
+                if (parts.length == 3 && !parts[1].isEmpty()) {
+                    parse(parts[2]).ifPresent(count -> received.accept(parts[1], count));
+                }
+            }).build();
+            binding.setRemoteDataSource(IDataSource.of(ignored -> { }, () -> sent));
+            field.addSyncValue(binding.getSyncValue());
+            field.addEventListener(UIEvents.FOCUS, event -> editing = key.get());
+            field.addEventListener(UIEvents.BLUR, event -> {
+                // Read the text, since LDLib2 keeps the last valid value when the editor is empty.
+                parse(field.getRawText()).ifPresent(count -> {
+                    if (editing != null && editing.equals(key.get()) && !Integer.toString(count).equals(echoed)) {
+                        sent = ++sequence + "|" + editing + "|" + count;
+                    }
+                });
+                field.setValue(echoed, false);
+            });
+            field.addEventListener(UIEvents.KEY_DOWN, event -> {
+                if (event.keyCode == GLFW.GLFW_KEY_ENTER || event.keyCode == GLFW.GLFW_KEY_KP_ENTER) {
+                    field.blur();
+                    event.stopPropagation();
+                }
+            });
+        }
+
+        private void receive(String value) {
+            echoed = value;
+            if (!field.isFocused()) {
+                field.setValue(value, false);
+            }
+        }
     }
 
     private static Optional<Integer> parse(String text) {

@@ -2,6 +2,7 @@ import { expect } from "@playwright/test";
 import { defineTask, javaTask, type MinecraftClient } from "@izakyl/blockwright-minecraft";
 import { readFileSync } from "node:fs";
 import { frames } from "../harness/bw-helpers";
+import { waitForResourceReload } from "../harness/resource-reload";
 
 export const PONDER_FOLDERS = defineTask<void, { id: string; scenes: string[] }[]>({
   name: "folkways.visual.ponder-folders", side: "client",
@@ -69,6 +70,7 @@ export function ponderCatalog(locale: string): Record<string, string> {
 
 export async function setVisualLanguage(client: MinecraftClient, locale: string) {
   await client.run(SET_LANGUAGE, { locale });
+  await waitForResourceReload(client);
   await expect.poll(() => client.run(LANGUAGE_READY), { timeout: 60_000 })
     .toBe(ponderCatalog(locale)["folkways.ponder.housing.header"]);
   await frames(client, 5);

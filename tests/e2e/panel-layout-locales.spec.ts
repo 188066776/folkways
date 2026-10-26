@@ -9,6 +9,7 @@ import { seededServer } from "../shared/harness/mod-settings";
 import { BUDGET } from "../shared/harness/budgets";
 import { frames, safeAction } from "../shared/harness/bw-helpers";
 import { newRunId } from "../shared/harness/run-id";
+import { waitForResourceReload } from "../shared/harness/resource-reload";
 import { writeFileSync } from "node:fs";
 
 // The visual suite lints every page, but in English on a wide interface. Players run Chinese, whose words do not
@@ -79,6 +80,7 @@ test("every colony page fits its words in each language on a large interface", a
 
     for (const code of LOCALES) {
       await client.run(LANGUAGE, { code });
+      await waitForResourceReload(client);
       await settle(client, code);
       await openColonyPanelViaBook(server, client, grounded.name, founding.standBlock);
       const probe = new LayoutProbe(client);

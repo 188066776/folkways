@@ -63,7 +63,8 @@ public final class ResidentWaterGameTests {
             WorldPos from = WorldPos.of(rig.level, rig.submergedStart);
             Roaming ways = new Roaming(rig.level);
             Faring route = ways.answered(known -> known.journey(rig.body.resident(), from, rig.goals()),
-                List.of(new Roamer(PersonBody.ID, Walking.INSTANCE, rig.body)), List.of(), List.of(), rig.level.getGameTime());
+                List.of(new Roamer(PersonBody.ID, Walking.INSTANCE, rig.body)), List.of(),
+                rig.level.getGameTime());
             helper.assertTrue(route instanceof Faring.Yes,
                 "the explicit underwater start is independent of the sizing resident's position and water state: " + route);
             rig.body.discard();
@@ -91,7 +92,8 @@ public final class ResidentWaterGameTests {
                 WorldPos from = WorldPos.of(rig.level, rig.body.blockPosition());
                 Roaming ways = new Roaming(rig.level);
                 Faring route = ways.answered(known -> known.journey(rig.body.resident(), from, rig.goals()),
-                    List.of(new Roamer(PersonBody.ID, Walking.INSTANCE, rig.body)), List.of(), List.of(), rig.level.getGameTime());
+                    List.of(new Roamer(PersonBody.ID, Walking.INSTANCE, rig.body)), List.of(),
+                    rig.level.getGameTime());
                 helper.assertTrue(route instanceof Faring.Yes,
                     "the actual colony path graph must accept an exit its resident can swim: " + route + "; " + rig.describe());
             }

@@ -1,6 +1,7 @@
 import { cpSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { defineTask, javaTask, reflect, world, type MinecraftClient, type MinecraftServer } from "@izakyl/blockwright-minecraft";
+import { waitForResourceReload } from "../harness/resource-reload";
 
 export const MODEL_ASSETS = path.join(process.cwd(), "tests/shared/assets/resident-models");
 
@@ -99,14 +100,14 @@ export async function waitForModelsOnClient(client: MinecraftClient, packPath: s
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   const arrived = clientHasModelFile(client, packPath);
-  if (!arrived) throw new Error(`model resources did not sync to the client within ${timeoutMs}ms: ${packPath}`);
-  await new Promise((resolve) => setTimeout(resolve, RELOAD_SETTLE_MS));
+  if (!arrived) {
+    throw new Error(`model resources did not sync to the client within ${timeoutMs}ms: ${packPath}`);
+  }
+  await waitForResourceReload(client);
   // settle throws (MinecraftTimeoutError) when the client does not catch up in time.
   const settled = await client.settle({ timeoutMs: 60_000 });
   return { arrived, settled };
 }
-
-const RELOAD_SETTLE_MS = 8_000;
 
 export async function readResidentLooks(server: MinecraftServer): Promise<string[]> {
   const listed = await world

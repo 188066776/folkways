@@ -13,6 +13,7 @@ import { seededServer } from "../shared/harness/mod-settings";
 import { BUDGET } from "../shared/harness/budgets";
 import { commandPos, frames, safeAction, tryCommand, waitForElement } from "../shared/harness/bw-helpers";
 import { newRunId } from "../shared/harness/run-id";
+import { waitForResourceReload } from "../shared/harness/resource-reload";
 import { cover, twins } from "../shared/harness/stage";
 
 const RESIDENT_TYPE = "folkways:resident";
@@ -402,6 +403,7 @@ function assertUnclippedButton(elements: Element[], button: Element, purpose: st
 async function previewChineseContainer(server: any, client: any, playerName: string, chest: any, stage: any) {
   await screen.dismiss(client);
   await client.run(CONTAINER_LANGUAGE, { code: "zh_cn" });
+  await waitForResourceReload(client);
   for (const scale of [1, 3]) {
     await screen.dismiss(client);
     let viewport: { settled: boolean; width: number; height: number } | undefined;

@@ -23,7 +23,7 @@ const CRAFT_ROW = `folkways.board.row.${CRAFT_PAGE}.0`;
 const CRAFT_EDIT = `folkways.board.edit.${CRAFT_PAGE}.0.0`;
 const PASTURE_BOARD = /^folkways\.board\.[a-z]+\.folkways\.pasture\./;
 const CITIZENS_BOARD = /^folkways\.board\.[a-z]+\.folkways\.citizens\./;
-const PEN_LINE = /^\d+ of 4 .+ \d+ grown$/;
+const PEN_LINE = /^\d+ total · retain 4 · \d+ grown$/;
 
 test("a page a domain draws itself replaces the core's table, and one it does not keeps it", async ({}, testInfo) => {
   test.setTimeout(BUDGET.quick);

@@ -1,5 +1,23 @@
-import { clickElement, type Element, panelElements, selectElement, HOVER_REFRESH_FRAMES } from "../../ldlib2";
-import { input, media, player, tick, type MinecraftClient, type MinecraftServer } from "@izakyl/blockwright-minecraft";
+import {
+  clickElement,
+  type Element,
+  LDLIB2,
+  type PanelRead,
+  panelElements,
+  selectElement,
+  HOVER_REFRESH_FRAMES,
+} from "../../ldlib2";
+import { PANEL_ROUTES } from "../../ldlib2/routes";
+import {
+  defineTask,
+  input,
+  javaTask,
+  media,
+  player,
+  tick,
+  type MinecraftClient,
+  type MinecraftServer,
+} from "@izakyl/blockwright-minecraft";
 import {
   clickUnverified,
   frames,
@@ -114,6 +132,7 @@ export async function settlePanel(server: MinecraftServer, client: MinecraftClie
 }
 
 const KEY_ENTER = 257;
+const KEY_A = 65;
 const KEY_BACKSPACE = 259;
 const KEY_DELETE = 261;
 const KEY_END = 269;
@@ -136,6 +155,20 @@ async function expectControl(
 
 const TYPE_ATTEMPTS = 2;
 
+const READ_FIELD_TEXT = defineTask<Record<string, unknown>, PanelRead>({
+  name: "folkways.panel.read-field-text",
+  side: "client",
+  modules: [LDLIB2],
+  source: javaTask({ body: "return blockwright.ldlib2.Ldlib2.panel(ctx, Args.of(ctx));" }),
+});
+
+async function fieldText(client: MinecraftClient, token: string): Promise<string | undefined> {
+  const read = await client.run(READ_FIELD_TEXT, {
+    routes: { ...PANEL_ROUTES, select: { ...PANEL_ROUTES.select, text: "getRawText()", ownText: "getRawText()" } },
+  });
+  return selectElement(read.elements, { id: token })?.text;
+}
+
 export async function typeCell(
   server: MinecraftServer, client: MinecraftClient, token: string, value: string,
 ) {
@@ -153,21 +186,31 @@ export async function typeCell(
     };
 
     tried.focus = await tap("focus", () => clickUnverified(client, { id: token }));
-    await tap("end", () => input.key(client, { keyCode: KEY_END }));
-    for (let stroke = 0; stroke < CLEAR_STROKES; stroke++) {
-      await tap("backspace", () => input.key(client, { keyCode: KEY_BACKSPACE }));
-    }
-    for (let stroke = 0; stroke < CLEAR_STROKES; stroke++) {
-      await tap("delete", () => input.key(client, { keyCode: KEY_DELETE }));
+    tried.selectAll = await tap("select all", () => input.key(client, { keyCode: KEY_A, modifiers: ["ctrl"] }));
+    await tap("clear selection", () => input.key(client, { keyCode: KEY_BACKSPACE }));
+    tried.cleared = await fieldText(client, token);
+    if (tried.cleared !== "") {
+      await tap("end", () => input.key(client, { keyCode: KEY_END }));
+      for (let stroke = 0; stroke < CLEAR_STROKES; stroke++) {
+        await tap("backspace", () => input.key(client, { keyCode: KEY_BACKSPACE }));
+      }
+      for (let stroke = 0; stroke < CLEAR_STROKES; stroke++) {
+        await tap("delete", () => input.key(client, { keyCode: KEY_DELETE }));
+      }
     }
     tried.typed = await tap("type", () => input.key(client, { text: value }));
     tried.commit = await tap("commit", () => input.key(client, { keyCode: KEY_ENTER }));
     await settlePanel(server, client);
 
+    tried.actual = await fieldText(client, token);
     tried.refused = refused;
     evidence.attempts.push(tried);
     if (refused.length === 0) {
-      evidence.verified = "keys-delivered";
+      if (tried.actual !== value) {
+        throw new Error(`panel: ${token} text after commit was ${JSON.stringify(tried.actual)}, `
+          + `expected ${JSON.stringify(value)} (attempts=${JSON.stringify(evidence.attempts)})`);
+      }
+      evidence.verified = "client-text";
       return evidence;
     }
   }

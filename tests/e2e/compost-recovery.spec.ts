@@ -85,8 +85,10 @@ for (const stage of twins()) test(stage.title("compost recovery: discover player
     const wheatRow = "folkways.settings.compost.reserve." + discovered.indexOf(SEED);
     expect(evidence.residentInput.defaultReserve, "new colonies retain a stack by default").toBe(64);
     evidence.defaultReserve80 = await typeCell(server, client, "folkways.settings.compost.default_reserve", "80");
+    expect((await read(server, stage, cells)).defaultReserve).toBe(80);
     expect((await read(server, stage, cells)).wheatReserve, "an unconfigured seed inherits the default").toBe(80);
     evidence.wheatReserve106 = await typeCell(server, client, wheatRow, "106");
+    expect((await read(server, stage, cells)).wheatReserve).toBe(106);
     evidence.defaultReserve96 = await typeCell(server, client, "folkways.settings.compost.default_reserve", "96");
     expect((await read(server, stage, cells)).defaultReserve).toBe(96);
     expect((await read(server, stage, cells)).wheatReserve, "individual seed settings survive a change to the default").toBe(106);
@@ -95,6 +97,9 @@ for (const stage of twins()) test(stage.title("compost recovery: discover player
     await settlePanel(server, client);
     expect((await read(server, stage, cells)).wheatReserve, "reset restores inheritance").toBe(96);
     evidence.restoreDefault = await typeCell(server, client, "folkways.settings.compost.default_reserve", "64");
+    const restored = await read(server, stage, cells);
+    expect(restored.defaultReserve).toBe(64);
+    expect(restored.wheatReserve, "reset seeds inherit the restored default before resident composting").toBe(64);
     await closeCompostSettings(server, client);
     await tick.sprint(server, 200);
     const disabled = await read(server, stage, cells); evidence.automaticDisabled = disabled;

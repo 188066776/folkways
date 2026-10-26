@@ -8,6 +8,7 @@ import { seededServer } from "../shared/harness/mod-settings";
 import { BUDGET } from "../shared/harness/budgets";
 import { commandPos, frames } from "../shared/harness/bw-helpers";
 import { newRunId } from "../shared/harness/run-id";
+import { waitForResourceReload } from "../shared/harness/resource-reload";
 import { twins, type Vec } from "../shared/harness/stage";
 
 const SET_CHINESE = defineTask<void, string>({
@@ -109,6 +110,7 @@ for (const stage of twins()) test(stage.title("book feedback: bounded stock sear
     await screen.dismiss(client);
     progress("switch-to-chinese");
     await client.run(SET_CHINESE, undefined);
+    await waitForResourceReload(client);
     await expect.poll(async () => (await client.run(READ_TRANSLATION, undefined))["item.minecraft.diamond"], { timeout: 30_000 }).toBe("钻石");
     const words = await client.run(READ_TRANSLATION, undefined); evidence.translations = words;
     expect(words["block.kaleidoscope_cookery.tea_tree"]).toBe("茶树");

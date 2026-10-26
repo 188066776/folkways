@@ -8,6 +8,7 @@ import { seededServer } from "../shared/harness/mod-settings";
 import { BUDGET } from "../shared/harness/budgets";
 import { commandPos, frames, waitForElement } from "../shared/harness/bw-helpers";
 import { newRunId } from "../shared/harness/run-id";
+import { waitForResourceReload } from "../shared/harness/resource-reload";
 import { GROUND } from "../shared/harness/stage";
 import { clickTab } from "../shared/ui/colony-pages";
 
@@ -108,6 +109,7 @@ for (const installed of [false, true]) test(`display search with JEC ${installed
     });
     const { server, client } = pair;
     await client.run(CHINESE, undefined);
+    await waitForResourceReload(client);
     await expect.poll(() => client.run(TRANSLATION, undefined), { timeout: 30_000 }).toBe("铁锭");
     const matching = await client.run(MATCHING, undefined);
     evidence.matching = matching;

@@ -9,6 +9,7 @@ import { seededServer } from "../shared/harness/mod-settings";
 import { BUDGET } from "../shared/harness/budgets";
 import { frames, safeScreen, screenName } from "../shared/harness/bw-helpers";
 import { newRunId } from "../shared/harness/run-id";
+import { waitForResourceReload } from "../shared/harness/resource-reload";
 
 const SCENES = ["cookery_orders", "cookery_tools", "cookery_heat", "cookery_millstone", "cookery_spit", "cookery_steamer",
   "cookery_pots", "cookery_rice", "cookery_equipment", "cookery_seeds", "cookery_tray", "cookery_teapot", "cookery_chain"];
@@ -165,6 +166,7 @@ for (const locale of LOCALES) for (const installation of INSTALLATIONS) test("co
     const grounded = await waitForGroundedPlayer(server); const name = grounded.name;
     if (locale !== "en_us") {
       await client.run(SET_LANGUAGE, { locale });
+      await waitForResourceReload(client);
       const catalog = JSON.parse(readFileSync("mods/core/src/main/resources/assets/folkways/lang/" + locale + ".json", "utf8"));
       await expect.poll(async () => client.run(READ_LANGUAGE), { timeout: 30_000 }).toEqual({
         locale, title: catalog["folkways.ponder.cookery_orders.header"],

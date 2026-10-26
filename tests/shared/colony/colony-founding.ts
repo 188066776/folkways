@@ -30,6 +30,7 @@ import {
   softly,
 } from "../harness/bw-helpers";
 import { GROUND, type Box, type Stage } from "../harness/stage";
+import { waitForResourceReload } from "../harness/resource-reload";
 
 /** Whether an `execute` condition holds now; throws when the game cannot evaluate it. */
 export function probe(server: MinecraftServer, condition: string): Promise<boolean> {
@@ -350,6 +351,7 @@ async function standUp(client: MinecraftClient, timeoutMs = 5_000): Promise<numb
 
 export async function setBookGesture(server: MinecraftServer, client: MinecraftClient, playerName: string, gesture: BookGesture) {
   const step: any = { gesture, attempts: [] };
+  await waitForResourceReload(client);
   await safeAction(() => screen.dismiss(client));
   step.sneak = await safeAction(() => input.key(client, { keybind: "key.sneak", action: "press" }));
   try {

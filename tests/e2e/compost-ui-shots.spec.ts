@@ -9,6 +9,7 @@ import { seededServer } from "../shared/harness/mod-settings";
 import { outAbs, tracePath } from "../shared/harness/out-paths";
 import { frames } from "../shared/harness/bw-helpers";
 import { newRunId } from "../shared/harness/run-id";
+import { waitForResourceReload } from "../shared/harness/resource-reload";
 
 const DISCOVERED = defineTask<void, string[]>({
   name: "folkways.compost-shots.discovered", side: "server",
@@ -26,12 +27,6 @@ mc.options.guiScale().set(2); mc.resizeDisplay(); mc.reloadResourcePacks();
 return true;
 ` }),
 });
-const READY = defineTask<void, boolean>({
-  name: "folkways.compost-shots.ready", side: "client",
-  source: javaTask({ imports: ["net.minecraft.client.Minecraft"], body: `
-return Minecraft.getInstance().getOverlay() == null;
-` }),
-});
 
 test("compost settings: capture the independent entry, shared rice row and individual reserves", async ({}, testInfo) => {
   const runId = newRunId();
@@ -47,11 +42,7 @@ test("compost settings: capture the independent entry, shared rice row and indiv
     const { server, client } = pair;
     const player = await waitForGroundedPlayer(server);
     await client.run(LANGUAGE);
-    for (let attempt = 0; attempt < 100; attempt++) {
-      await frames(client, 5);
-      if (await client.run(READY)) break;
-    }
-    expect(await client.run(READY)).toBe(true);
+    await waitForResourceReload(client);
     const origin = { x: Math.round(player.pos.x) + 4, y: Math.round(player.pos.y), z: Math.round(player.pos.z) + 4 };
     const founded = await foundColonyFast(server, client, player.name, { origin, residentCount: 1 });
     const chest = { x: origin.x + 3, y: origin.y, z: origin.z + 3 };
