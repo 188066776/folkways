@@ -2,8 +2,12 @@ package io.github.izakyl.folkways.core.api.terms;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.tags.TagKey;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
@@ -11,10 +15,16 @@ public final class Footing {
 
     private static final double NEARLY_FULL = 14.0D / 16.0D;
 
+    public static final TagKey<Block> NO_FOOTING = TagKey.create(Registries.BLOCK,
+        ResourceLocation.fromNamespaceAndPath("folkways", "no_footing"));
+
     private Footing() {
     }
 
     public static boolean withFeetAt(BlockGetter blocks, BlockPos feet) {
+        if (forbidsStandingAbove(blocks.getBlockState(feet.below()))) {
+            return false;
+        }
         if (blocks instanceof Level level && Keepouts.forbidden(level, feet)) {
             return false;
         }
@@ -28,10 +38,17 @@ public final class Footing {
 
     public static boolean holdsAbove(BlockGetter blocks, BlockPos floor) {
         BlockState state = blocks.getBlockState(floor);
+        if (forbidsStandingAbove(state)) {
+            return false;
+        }
         return state.isFaceSturdy(blocks, floor, Direction.UP)
             || ClimbableBlocks.offersFloor(state)
             || !state.getCollisionShape(blocks, floor).getFaceShape(Direction.UP).isEmpty()
             || nearlyFull(state.getCollisionShape(blocks, floor));
+    }
+
+    public static boolean forbidsStandingAbove(BlockState state) {
+        return state.is(NO_FOOTING);
     }
 
     // Farmland, a dirt path, soul sand or a chest tops out a little short of the block above: a face cut at the

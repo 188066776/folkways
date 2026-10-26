@@ -7,7 +7,14 @@ import io.github.izakyl.folkways.core.api.colony.Colony;
 import io.github.izakyl.folkways.core.api.resident.Resident;
 import io.github.izakyl.folkways.core.api.terms.ItemFilter;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
-import io.github.izakyl.folkways.core.api.work.*;
+import io.github.izakyl.folkways.core.api.work.Ending;
+import io.github.izakyl.folkways.core.api.work.Node;
+import io.github.izakyl.folkways.core.api.work.Outcome;
+import io.github.izakyl.folkways.core.api.work.Placement;
+import io.github.izakyl.folkways.core.api.work.ToolNeed;
+import io.github.izakyl.folkways.core.api.work.Urge;
+import io.github.izakyl.folkways.core.api.work.Worker;
+import io.github.izakyl.folkways.core.api.work.Workload;
 import io.github.izakyl.folkways.effect.Effects;
 import io.github.izakyl.folkways.front.engine.colony.ColonyFront;
 import io.github.izakyl.folkways.front.engine.colony.ColonySettings;
@@ -54,6 +61,13 @@ public final class DiningGameTests {
             }
             public Container inventory(ServerLevel level, BlockPos at) { return DISPLAYS.get(WorldPos.of(level, at)); }
         });
+        DiningTables.register(ResourceLocation.fromNamespaceAndPath("folkways", "test_plain_table"),
+            new DiningTables.Table() {
+                public boolean matches(ServerLevel level, BlockPos at) {
+                    return level.getBlockState(at).is(Blocks.CHISELED_QUARTZ_BLOCK);
+                }
+                public Container inventory(ServerLevel level, BlockPos at) { return null; }
+            });
         DiningDrinks.register(ResourceLocation.fromNamespaceAndPath("folkways", "test_table_drink"), new DiningDrinks.Drink() {
             public boolean matches(ItemStack stack) { return stack.is(Items.POTION); }
             public ItemStack finishUsing(ServerLevel level, Mob diner, ItemStack serving) {
@@ -357,9 +371,8 @@ public final class DiningGameTests {
 
     @GameTest(template = "empty")
     public static void connectedBasicTablesShareTheActualCakeAtTheirFarEnd(GameTestHelper helper) {
-        var slab = Blocks.OAK_SLAB.defaultBlockState().setValue(net.minecraft.world.level.block.SlabBlock.TYPE,
-            net.minecraft.world.level.block.state.properties.SlabType.TOP);
-        try (Fixture f = new Fixture(helper, slab)) {
+        var table = Blocks.CHISELED_QUARTZ_BLOCK.defaultBlockState();
+        try (Fixture f = new Fixture(helper, table)) {
             f.zone(Items.CAKE);
             var settings = f.front.zone(f.zone).orElseThrow().settings();
             f.front.erase(f.zone);
@@ -368,7 +381,7 @@ public final class DiningGameTests {
             for (int x = 0; x < 8; x++) {
                 BlockPos at = f.at.east(x);
                 f.level.setBlockAndUpdate(at.below(), Blocks.STONE.defaultBlockState());
-                f.level.setBlockAndUpdate(at, slab);
+                f.level.setBlockAndUpdate(at, table);
                 cells.add(at);
             }
             f.zone = f.front.addZone(f.level, LivingContent.DINING, cells, settings).orElseThrow().id();

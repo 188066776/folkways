@@ -3,8 +3,10 @@ package io.github.izakyl.folkways.cookery.dining;
 import com.github.ysbbbbbb.kaleidoscopecookery.block.decoration.ChairBlock;
 import com.github.ysbbbbbb.kaleidoscopecookery.blockentity.decoration.TableBlockEntity;
 import com.github.ysbbbbbb.kaleidoscopecookery.entity.SitEntity;
+import com.github.ysbbbbbb.kaleidoscopecookery.init.ModBlocks;
 import io.github.izakyl.folkways.plugins.person.living.DiningTables;
 import io.github.izakyl.folkways.plugins.person.living.DiningDrinks;
+import java.util.Optional;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -12,6 +14,7 @@ import net.minecraft.world.Container;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 
 /** Uses the native four display slots, keeping full item components and native rendering/save data. */
@@ -22,6 +25,7 @@ public final class CookeryDiningTables {
         if (registered) { return; }
         ResourceLocation id = ResourceLocation.fromNamespaceAndPath("folkways", "cookery_dining");
         DiningTables.register(id, new DiningTables.Table() {
+            public Optional<BlockState> sample() { return Optional.of(ModBlocks.TABLE_OAK.get().defaultBlockState()); }
             public boolean matches(ServerLevel level, BlockPos at) { return level.getBlockEntity(at) instanceof TableBlockEntity; }
             public Container inventory(ServerLevel level, BlockPos at) {
                 return level.getBlockEntity(at) instanceof TableBlockEntity table ? new TableStore(table) : null;

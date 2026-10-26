@@ -2,7 +2,9 @@ import { expect, test } from "@playwright/test";
 import { input } from "@izakyl/blockwright-minecraft";
 import { waitForGroundedPlayer } from "../shared/colony/colony-founding";
 import { VisualRun } from "../shared/capture/visual-kit";
-import { OPEN_PONDER, PONDER_FOLDERS, READ_PONDER, SET_GUI_SCALE, ponderCatalog, setVisualLanguage } from "../shared/capture/ponder";
+import {
+  OPEN_PONDER, PONDER_DINING, PONDER_FOLDERS, READ_PONDER, SET_GUI_SCALE, ponderCatalog, setVisualLanguage,
+} from "../shared/capture/ponder";
 import { launchPair, type E2EPair } from "../shared/harness/pair";
 import { seededOffThreadServer } from "../shared/harness/mod-settings";
 import { tracePath } from "../shared/harness/out-paths";
@@ -35,18 +37,23 @@ for (const capture of [
     await setVisualLanguage(client, locale);
     await client.run(SET_GUI_SCALE, { scale });
     const folders = await client.run(PONDER_FOLDERS);
-    const scenes = folders.filter(folder => profile === "base" || folder.id === "folkways:cookery")
-      .flatMap(folder => folder.scenes);
+    const dining = profile !== "base";
+    expect(folders.flatMap(folder => folder.scenes).includes("folkways:dining")).toBe(dining);
+    expect(await client.run(PONDER_DINING)).toEqual({ lesson: dining, indexed: dining, playback: dining });
+    const scenes = folders.flatMap(folder => folder.scenes.filter(id =>
+      profile === "base" || folder.id === "folkways:cookery" || id === "folkways:dining"));
     expect(scenes.length).toBeGreaterThan(0);
-    if (profile !== "base") expect(scenes).toEqual(expect.arrayContaining(["folkways:tavern", "folkways:cookery_pots"]));
+    if (profile !== "base") {
+      expect(scenes).toEqual(expect.arrayContaining(["folkways:tavern", "folkways:cookery_pots", "folkways:dining"]));
+    }
     const selected = scenes.filter(id => scale === 3 ? id === "folkways:farming"
       : locale === "zh_cn" ? ["folkways:housing", "folkways:dining", "folkways:household"].includes(id) : true)
       .filter(id => !only || only.includes(id.replace(/^folkways:/, "")));
     test.skip(only !== undefined && selected.length === 0, `none of ${process.env.PONDER_SCENES} in this capture`);
     expect(selected.length).toBeGreaterThan(0);
-    if (locale === "zh_cn" && !only) expect(selected).toEqual(expect.arrayContaining([
-      "folkways:housing", "folkways:dining", "folkways:household",
-    ]));
+    if (locale === "zh_cn" && !only) {
+      expect(selected).toEqual(expect.arrayContaining(["folkways:housing", "folkways:household"]));
+    }
     // Preflight the named entry points before spending time on clips. Ponder screens share context;
     // opening another lesson must reset the old screen instead of retaining its active scene.
     for (const id of selected) {

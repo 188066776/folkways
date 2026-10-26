@@ -7,6 +7,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 import net.createmod.ponder.api.registration.StoryBoardEntry;
 import net.minecraft.resources.ResourceLocation;
 import net.neoforged.api.distmarker.Dist;
@@ -21,8 +22,17 @@ public final class Lessons {
     private Lessons() {
     }
 
-    // The basics first, then the folders in the order their plugins enrolled, as the panel lists its tabs.
     public static List<Scenes.Folder> folders() {
+        return declared().stream().flatMap(folder -> {
+            var scenes = folder.scenes().stream().filter(scene -> scene.available().getAsBoolean()).toList();
+            return scenes.isEmpty() ? Stream.empty()
+                : Stream.of(new Scenes.Folder(folder.id(), folder.nameKey(), folder.icon(), scenes));
+        }).toList();
+    }
+
+    // The basics first, then the folders in the order their plugins enrolled, as the panel lists its tabs.
+    // Registration precedes world tags; keep every board so later joins and reloads can reveal it.
+    public static List<Scenes.Folder> declared() {
         List<ResourceLocation> enrolled = new ArrayList<>(Enrollments.all().keySet());
         return Scenes.declared().stream()
             .sorted(Comparator.comparingInt((Scenes.Folder folder) -> rank(enrolled, folder.id()))
@@ -48,10 +58,10 @@ public final class Lessons {
     }
 
     public static List<StoryBoardEntry> scenesFor(ResourceLocation lesson) {
-        return List.copyOf(ENTRIES.getOrDefault(lesson, List.of()));
+        return ENTRIES.getOrDefault(lesson, List.of()).stream().filter(Scenes::available).toList();
     }
 
     public static boolean has(ResourceLocation lesson) {
-        return ENTRIES.containsKey(lesson);
+        return !scenesFor(lesson).isEmpty();
     }
 }

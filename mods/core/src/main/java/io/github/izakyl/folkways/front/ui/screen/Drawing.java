@@ -88,8 +88,8 @@ public final class Drawing {
         }
     }
 
-    private record Candidate(Picked pick, Shape.Gesture gesture, Button row, UIElement mark, UIElement pane, int most,
-                             Component limit) {
+    private record Candidate(Picked pick, Shape.Gesture gesture, Button row, Label name, UIElement mark, UIElement pane,
+        int most, Component limit, Supplier<Optional<Component>> disabledReason) {
     }
 
     private final List<Candidate> candidates = new ArrayList<>();
@@ -125,14 +125,15 @@ public final class Drawing {
                 add(list, detail, new Picked.Ground(declared.id()), declared.shape().gesture(),
                     Component.translatable("folkways.delegation."
                         + declared.id().getNamespace() + "." + declared.id().getPath()),
-                    declared.icon(), mostOf(declared), limitOf(declared), settingsOf(declared));
+                    declared.icon(), mostOf(declared), limitOf(declared), settingsOf(declared),
+                    declared::disabledReason);
             }
         }
         for (Map.Entry<Shape.Gesture, Supplier<List<Offered>>> gesture : OFFERS.entrySet()) {
             for (Offered offered : gesture.getValue().get()) {
                 add(list, detail, new Picked.Offer(offered.id()), gesture.getKey(),
                     Component.translatable(offered.nameKey()), offered.icon(), Integer.MAX_VALUE, Component.empty(),
-                    Rows.page());
+                    Rows.page(), Optional::empty);
             }
         }
 
@@ -184,7 +185,8 @@ public final class Drawing {
     }
 
     private void add(UIElement list, UIElement detail, Picked pick, Shape.Gesture gesture, Component name,
-            ResourceLocation icon, int most, Component limit, UIElement pane) {
+            ResourceLocation icon, int most, Component limit, UIElement pane,
+            Supplier<Optional<Component>> disabledReason) {
         Button row = new Button().noText();
         Tokens.name(row, switch (pick) {
             case Picked.Ground ground -> "folkways.zoneconfig.kind." + Tokens.of(ground.delegation());
@@ -199,10 +201,11 @@ public final class Drawing {
             .layout(layout -> layout.width(MARK_WIDTH).heightPercent(100).flexShrink(0))
             .style(style -> style.background(new ColorRectTexture(MARK_ON)));
         mark.setDisplay(false);
-        row.addChildren(mark, Rows.icon(SettingsPage.iconOf(icon)), Rows.name(name));
+        Label label = Rows.name(name);
+        row.addChildren(mark, Rows.icon(SettingsPage.iconOf(icon)), label);
         pane.layout(layout -> layout.flexGrow(1).flexShrink(1).minHeight(0));
         pane.setDisplay(false);
-        Candidate candidate = new Candidate(pick, gesture, row, mark, pane, most, limit);
+        Candidate candidate = new Candidate(pick, gesture, row, label, mark, pane, most, limit, disabledReason);
         row.setOnClick(event -> pick(candidate));
         candidates.add(candidate);
         list.addChildren(row);
@@ -210,6 +213,9 @@ public final class Drawing {
     }
 
     private void pick(Candidate candidate) {
+        if (candidate.disabledReason().get().isPresent()) {
+            return;
+        }
         picked = candidate;
         if (candidate.pick() instanceof Picked.Offer offer) {
             candidate.pane().clearAllChildren();
@@ -243,19 +249,27 @@ public final class Drawing {
         Candidate first = null;
         Candidate resumed = null;
         boolean stands = false;
+        boolean anyShown = false;
         for (Candidate candidate : candidates) {
             boolean shown = candidate.gesture() == holding;
             candidate.row().setDisplay(shown);
-            if (shown && first == null) {
+            anyShown |= shown;
+            Optional<Component> reason = candidate.disabledReason().get();
+            boolean enabled = reason.isEmpty();
+            candidate.row().setActive(enabled);
+            candidate.row().style(style -> style.tooltips(reason.stream().toArray(Component[]::new)));
+            candidate.name().textStyle(style -> style.textColor(enabled ? Rows.INK : 0xFF8F7F62));
+            if (shown && enabled && first == null) {
                 first = candidate;
             }
-            if (shown && candidate.pick() instanceof Picked.Offer offer && previewed.equals(Optional.of(offer.id()))) {
+            if (shown && enabled && candidate.pick() instanceof Picked.Offer offer
+                    && previewed.equals(Optional.of(offer.id()))) {
                 resumed = candidate;
             }
-            stands |= shown && candidate == picked;
+            stands |= shown && enabled && candidate == picked;
         }
-        unavailable.setDisplay(first == null);
-        split.setDisplay(first != null);
+        unavailable.setDisplay(!anyShown);
+        split.setDisplay(anyShown);
         if (!stands) {
             picked = null;
             if (first != null) {
@@ -315,6 +329,7 @@ public final class Drawing {
 
     private void hand() {
         if (picked == null || !(picked.pick() instanceof Picked.Ground ground)
+                || picked.disabledReason().get().isPresent()
                 || held().map(Held::extent).orElse(0) > picked.most()) {
             return;
         }

@@ -163,14 +163,15 @@ With safety enabled, harmful carried food does not count toward nourishment when
 
 With the book marking out, frame a **Dining area** around tables and the chairs
 beside them, then choose its **Table food** and **Servings per tabletop block**
-(1 to 4). Top slabs work as tables and bottom stairs as chairs. Leave an aisle
-beside each chair. Connected tabletops on the same level form one table that
-residents can serve from any reachable edge.
+(1 to 4). Tables must come from a supported mod, such as Kaleidoscope Cookery;
+bottom stairs work as chairs. Dining is disabled when no supported tables are
+available. Leave an aisle beside each chair. Connected tabletops on the same
+level form one table that residents can serve from any reachable edge.
 
 Residents bring one serving at a time from colony stores and keep food on
 display. With several table foods selected, each empty serving slot asks for a
 random dish from the menu and keeps that choice until delivery; these requests
-can drive production directly. Plain tables, including top slabs, hold one
+can drive production directly. Supported tables without inventories hold one
 placeable food such as cake; supported Kaleidoscope Cookery tables accept edible
 foods and use the servings setting. Residents preserve food components, leave
 servings placed by players alone, and return unused supplies when an area is

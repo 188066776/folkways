@@ -48,8 +48,22 @@ public final class DiningTableGameTests {
     }
 
     @GameTest(template = "empty")
+    public static void nativeAdapterOffersARecognizedTableSample(GameTestHelper helper) {
+        CookeryDiningTables.register();
+        var sample = DiningTables.sample().orElseThrow();
+        helper.assertTrue(sample.is(ModBlocks.TABLE_OAK.get()), "Cookery offers its oak table for previews");
+        BlockPos at = helper.absolutePos(new BlockPos(3, 2, 3));
+        helper.getLevel().setBlockAndUpdate(at, sample);
+        helper.assertTrue(DiningTables.table(helper.getLevel(), at), "the sample is a recognized dining table");
+        helper.assertValueEqual(DiningTables.inventory(helper.getLevel(), at).orElseThrow().getContainerSize(), 4,
+            "the preview block has the native table's four display slots");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
     public static void nativeDiningTableHasFourRealSingleFoodSlotsAndPreservesComponents(GameTestHelper helper) {
         CookeryDiningTables.register();
+        helper.assertTrue(DiningTables.anyTable(), "the common Cookery adapter makes dining available");
         var level = helper.getLevel();
         BlockPos at = helper.absolutePos(new BlockPos(3, 2, 3));
         level.setBlockAndUpdate(at, ModBlocks.TABLE_OAK.get().defaultBlockState());
@@ -109,8 +123,8 @@ public final class DiningTableGameTests {
         var level = helper.getLevel();
         BlockPos at = helper.absolutePos(new BlockPos(3, 2, 3));
         level.setBlockAndUpdate(at, Blocks.OAK_SLAB.defaultBlockState().setValue(SlabBlock.TYPE, SlabType.TOP));
-        helper.assertTrue(DiningTables.table(level, at), "upper slab supports a basic table");
-        helper.assertTrue(DiningTables.inventory(level, at).isEmpty(), "basic table has no invented inventory");
+        helper.assertFalse(DiningTables.table(level, at), "top slabs are never dining tables");
+        helper.assertTrue(DiningTables.inventory(level, at).isEmpty(), "slabs have no dining inventory");
         level.setBlockAndUpdate(at, Blocks.OAK_STAIRS.defaultBlockState());
         helper.assertTrue(DiningTables.chair(level, at), "lower stairs support basic chairs");
         level.setBlockAndUpdate(at, Blocks.CRAFTING_TABLE.defaultBlockState());

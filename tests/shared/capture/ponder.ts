@@ -6,9 +6,33 @@ import { waitForResourceReload } from "../harness/resource-reload";
 
 export const PONDER_FOLDERS = defineTask<void, { id: string; scenes: string[] }[]>({
   name: "folkways.visual.ponder-folders", side: "client",
-  source: javaTask({ imports: ["io.github.izakyl.folkways.front.api.ponder.Scenes"], body: `
-return Scenes.declared().stream().map(folder -> Map.of("id", folder.id().toString(),
+  source: javaTask({ imports: ["io.github.izakyl.folkways.front.client.Lessons"], body: `
+return Lessons.folders().stream().map(folder -> Map.of("id", folder.id().toString(),
  "scenes", folder.scenes().stream().map(scene -> scene.id().toString()).toList())).toList();
+` }),
+});
+
+export const PONDER_DINING = defineTask<void, { lesson: boolean; indexed: boolean; playback: boolean }>({
+  name: "folkways.visual.ponder-dining", side: "client",
+  source: javaTask({ imports: [
+    "io.github.izakyl.folkways.front.api.ponder.Scenes",
+    "io.github.izakyl.folkways.front.client.Lessons",
+    "io.github.izakyl.folkways.front.engine.registry.FolkwaysItems",
+    "net.createmod.ponder.foundation.PonderIndex",
+    "net.createmod.ponder.foundation.PonderStoryBoardEntry",
+    "net.minecraft.resources.ResourceLocation",
+  ], body: `
+var id = ResourceLocation.fromNamespaceAndPath("folkways", "dining");
+var folder = Scenes.declared().stream()
+    .filter(candidate -> candidate.scenes().stream().anyMatch(scene -> scene.id().equals(id)))
+    .findFirst().orElseThrow();
+var scene = folder.scenes().stream().filter(candidate -> candidate.id().equals(id)).findFirst().orElseThrow();
+var access = PonderIndex.getSceneAccess();
+boolean indexed = access.getRegisteredEntries().stream().anyMatch(entry ->
+    entry.getValue().getBoard() instanceof Scenes.Scene board && board.id().equals(id));
+var entry = new PonderStoryBoardEntry(scene, "folkways", folder.id().getPath() + "/dining",
+    FolkwaysItems.COLONY_BOOK.getId());
+return Map.of("lesson", Lessons.has(id), "indexed", indexed, "playback", !access.compile(List.of(entry)).isEmpty());
 ` }),
 });
 

@@ -2,10 +2,12 @@ package io.github.izakyl.folkways.plugins.person.living;
 
 import io.github.izakyl.folkways.core.api.terms.Keepouts;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -13,16 +15,16 @@ import net.minecraft.tags.TagKey;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.SlabBlock;
 import net.minecraft.world.level.block.StairBlock;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Half;
-import net.minecraft.world.level.block.state.properties.SlabType;
 
 /** Dining furniture integrations, separate from colony ingredient storage. */
 public final class DiningTables {
     public interface Table {
         boolean matches(ServerLevel level, BlockPos table);
         Container inventory(ServerLevel level, BlockPos table);
+        default Optional<BlockState> sample() { return Optional.empty(); }
     }
     public interface Seat {
         boolean matches(ServerLevel level, BlockPos chair);
@@ -56,11 +58,25 @@ public final class DiningTables {
         }
         return Optional.empty();
     }
+    /** Tags are synced to clients; adapters are installed during common setup. */
+    public static boolean anyTable() {
+        return !TABLES.isEmpty()
+            || BuiltInRegistries.BLOCK.getTag(tag("dining/tables")).filter(tables -> tables.size() > 0).isPresent()
+            || BuiltInRegistries.BLOCK.getTag(tag("housing/table")).filter(tables -> tables.size() > 0).isPresent();
+    }
+    /** Resolve afresh so previews follow the current world's table tags. */
+    public static Optional<BlockState> sample() {
+        for (String path : List.of("dining/tables", "housing/table")) {
+            var tagged = BuiltInRegistries.BLOCK.getTag(tag(path))
+                .flatMap(tables -> tables.stream().findFirst()).map(table -> table.value().defaultBlockState());
+            if (tagged.isPresent()) { return tagged; }
+        }
+        return TABLES.values().stream().flatMap(adapter -> adapter.sample().stream()).findFirst();
+    }
     public static boolean table(ServerLevel level, BlockPos at) {
         if (!level.isLoaded(at)) { return false; }
         var state = level.getBlockState(at);
         return state.is(tag("dining/tables")) || state.is(tag("housing/table"))
-            || state.getBlock() instanceof SlabBlock && state.getValue(SlabBlock.TYPE) == SlabType.TOP
             || TABLES.values().stream().anyMatch(adapter -> adapter.matches(level, at));
     }
     public static boolean chair(ServerLevel level, BlockPos at) {

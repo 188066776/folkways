@@ -12,9 +12,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.CakeBlock;
-import net.minecraft.world.level.block.SlabBlock;
 import net.minecraft.world.level.block.StairBlock;
-import net.minecraft.world.level.block.state.properties.SlabType;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
 
@@ -23,14 +21,14 @@ public final class DiningScene {
     private DiningScene() { }
 
     public static void program(SceneBuilder scene, SceneBuildingUtil util) {
+        var table = DiningTables.sample().orElseThrow();
         scene.title("dining", "Dining: set a table for the colony");
         PonderScenery.openWorld(scene, util, 8);
         PonderScenery.grassGround(scene, util, 8);
         BlockPos store = util.grid().at(6, 1, 1);
         scene.world().setBlock(store, Blocks.CHEST.defaultBlockState(), false);
         for (int x = 2; x <= 4; x++) {
-            scene.world().setBlock(util.grid().at(x, 1, 3), Blocks.OAK_SLAB.defaultBlockState()
-                .setValue(SlabBlock.TYPE, SlabType.TOP), false);
+            scene.world().setBlock(util.grid().at(x, 1, 3), table, false);
             if (x == 3) { continue; }
             for (int z : new int[] {2, 4}) {
                 scene.world().setBlock(util.grid().at(x, 1, z), Blocks.OAK_STAIRS.defaultBlockState()
@@ -41,7 +39,9 @@ public final class DiningScene {
         scene.idle(15);
         scene.overlay().showOutline(PonderPalette.BLUE, "area", util.select().fromTo(1, 0, 1, 6, 2, 5), 120);
         scene.overlay().showText(120)
-            .text("With the book marking out, frame a dining area around tables and adjacent chairs. Top slabs make tables and bottom stairs make chairs. Include the chairs in the area and leave a clear aisle beside them.")
+            .text("With the book marking out, frame a dining area around tables and adjacent chairs. "
+                + "Use supported mod tables; bottom stairs make chairs. "
+                + "Include the chairs in the area and leave a clear aisle beside them.")
             .pointAt(util.vector().topOf(3, 1, 4)).placeNearTarget().attachKeyFrame();
         scene.idle(130);
         scene.overlay().showOutline(PonderPalette.GREEN, "table", util.select().fromTo(2, 1, 3, 4, 1, 3), 100);
@@ -50,7 +50,9 @@ public final class DiningScene {
             .pointAt(util.vector().topOf(3, 1, 3)).placeNearTarget().attachKeyFrame();
         scene.idle(120);
         scene.overlay().showText(120)
-            .text("Choose food and 1 to 4 servings per table cell in the area settings. Furniture with an inventory uses that many slots, up to its capacity. A plain top holds one placed dish, such as cake.")
+            .text("Choose food and 1 to 4 servings per table cell in the area settings. "
+                + "Tables with an inventory use that many slots, up to their capacity. "
+                + "Supported tables without inventories hold one placed dish, such as cake.")
             .pointAt(util.vector().topOf(2, 1, 3)).placeNearTarget().attachKeyFrame();
         scene.idle(130);
         var waiter = PonderScenery.body(scene, PersonBody.RESIDENT.get(), util.vector().topOf(6, 0, 2), 180);

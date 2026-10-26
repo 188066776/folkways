@@ -2,6 +2,7 @@ package io.github.izakyl.folkways.plugins.person.walk;
 
 import io.github.izakyl.folkways.FolkwaysMod;
 import io.github.izakyl.folkways.core.api.terms.ClimbableBlocks;
+import io.github.izakyl.folkways.core.api.terms.Footing;
 import io.github.izakyl.folkways.core.api.terms.Keepouts;
 import io.github.izakyl.folkways.core.api.terms.Structures;
 import io.github.izakyl.folkways.plugins.FolkwaysVanillaMod;
@@ -20,6 +21,10 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.EntityBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.Half;
+import net.minecraft.world.level.block.state.properties.SlabType;
+import net.minecraft.world.level.block.state.properties.StairsShape;
 import net.minecraft.world.level.pathfinder.PathComputationType;
 import net.minecraft.world.level.pathfinder.PathFinder;
 import net.minecraft.world.level.pathfinder.PathType;
@@ -75,6 +80,104 @@ public final class ResidentNodeEvaluatorGameTests {
         } finally {
             remove.run();
             removeOther.run();
+        }
+    }
+
+    @GameTest(template = "empty")
+    public static void bambooIsAWallWithNoFloorOnTop(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        BlockPos cell = helper.absolutePos(new BlockPos(2, 1, 2));
+        for (BlockPos floor : BlockPos.betweenClosed(cell.offset(-2, -1, -2), cell.offset(2, -1, 2))) {
+            level.setBlockAndUpdate(floor, Blocks.DIRT.defaultBlockState());
+        }
+        level.setBlockAndUpdate(cell, Blocks.BAMBOO.defaultBlockState());
+        var mob = EntityType.VILLAGER.create(level);
+        BlockPos start = cell.west();
+        mob.setPos(Vec3.atBottomCenterOf(start));
+        var context = new PathfindingContext(level, mob);
+        var evaluator = new ResidentNodeEvaluator(start);
+        helper.assertTrue(evaluator.getPathType(context, cell.getX(), cell.getY(), cell.getZ()) == PathType.BLOCKED,
+            "a bamboo stalk is not walked through");
+        helper.assertTrue(evaluator.getPathType(context, cell.getX(), cell.getY() + 1, cell.getZ()) == PathType.OPEN,
+            "the top of a bamboo stalk is no floor to stand on");
+        var region = Structures.region(level, cell.offset(-2, -1, -2), cell.offset(2, 3, 2));
+        var path = new PathFinder(evaluator, 512).findPath(region, mob, Set.of(cell.above()), 12, 0, 1);
+        helper.assertTrue(path == null || !path.canReach(), "nobody paths onto the top of a bamboo stalk");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void taggedTopsAreNotWalkingFloors(GameTestHelper helper) {
+        BlockPos floor = helper.absolutePos(new BlockPos(2, 1, 2));
+        List<BlockState> forbidden = List.of(
+            Blocks.BAMBOO.defaultBlockState(),
+            Blocks.OAK_FENCE.defaultBlockState(),
+            Blocks.COBBLESTONE_WALL.defaultBlockState(),
+            Blocks.OAK_FENCE_GATE.defaultBlockState(),
+            Blocks.OAK_FENCE_GATE.defaultBlockState().setValue(BlockStateProperties.OPEN, true),
+            Blocks.IRON_BARS.defaultBlockState(),
+            Blocks.GLASS_PANE.defaultBlockState(),
+            Blocks.BLACK_STAINED_GLASS_PANE.defaultBlockState(),
+            Blocks.CHAIN.defaultBlockState(),
+            Blocks.CHAIN.defaultBlockState().setValue(BlockStateProperties.AXIS, Direction.Axis.X),
+            Blocks.END_ROD.defaultBlockState(),
+            Blocks.END_ROD.defaultBlockState().setValue(BlockStateProperties.FACING, Direction.EAST),
+            Blocks.LIGHTNING_ROD.defaultBlockState(),
+            Blocks.CANDLE.defaultBlockState(),
+            Blocks.POINTED_DRIPSTONE.defaultBlockState());
+        for (BlockState state : forbidden) {
+            assertFloorType(helper, floor, state, PathType.OPEN);
+        }
+        List<BlockState> ordinary = List.of(
+            Blocks.DIRT.defaultBlockState(),
+            Blocks.FARMLAND.defaultBlockState(),
+            Blocks.DIRT_PATH.defaultBlockState(),
+            Blocks.SOUL_SAND.defaultBlockState(),
+            Blocks.CHEST.defaultBlockState(),
+            Blocks.STONE_SLAB.defaultBlockState(),
+            Blocks.STONE_SLAB.defaultBlockState().setValue(BlockStateProperties.SLAB_TYPE, SlabType.TOP),
+            Blocks.HOPPER.defaultBlockState(),
+            Blocks.CAULDRON.defaultBlockState(),
+            Blocks.COMPOSTER.defaultBlockState(),
+            Blocks.SCAFFOLDING.defaultBlockState(),
+            Blocks.LADDER.defaultBlockState());
+        for (BlockState state : ordinary) {
+            assertFloorType(helper, floor, state, PathType.WALKABLE);
+        }
+        for (Direction facing : Direction.Plane.HORIZONTAL) {
+            for (Half half : Half.values()) {
+                for (StairsShape shape : StairsShape.values()) {
+                    BlockState state = Blocks.OAK_STAIRS.defaultBlockState()
+                        .setValue(BlockStateProperties.HORIZONTAL_FACING, facing)
+                        .setValue(BlockStateProperties.HALF, half)
+                        .setValue(BlockStateProperties.STAIRS_SHAPE, shape);
+                    assertFloorType(helper, floor, state, PathType.WALKABLE);
+                }
+            }
+        }
+        helper.getLevel().setBlock(floor.above(), Blocks.LADDER.defaultBlockState(), Block.UPDATE_CLIENTS);
+        assertFloorType(helper, floor, Blocks.OAK_FENCE.defaultBlockState(), PathType.OPEN);
+        assertFloorType(helper, floor, Blocks.BAMBOO.defaultBlockState(), PathType.OPEN);
+        helper.succeed();
+    }
+
+    private static void assertFloorType(GameTestHelper helper, BlockPos floor, BlockState state, PathType expected) {
+        var level = helper.getLevel();
+        level.setBlock(floor, state, Block.UPDATE_CLIENTS);
+        var mob = EntityType.VILLAGER.create(level);
+        var context = new PathfindingContext(level, mob);
+        var evaluator = new ResidentNodeEvaluator(floor.west());
+        PathType type = evaluator.getPathType(context, floor.getX(), floor.getY() + 1, floor.getZ());
+        helper.assertTrue(type == expected, "the cell above " + state + " is " + expected + ", got " + type);
+        PathType vanilla = WalkNodeEvaluator.getPathTypeStatic(context, floor.mutable());
+        if (Footing.forbidsStandingAbove(state) && vanilla != PathType.FENCE) {
+            PathType inside = evaluator.getPathType(context, floor.getX(), floor.getY(), floor.getZ());
+            helper.assertTrue(inside == vanilla, "a tagged block keeps its own path type: " + state);
+        }
+        if (state.is(Blocks.OAK_FENCE) || state.is(Blocks.COBBLESTONE_WALL)) {
+            PathType inside = evaluator.getPathType(context, floor.getX(), floor.getY(), floor.getZ());
+            helper.assertTrue(inside == PathType.FENCE,
+                "fences and walls keep vanilla's path type");
         }
     }
 

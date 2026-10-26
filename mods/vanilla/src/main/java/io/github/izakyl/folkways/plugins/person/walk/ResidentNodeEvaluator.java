@@ -2,6 +2,7 @@ package io.github.izakyl.folkways.plugins.person.walk;
 
 import io.github.izakyl.folkways.core.api.resident.Searches;
 import io.github.izakyl.folkways.core.api.terms.ClimbableBlocks;
+import io.github.izakyl.folkways.core.api.terms.Footing;
 import io.github.izakyl.folkways.core.api.terms.Keepouts;
 import javax.annotation.Nullable;
 import net.minecraft.core.BlockPos;
@@ -103,6 +104,13 @@ public final class ResidentNodeEvaluator extends WalkNodeEvaluator {
         }
         if (type == PathType.TRAPDOOR && isShutOverhead(context.getBlockState(probePos.set(x, y, z)))) {
             return PathType.BLOCKED;
+        }
+        // A top nobody stands on leaves air above it, not a floor or a wall at someone's head.
+        BlockState state = context.getBlockState(probePos.set(x, y, z));
+        if ((type == PathType.OPEN || type == PathType.WALKABLE
+                || state.isAir()) && !Footing.forbidsStandingAbove(state)
+                && Footing.forbidsStandingAbove(context.getBlockState(probePos.set(x, y - 1, z)))) {
+            return PathType.OPEN;
         }
         if ((type == PathType.WALKABLE || type == PathType.OPEN) && isPortalMouth(context, x, y, z)) {
             return PathType.DANGER_OTHER;

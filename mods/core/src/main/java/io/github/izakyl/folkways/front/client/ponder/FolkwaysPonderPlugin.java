@@ -30,21 +30,21 @@ public final class FolkwaysPonderPlugin implements PonderPlugin {
     @Override
     public void registerScenes(PonderSceneRegistrationHelper<ResourceLocation> helper) {
         Lessons.clear();
-        List<Scenes.Folder> folders = Lessons.folders();
+        List<Scenes.Folder> folders = Lessons.declared();
         ResourceLocation colonyBook = FolkwaysItems.COLONY_BOOK.getId();
 
         for (Scenes.Folder folder : folders) {
             for (Scenes.Scene scene : folder.scenes()) {
                 String schematic = folder.id().getPath() + "/" + scene.id().getPath();
                 // Ponder invokes the callback once per component. Only the book's entry belongs in our lesson list.
-                helper.forComponents(colonyBook).addStoryBoard(schematic, scene.board(), entry -> {
+                helper.forComponents(colonyBook).addStoryBoard(schematic, scene, entry -> {
                     Lessons.bind(folder.id(), entry);
                     Lessons.bind(scene.id(), entry);
                 });
                 List<ResourceLocation> components = Scenes.itemsFor(scene).stream()
                     .filter(component -> !component.equals(colonyBook)).distinct().toList();
                 if (!components.isEmpty()) {
-                    helper.forComponents(components.toArray(ResourceLocation[]::new)).addStoryBoard(schematic, scene.board());
+                    helper.forComponents(components.toArray(ResourceLocation[]::new)).addStoryBoard(schematic, scene);
                 }
             }
         }

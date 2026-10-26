@@ -38,7 +38,7 @@ public final class HouseholdScene {
             ResourceLocation.withDefaultNamespace("red_bed"),
             Scenes.scene("household", HouseholdScene::program),
             Scenes.scene("housing", HousingScene::program),
-            Scenes.scene("dining", DiningScene::program),
+            Scenes.scene("dining", DiningScene::program).when(() -> DiningTables.sample().isPresent()),
             Scenes.scene("recreation", RecreationScene::program)));
     }
 

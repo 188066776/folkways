@@ -32,9 +32,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.CakeBlock;
-import net.minecraft.world.level.block.SlabBlock;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.properties.SlabType;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
@@ -49,8 +47,8 @@ public final class DiningSchedulingGameTests {
     @SubscribeEvent public static void register(RegisterGameTestsEvent event) { event.register(DiningSchedulingGameTests.class); }
 
     @GameTest(template = "empty", timeoutTicks = 1400)
-    public static void realSchedulerSetsVanillaTableThenCompletesMealAndReleasesPose(GameTestHelper helper) {
-        var rig = new Rig(helper, Blocks.OAK_SLAB.defaultBlockState().setValue(SlabBlock.TYPE, SlabType.TOP),
+    public static void realSchedulerSetsDeclaredTableThenCompletesMealAndReleasesPose(GameTestHelper helper) {
+        var rig = new Rig(helper, Blocks.CHISELED_QUARTZ_BLOCK.defaultBlockState(),
             Blocks.OAK_STAIRS.defaultBlockState(), new ItemStack(Items.CAKE));
         helper.startSequence()
             .thenWaitUntil(() -> helper.assertTrue(rig.level.getBlockState(rig.table.above()).is(Blocks.CAKE),
@@ -135,7 +133,7 @@ public final class DiningSchedulingGameTests {
 
     @GameTest(template = "empty", timeoutTicks = 100)
     public static void drinkCabinetAccessRulesFollowMenuChangesAndRemoval(GameTestHelper helper) {
-        try (var rig = new Rig(helper, Blocks.OAK_SLAB.defaultBlockState().setValue(SlabBlock.TYPE, SlabType.TOP),
+        try (var rig = new Rig(helper, Blocks.CHISELED_QUARTZ_BLOCK.defaultBlockState(),
                 Blocks.OAK_STAIRS.defaultBlockState(), new ItemStack(Items.CAKE))) {
             BlockPos cabinet = rig.chair.west();
             WorldPos at = WorldPos.of(rig.level, cabinet);

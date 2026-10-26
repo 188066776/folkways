@@ -1,6 +1,7 @@
 package io.github.izakyl.folkways.core.api.ground;
 
 import io.github.izakyl.folkways.FolkwaysMod;
+import io.github.izakyl.folkways.core.api.terms.Footing;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -62,6 +63,27 @@ public final class GroundGameTests {
             wall.keySet().forEach(cell -> level.setBlock(cell, Blocks.AIR.defaultBlockState(), 3));
             helper.assertTrue(watch.now(List.of(walker)).reachable(far), "taking it down opens the hall again");
             helper.assertTrue(!ground.known(at(helper, 2, 0, 5).offset(-40, 0, 0)), "outside the box is not known");
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void bambooOffersNoPlaceToStand(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        BlockPos cell = at(helper, 2, 1, 2);
+        for (BlockPos floor : BlockPos.betweenClosed(cell.offset(-1, -1, -1), cell.offset(1, -1, 1))) {
+            level.setBlockAndUpdate(floor, Blocks.DIRT.defaultBlockState());
+        }
+        level.setBlockAndUpdate(cell, Blocks.BAMBOO.defaultBlockState());
+        Mob walker = walker(helper, cell.west());
+        BoundingBox area = BoundingBox.fromCorners(cell.offset(-1, -1, -1), cell.offset(1, 3, 1));
+        try (Grounds.Watch watch = Grounds.watch(level, area)) {
+            Ground ground = watch.now(List.of(walker));
+            helper.assertTrue(ground.standable(cell.west()), "the ground beside bamboo is somewhere to stand");
+            helper.assertTrue(!ground.standable(cell), "a bamboo stalk is not walked through");
+            helper.assertTrue(!ground.standable(cell.above()), "the top of a bamboo stalk is no floor to stand on");
+            helper.assertTrue(ground.standable(cell.above()) == Footing.withFeetAt(level, cell.above()),
+                "walking ground and job footings agree above bamboo");
         }
         helper.succeed();
     }

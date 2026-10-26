@@ -26,6 +26,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -145,7 +146,8 @@ public final class LivingContent {
         registering.enrollment(ID, new Enrollment(
             List.of(new Delegation(BED, new Shape.Block(Housing::isBed, Housing::sleepingCell)),
                 new Delegation(DINING, new Shape.Volume(4096), new Schema(List.of(DINING_FOOD, DINING_SERVINGS, DINING_DRINK)),
-                    ResourceLocation.withDefaultNamespace("cake"))),
+                    ResourceLocation.withDefaultNamespace("cake"), () -> DiningTables.anyTable() ? Optional.empty()
+                        : Optional.of(Component.translatable("folkways.dining.requires_tables")))),
             new Schema(List.of(FOOD_MODE, FOOD_SAFETY, FOOD)), List.of()));
     }
 

@@ -4,7 +4,11 @@ import io.github.izakyl.folkways.FolkwaysMod;
 import io.github.izakyl.folkways.base.Ledger;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.BooleanSupplier;
+import net.createmod.ponder.api.registration.StoryBoardEntry;
 import net.createmod.ponder.api.scene.PonderStoryBoard;
+import net.createmod.ponder.api.scene.SceneBuilder;
+import net.createmod.ponder.api.scene.SceneBuildingUtil;
 import net.minecraft.resources.ResourceLocation;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
@@ -18,7 +22,21 @@ public final class Scenes {
         ResourceLocation.fromNamespaceAndPath(FolkwaysMod.MOD_ID, "basics");
 
     // The id is the one the board gives scene.title(...); it names the header the index shows.
-    public record Scene(ResourceLocation id, PonderStoryBoard board) {
+    public record Scene(ResourceLocation id, PonderStoryBoard board, BooleanSupplier available)
+        implements PonderStoryBoard {
+        public Scene(ResourceLocation id, PonderStoryBoard board) {
+            this(id, board, () -> true);
+        }
+
+        public Scene when(BooleanSupplier condition) {
+            return new Scene(id, board, condition);
+        }
+
+        @Override
+        public void program(SceneBuilder scene, SceneBuildingUtil util) {
+            board.program(scene, util);
+        }
+
         public String headerKey() {
             return id.getNamespace() + ".ponder." + id.getPath() + ".header";
         }
@@ -58,6 +76,10 @@ public final class Scenes {
 
     public static List<ResourceLocation> itemsFor(Scene scene) {
         return ITEMS.getOrDefault(scene.id(), List.of());
+    }
+
+    public static boolean available(StoryBoardEntry entry) {
+        return !(entry.getBoard() instanceof Scene scene) || scene.available().getAsBoolean();
     }
 
     public static void folder(ResourceLocation id, String nameKey, ResourceLocation icon, Scene... scenes) {

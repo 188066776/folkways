@@ -1,0 +1,16 @@
+{
+  "replace": false,
+  "values": [
+    "minecraft:bamboo",
+    "#minecraft:fences",
+    "#minecraft:walls",
+    "#minecraft:fence_gates",
+    "minecraft:iron_bars",
+    "#c:glass_panes",
+    "minecraft:chain",
+    "minecraft:end_rod",
+    "minecraft:lightning_rod",
+    "#minecraft:candles",
+    "minecraft:pointed_dripstone"
+  ]
+}

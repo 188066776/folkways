@@ -188,7 +188,7 @@ player.getAbilities().flying = true; player.onUpdateAbilities(); return true;
     const boxes = [
       { kind: "dining", min: { x: x + 3, y: y - 1, z: z + 9 }, max: { x: x + 8, y, z: z + 13 } },
     ] as const;
-    await command(`setblock ${x + 5} ${y} ${z + 11} minecraft:oak_slab[type=top]`);
+    await command(`setblock ${x + 5} ${y} ${z + 11} kaleidoscope_cookery:table_oak`);
     await command(`setblock ${x + 5} ${y} ${z + 10} minecraft:oak_stairs[facing=south]`);
     await command(`setblock ${x + 5} ${y} ${z + 12} minecraft:oak_stairs[facing=north]`);
     for (const [index, box] of boxes.entries()) {

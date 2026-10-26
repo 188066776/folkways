@@ -1,11 +1,18 @@
 package io.github.izakyl.folkways.plugins.person.living;
 
 import io.github.izakyl.folkways.FolkwaysMod;
+import io.github.izakyl.folkways.core.api.colony.Colonies;
+import io.github.izakyl.folkways.core.api.colony.Colony;
+import io.github.izakyl.folkways.core.api.terms.Footing;
 import io.github.izakyl.folkways.core.api.terms.Keepouts;
 import io.github.izakyl.folkways.core.api.terms.Reach;
+import io.github.izakyl.folkways.front.engine.colony.ColonyFront;
+import io.github.izakyl.folkways.front.engine.colony.ColonySettings;
 import io.github.izakyl.folkways.plugins.person.PersonBody;
 import io.github.izakyl.folkways.plugins.person.ResidentEntity;
 import io.github.izakyl.folkways.plugins.person.walk.Walking;
+import java.util.HashSet;
+import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
@@ -26,66 +33,133 @@ import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 @GameTestHolder(FolkwaysMod.MOD_ID)
 @PrefixGameTestTemplate(false)
 public final class DiningWalkingGameTests {
-    @SubscribeEvent public static void register(RegisterGameTestsEvent event) { event.register(DiningWalkingGameTests.class); }
+    @SubscribeEvent public static void register(RegisterGameTestsEvent event) {
+        event.register(DiningWalkingGameTests.class);
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 160)
+    public static void aResidentWalksAcrossAnOrdinaryTopSlabFloor(GameTestHelper helper) {
+        BlockPos start = slabFloor(helper, 9, 7).offset(1, 0, 3);
+        BlockPos end = start.east(6);
+        BlockPos chair = start.below().west(2);
+        helper.getLevel().setBlockAndUpdate(chair, Blocks.OAK_STAIRS.defaultBlockState());
+        helper.assertTrue(DiningTables.chair(helper.getLevel(), chair), "a stair touches the floor's edge");
+        helper.assertFalse(DiningTables.table(helper.getLevel(), start.below()),
+            "top slabs are never dining tables");
+        for (BlockPos feet : BlockPos.betweenClosed(start, end)) {
+            helper.assertFalse(Keepouts.forbidden(helper.getLevel(), feet), "ordinary top slabs are not furniture");
+            helper.assertTrue(Footing.withFeetAt(helper.getLevel(), feet),
+                "ordinary top slabs provide walking footing");
+        }
+        ResidentEntity body = resident(helper, start);
+        Vec3 target = Vec3.atBottomCenterOf(end);
+        helper.startSequence().thenExecuteAfter(2, () -> walkTo(helper, body, target))
+            .thenWaitUntil(() -> helper.assertTrue(body.position().distanceToSqr(target) < 0.5D,
+                "resident crosses the top-slab floor; " + describe(body, target)))
+            .thenExecute(body::discard).thenSucceed();
+    }
+
+    @GameTest(template = "empty")
+    public static void topSlabsRemainWalkableInsideDiningAreas(GameTestHelper helper) {
+        BlockPos table = room(helper);
+        var level = helper.getLevel();
+        level.setBlockAndUpdate(table.east(),
+            Blocks.OAK_SLAB.defaultBlockState().setValue(SlabBlock.TYPE, SlabType.TOP));
+        Colony colony = Colonies.mint(level.getServer());
+        try {
+            var front = ColonyFront.of(colony);
+            helper.assertTrue(Footing.withFeetAt(level, table.above()), "an unmarked slab is ordinary footing");
+            var zone = front.addZone(level, LivingContent.DINING, Set.of(table),
+                ColonySettings.empty()).orElseThrow();
+            helper.assertFalse(DiningTables.table(level, table), "marking a slab does not make it a table");
+            helper.assertFalse(Keepouts.forbidden(level, table.above()), "marked slabs remain ordinary footing");
+            helper.assertTrue(Footing.withFeetAt(level, table.above()), "a slab inside the area stays walkable");
+            helper.assertTrue(Footing.withFeetAt(level, table.east().above()),
+                "a connected slab outside the area stays walkable");
+            front.erase(zone.id());
+            helper.assertTrue(Footing.withFeetAt(level, table.above()), "erasing the area preserves footing");
+            zone = front.addZone(level, LivingContent.DINING, Set.of(table.below()),
+                ColonySettings.empty()).orElseThrow();
+            helper.assertFalse(DiningTables.table(level, table), "marking the floor does not make its slab a table");
+            helper.assertFalse(Keepouts.forbidden(level, table.above()), "floor outlines do not forbid slabs");
+            helper.assertTrue(Footing.withFeetAt(level, table.above()), "a slab above the area stays walkable");
+            front.erase(zone.id());
+            helper.assertTrue(Footing.withFeetAt(level, table.above()), "erasing the floor area preserves footing");
+        } finally { colony.raze(); }
+        helper.succeed();
+    }
 
     @GameTest(template = "empty")
     public static void routesGoAroundTheTableInsteadOfClimbingAcrossIt(GameTestHelper helper) {
-        BlockPos table = room(helper);
-        ResidentEntity body = resident(helper, table.west(3));
-        try {
-            var path = body.getNavigation().createPath(table.east(3), 0);
-            helper.assertTrue(path != null && path.canReach(), "a route remains around the dining table");
-            for (int i = 0; i < path.getNodeCount(); i++) {
-                var node = path.getNode(i);
-                helper.assertFalse(Keepouts.forbidden(helper.getLevel(), node.x, node.y, node.z),
-                    "a normal route never climbs onto dining furniture");
-            }
-        } finally { body.discard(); }
+        try (var fixture = new TableFixture(helper)) {
+            BlockPos table = fixture.table;
+            helper.assertTrue(Keepouts.forbidden(helper.getLevel(), table.above()),
+                "a declared table inside a dining area is furniture");
+            ResidentEntity body = resident(helper, table.west(3));
+            try {
+                var path = body.getNavigation().createPath(table.east(3), 0);
+                helper.assertTrue(path != null && path.canReach(), "a route remains around the dining table");
+                for (int i = 0; i < path.getNodeCount(); i++) {
+                    var node = path.getNode(i);
+                    helper.assertFalse(Keepouts.forbidden(helper.getLevel(), node.x, node.y, node.z),
+                        "a normal route never climbs onto dining furniture");
+                }
+            } finally { body.discard(); }
+        }
         helper.succeed();
     }
 
     @GameTest(template = "empty")
     public static void workFootingsStayBesideTheTableAndStillReachItsFood(GameTestHelper helper) {
-        BlockPos table = room(helper);
-        var feet = Reach.workableCells(helper.getLevel(), table.above());
-        helper.assertFalse(feet.contains(table.above()), "tabletop cannot be selected as a work stance");
-        helper.assertTrue(feet.contains(table.north()), "table food can still be delivered and eaten from beside it");
+        try (var fixture = new TableFixture(helper)) {
+            BlockPos table = fixture.table;
+            var feet = Reach.workableCells(helper.getLevel(), table.above());
+            helper.assertFalse(feet.contains(table.above()), "tabletop cannot be selected as a work stance");
+            helper.assertTrue(feet.contains(table.north()),
+                "table food can still be delivered and eaten from beside it");
+        }
         helper.succeed();
     }
 
     @GameTest(template = "empty", timeoutTicks = 160)
     public static void aResidentPlacedOnATableWalksDownToOrdinaryGround(GameTestHelper helper) {
-        BlockPos table = room(helper);
+        var fixture = new TableFixture(helper);
+        BlockPos table = fixture.table;
         ResidentEntity body = resident(helper, table.above());
         Vec3 target = Vec3.atBottomCenterOf(table.east(3));
         helper.startSequence().thenExecuteAfter(2, () -> walkTo(helper, body, target))
             .thenWaitUntil(() -> helper.assertTrue(body.position().distanceToSqr(target) < 0.5D,
                 "resident actually leaves the table without teleporting; " + describe(body, target)))
-            .thenExecute(body::discard).thenSucceed();
+            .thenExecute(body::discard).thenExecute(fixture::close).thenSucceed();
     }
 
     @GameTest(template = "empty", timeoutTicks = 160)
     public static void aResidentInTheMiddleOfALargeTableCanStillWalkOffItsEdge(GameTestHelper helper) {
-        BlockPos table = room(helper);
+        var fixture = new TableFixture(helper);
+        BlockPos table = fixture.table;
         for (BlockPos at : BlockPos.betweenClosed(table.offset(-1, 0, -1), table.offset(1, 0, 1))) {
-            helper.getLevel().setBlockAndUpdate(at,
-                Blocks.OAK_SLAB.defaultBlockState().setValue(SlabBlock.TYPE, SlabType.TOP));
+            helper.getLevel().setBlockAndUpdate(at, Blocks.CHISELED_QUARTZ_BLOCK.defaultBlockState());
         }
+        helper.assertTrue(Keepouts.forbidden(helper.getLevel(), table.above()),
+            "the middle of a table inside a dining area is furniture without chairs");
         ResidentEntity body = resident(helper, table.above());
         Vec3 target = Vec3.atBottomCenterOf(table.east(3));
         helper.startSequence().thenExecuteAfter(2, () -> walkTo(helper, body, target))
             .thenWaitUntil(() -> helper.assertTrue(body.position().distanceToSqr(target) < 0.5D,
                 "resident walks off the large tabletop without teleporting"))
-            .thenExecute(body::discard).thenSucceed();
+            .thenExecute(body::discard).thenExecute(fixture::close).thenSucceed();
     }
 
     @GameTest(template = "empty")
     public static void registeredTableAdaptersAlsoKeepTheirTopsOutOfWalkingAndWork(GameTestHelper helper) {
         AdapterFixture.install();
         BlockPos table = room(helper);
+        helper.assertFalse(Keepouts.forbidden(helper.getLevel(), table.above()),
+            "an unmarked plain slab is not furniture");
         helper.getLevel().setBlockAndUpdate(table, Blocks.CHISELED_QUARTZ_BLOCK.defaultBlockState());
         helper.assertTrue(DiningTables.table(helper.getLevel(), table), "integration adapter identifies its furniture");
         helper.assertTrue(Keepouts.forbidden(helper.getLevel(), table.above()), "adapter tabletop is forbidden");
+        helper.assertFalse(Footing.withFeetAt(helper.getLevel(), table.above()), "declared tables are not standable");
         helper.assertFalse(Reach.workableCells(helper.getLevel(), table).contains(table.above()),
             "integration tabletop is absent from work stances");
         helper.succeed();
@@ -98,8 +172,20 @@ public final class DiningWalkingGameTests {
             helper.getLevel().setBlockAndUpdate(at,
                 (at.getY() == table.getY() - 1 ? Blocks.STONE : Blocks.AIR).defaultBlockState());
         }
-        helper.getLevel().setBlockAndUpdate(table, Blocks.OAK_SLAB.defaultBlockState().setValue(SlabBlock.TYPE, SlabType.TOP));
+        helper.getLevel().setBlockAndUpdate(table,
+            Blocks.OAK_SLAB.defaultBlockState().setValue(SlabBlock.TYPE, SlabType.TOP));
         return table;
+    }
+
+    private static BlockPos slabFloor(GameTestHelper helper, int width, int depth) {
+        DiningTables.installKeepout();
+        BlockPos start = helper.absolutePos(new BlockPos(1, 1, 1));
+        for (BlockPos at : BlockPos.betweenClosed(start.below(), start.offset(width - 1, 3, depth - 1))) {
+            helper.getLevel().setBlockAndUpdate(at, at.getY() < start.getY()
+                ? Blocks.OAK_SLAB.defaultBlockState().setValue(SlabBlock.TYPE, SlabType.TOP)
+                : Blocks.AIR.defaultBlockState());
+        }
+        return start;
     }
 
     private static void walkTo(GameTestHelper helper, ResidentEntity body, Vec3 target) {
@@ -127,14 +213,37 @@ public final class DiningWalkingGameTests {
         return body;
     }
 
+    private static final class TableFixture implements AutoCloseable {
+        final BlockPos table;
+        final Colony colony;
+
+        TableFixture(GameTestHelper helper) {
+            AdapterFixture.install();
+            table = room(helper);
+            helper.getLevel().setBlockAndUpdate(table, Blocks.CHISELED_QUARTZ_BLOCK.defaultBlockState());
+            colony = Colonies.mint(helper.getLevel().getServer());
+            var cells = new HashSet<BlockPos>();
+            for (BlockPos at : BlockPos.betweenClosed(table.offset(-1, -1, -1), table.offset(1, -1, 1))) {
+                cells.add(at.immutable());
+            }
+            ColonyFront.of(colony).addZone(helper.getLevel(), LivingContent.DINING, cells,
+                ColonySettings.empty()).orElseThrow();
+        }
+
+        public void close() { colony.raze(); }
+    }
+
     private static final class AdapterFixture {
         private static boolean installed;
         static synchronized void install() {
-            if (installed) return;
-            DiningTables.register(ResourceLocation.fromNamespaceAndPath("folkways", "test_walking_table"), new DiningTables.Table() {
-                public boolean matches(ServerLevel level, BlockPos at) { return level.getBlockState(at).is(Blocks.CHISELED_QUARTZ_BLOCK); }
-                public Container inventory(ServerLevel level, BlockPos at) { return null; }
-            });
+            if (installed) { return; }
+            DiningTables.register(ResourceLocation.fromNamespaceAndPath("folkways", "test_walking_table"),
+                new DiningTables.Table() {
+                    public boolean matches(ServerLevel level, BlockPos at) {
+                        return level.getBlockState(at).is(Blocks.CHISELED_QUARTZ_BLOCK);
+                    }
+                    public Container inventory(ServerLevel level, BlockPos at) { return null; }
+                });
             installed = true;
         }
     }

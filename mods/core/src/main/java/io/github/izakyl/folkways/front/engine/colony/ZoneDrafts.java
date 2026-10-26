@@ -28,7 +28,7 @@ public final class ZoneDrafts {
             ResourceLocation delegation, BlockPos first, BlockPos second, ColonySettings chosen) {
         Optional<Delegation> declared = Enrollments.delegation(delegation);
         Optional<Shape.Volume> volume = volumeOf(delegation);
-        if (declared.isEmpty() || volume.isEmpty()) {
+        if (declared.isEmpty() || volume.isEmpty() || declared.get().disabledReason().isPresent()) {
             return Optional.empty();
         }
         Set<BlockPos> cells = cellsBetween(first, second, volume.get().maxCells());
@@ -42,6 +42,7 @@ public final class ZoneDrafts {
             ResourceLocation delegation, List<BlockPos> points, ColonySettings chosen) {
         Optional<Delegation> declared = Enrollments.delegation(delegation);
         if (declared.isEmpty() || !(declared.get().shape() instanceof Shape.Path line)
+                || declared.get().disabledReason().isPresent()
                 || points.size() < 2 || points.size() > line.maxPoints()) {
             return Optional.empty();
         }
