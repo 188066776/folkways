@@ -1,12 +1,15 @@
 package io.github.izakyl.folkways.front.client;
 
 import com.mojang.blaze3d.vertex.PoseStack;
+import io.github.izakyl.folkways.front.api.ui.ModeOverlays;
+import io.github.izakyl.folkways.front.api.ui.OverheadTools;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import io.github.izakyl.folkways.FolkwaysClientConfig;
 import io.github.izakyl.folkways.front.api.Shape;
+import io.github.izakyl.folkways.front.api.ui.OverheadTools;
+import io.github.izakyl.folkways.front.api.ui.PathOffers;
 import io.github.izakyl.folkways.front.engine.item.HeldBook;
 import io.github.izakyl.folkways.front.engine.net.CreatePathPacket;
-import io.github.izakyl.folkways.front.api.ui.PathOffers;
 import io.github.izakyl.folkways.front.ui.screen.Drawing;
 import java.util.ArrayList;
 import java.util.List;
@@ -97,7 +100,7 @@ public final class PathSelection {
             return;
         }
         Optional<HeldBook> book = HeldBook.bound(player);
-        if (book.isEmpty() || book.get().gesture() != Shape.Gesture.LINE) {
+        if (book.isEmpty() || (book.get().gesture() != Shape.Gesture.LINE || OverheadTools.active().isPresent())) {
             clear();
         }
     }
@@ -248,7 +251,8 @@ public final class PathSelection {
         // stores them, and each piece is drawn where it shows: on a ship, with the ship.
         Optional<BlockPos> next = POINTS.isEmpty() || POINTS.size() >= MAX_POINTS ? Optional.empty() : aimed(minecraft);
         Set<BlockPos> laid = ColonyHighlightState.ribbon(level, POINTS);
-        VertexConsumer fills = buffers.getBuffer(RenderType.debugFilledBox());
+        VertexConsumer fills = ModeOverlays.vertices(
+            buffers.getBuffer(RenderType.debugFilledBox()), OverheadTools.BUILD);
         for (BlockPos cell : laid) {
             ColonyHighlightState.ribbonCell(level, poseStack, fills, cell, DRAFT, ColonyHighlightState.RIBBON_FILL,
                 partialTick);
@@ -262,7 +266,8 @@ public final class PathSelection {
         });
         buffers.endBatch(RenderType.debugFilledBox());
 
-        VertexConsumer lines = buffers.getBuffer(RenderType.lines());
+        VertexConsumer lines = ModeOverlays.vertices(
+            buffers.getBuffer(RenderType.lines()), OverheadTools.BUILD);
         for (var path : Layer.PATHS.shown() ? PATHS : List.<io.github.izakyl.folkways.front.engine.colony.ColonyPath>of()) {
             for (int at = 1; at < path.points().size(); at++) {
                 BlockPos from = path.points().get(at - 1);

@@ -15,3 +15,5 @@ For groundwork clearing and fallen-wood rules, see [Groundwork](groundwork.md).
 | Find a module, API or lifecycle hook                                           | [Architecture](architecture.md)                                |
 
 For documentation layout and maintenance, see the [documentation index](../README.md).
+
+- [TACZ firearms](tacz.md): optional finite-ammunition guns for profiles and sentries.

@@ -6,10 +6,11 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.blaze3d.vertex.VertexFormat;
 import io.github.izakyl.folkways.FolkwaysClientConfig;
 import io.github.izakyl.folkways.front.api.Shape;
+import io.github.izakyl.folkways.front.api.ui.BoxOffers;
+import io.github.izakyl.folkways.front.api.ui.OverheadTools;
 import io.github.izakyl.folkways.front.engine.item.HeldBook;
 import io.github.izakyl.folkways.front.engine.net.CreateZonePacket;
 import io.github.izakyl.folkways.front.engine.net.ZoneSnapshot;
-import io.github.izakyl.folkways.front.api.ui.BoxOffers;
 import io.github.izakyl.folkways.front.ui.screen.Drawing;
 import java.util.List;
 import java.util.Optional;
@@ -46,12 +47,15 @@ public final class ZoneSelection {
 
     private static final long OPENING_WINDOW_MS = 2000L;
     private static UUID openingId;
+    private static UUID selectedId;
+
     private static long openingUntilMs;
 
     static {
         Drawing.install(Shape.Gesture.BOX, new Draft<Marked>(ZoneSelection::marked, ZoneSelection::clear,
             ZoneSelection::measure, box -> box.sizeX() * box.sizeY() * box.sizeZ(),
-            (colony, box, delegation, settings) -> new CreateZonePacket(colony, box.min(), box.max(), delegation, settings),
+            (colony, box, delegation, settings) ->
+                new CreateZonePacket(colony, box.min(), box.max(), delegation, settings),
             id -> BoxOffers.of(id).map(offer -> (box, taking) -> offer.body().build(box.min(), box.max(), taking))));
         Drawing.offers(Shape.Gesture.BOX, () -> BoxOffers.all().stream()
             .map(offer -> new Drawing.Offered(offer.id(), offer.nameKey(), offer.icon()))
@@ -60,6 +64,16 @@ public final class ZoneSelection {
     }
 
     private ZoneSelection() {
+    }
+
+    public static void selected(UUID id) {
+        selectedId = id;
+    }
+
+    static boolean highlighted(UUID id) {
+        Minecraft minecraft = Minecraft.getInstance();
+        return minecraft.screen != null && id.equals(selectedId)
+            || minecraft.player != null && aimedZone(minecraft.player).map(zone -> zone.id().equals(id)).orElse(false);
     }
 
     public record Marked(BlockPos min, BlockPos max) {
@@ -94,7 +108,7 @@ public final class ZoneSelection {
         return origin != null || min != null;
     }
 
-    static void discard() {
+    public static void discard() {
         if (drafting()) {
             clear();
             Draft.say(Component.translatable("folkways.zone.dropped"));
@@ -120,7 +134,7 @@ public final class ZoneSelection {
         return range;
     }
 
-    static void openOn(UUID id) {
+    public static void openOn(UUID id) {
         openingId = id;
         openingUntilMs = Util.getMillis() + OPENING_WINDOW_MS;
     }
@@ -139,7 +153,7 @@ public final class ZoneSelection {
             return;
         }
         Optional<HeldBook> book = HeldBook.bound(player);
-        if (book.isEmpty() || book.get().gesture() != Shape.Gesture.BOX) {
+        if (book.isEmpty() || (book.get().gesture() != Shape.Gesture.BOX && OverheadTools.active().isEmpty())) {
             clear();
             return;
         }

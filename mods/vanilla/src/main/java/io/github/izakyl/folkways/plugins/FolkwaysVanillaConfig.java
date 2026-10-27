@@ -21,6 +21,9 @@ public final class FolkwaysVanillaConfig {
     private static final ModConfigSpec.IntValue FOOD_PER_RESIDENT;
     private static final ModConfigSpec.IntValue SETTLER_INTERVAL_TICKS;
     private static final ModConfigSpec.IntValue MAX_WAITING_SETTLERS;
+    private static final ModConfigSpec.IntValue MAX_DAMAGE_CONTROL_CELLS;
+    private static final ModConfigSpec.IntValue DAMAGE_CONTROL_SCAN_BUDGET;
+    private static final ModConfigSpec.IntValue DAMAGE_CONTROL_CONCURRENCY;
     private static final ModConfigSpec.IntValue MAX_FISH_CELLS;
     private static final ModConfigSpec.IntValue MAX_PASTURE_CELLS;
     private static final ModConfigSpec.IntValue MAX_FARM_CELLS;
@@ -28,6 +31,21 @@ public final class FolkwaysVanillaConfig {
     private static final ModConfigSpec.IntValue MAX_PATROL_POINTS;
     private static final ModConfigSpec.IntValue PATROL_WARD_RADIUS;
     private static final ModConfigSpec.IntValue PATROL_WARD_TICKS;
+    private static final ModConfigSpec.IntValue MAX_SENTRY_CELLS;
+    private static final ModConfigSpec.IntValue DEFENDER_SIGHT_RADIUS;
+    private static final ModConfigSpec.DoubleValue SIGHT_HEIGHT_PER_BLOCK;
+    private static final ModConfigSpec.IntValue SIGHT_HEIGHT_LIMIT;
+    private static final ModConfigSpec.DoubleValue DARK_SIGHT_MULTIPLIER;
+    private static final ModConfigSpec.IntValue DARK_SIGHT_LIGHT_LEVEL;
+    private static final ModConfigSpec.IntValue FULL_SIGHT_LIGHT_LEVEL;
+    private static final ModConfigSpec.DoubleValue OBSERVATION_SIGHT_MULTIPLIER;
+    private static final ModConfigSpec.IntValue MINIMUM_SIGHT_RADIUS;
+    private static final ModConfigSpec.IntValue MAXIMUM_SIGHT_RADIUS;
+    private static final ModConfigSpec.IntValue SPOTTED_TARGET_TTL;
+    private static final ModConfigSpec.IntValue MAX_SPOTTED_TARGETS;
+    private static final ModConfigSpec.IntValue SENTRY_CALL_RADIUS;
+    private static final ModConfigSpec.IntValue SENTRY_CALL_RESPONDERS;
+    private static final ModConfigSpec.IntValue SENTRY_CALL_TICKS;
     private static final ModConfigSpec.IntValue MAX_BUILD_CELLS;
     private static final ModConfigSpec.LongValue MAX_BLUEPRINT_VOLUME;
     private static final ModConfigSpec.IntValue DRAW_SECONDS;
@@ -63,6 +81,15 @@ public final class FolkwaysVanillaConfig {
             .defineInRange("maxWaitingSettlers", 5, 1, 64);
         BUILDER.pop();
 
+        BUILDER.push("damageControl");
+        MAX_DAMAGE_CONTROL_CELLS = BUILDER.comment("Largest damage control zone, in cells.")
+            .defineInRange("maxZoneCells", 32_768, 1, 262_144);
+        DAMAGE_CONTROL_SCAN_BUDGET = BUILDER.comment("Cells inspected per colony per tick, shared by its zones.")
+            .defineInRange("scanBudget", 512, 1, 16_384);
+        DAMAGE_CONTROL_CONCURRENCY = BUILDER.comment("Most residents suppressing fires at once in one colony.")
+            .defineInRange("concurrency", 4, 1, 64);
+        BUILDER.pop();
+
         BUILDER.push("zones");
         MAX_FISH_CELLS = BUILDER
             .comment("Largest fishing zone a player may mark out, in cells. The box marks where a fisher",
@@ -95,6 +122,55 @@ public final class FolkwaysVanillaConfig {
             .comment("How long, in ticks, a stop stays warded after a patroller last stood watch there.",
                 "Patrollers come back round to a stop once half of this has gone by.")
             .defineInRange("patrolWardTicks", 2_400, 20, 72_000);
+        BUILDER.pop();
+
+        BUILDER.push("sentries");
+        MAX_SENTRY_CELLS = BUILDER
+            .comment("Largest sentry zone in cells.")
+            .defineInRange("maxSentryCells", 25, 1, 256);
+        DEFENDER_SIGHT_RADIUS = BUILDER
+            .comment("Baseline sight before vigilance, relative eye height, target brightness and observation gear.")
+            .defineInRange("defenderSightRadius", 32, 1, 128);
+        SIGHT_HEIGHT_PER_BLOCK = BUILDER
+            .comment("Extra sight per block the observer's eyes are above the target's eyes.")
+            .defineInRange("sightHeightPerBlock", 1.5, 0, 8);
+        SIGHT_HEIGHT_LIMIT = BUILDER
+            .comment("Maximum positive eye-height difference counted for sight, in blocks.")
+            .defineInRange("sightHeightLimit", 16, 0, 64);
+        DARK_SIGHT_MULTIPLIER = BUILDER
+            .comment("Sight multiplier at zero effective target light; interpolated to one in bright light.")
+            .defineInRange("darkSightMultiplier", .25, 0, 1);
+        DARK_SIGHT_LIGHT_LEVEL = BUILDER
+            .comment("Effective target light at or below which the darkest sight factor applies;",
+                "capped below full light.")
+            .defineInRange("darkSightLightLevel", 4, 0, 14);
+        FULL_SIGHT_LIGHT_LEVEL = BUILDER
+            .comment("Effective target light at which darkness no longer reduces sight.")
+            .defineInRange("fullSightLightLevel", 12, 1, 15);
+        OBSERVATION_SIGHT_MULTIPLIER = BUILDER
+            .comment("Sight multiplier for a profile-required observation item actually in the pack; one disables it.")
+            .defineInRange("observationSightMultiplier", 2.0, 1, 4);
+        MINIMUM_SIGHT_RADIUS = BUILDER
+            .comment("Minimum detection distance despite darkness, still requiring line of sight; capped by maximum.")
+            .defineInRange("minimumSightRadius", 3, 1, 16);
+        MAXIMUM_SIGHT_RADIUS = BUILDER
+            .comment("Hard cap on all detection distances and entity scan bounds, in blocks.")
+            .defineInRange("maximumSightRadius", 128, 1, 128);
+        SPOTTED_TARGET_TTL = BUILDER
+            .comment("Maximum observation age in ticks. Reports and calls are transient.")
+            .defineInRange("spottedTargetTtl", 100, 1, 1200);
+        MAX_SPOTTED_TARGETS = BUILDER
+            .comment("Maximum observations kept by one colony.")
+            .defineInRange("maxSpottedTargets", 128, 1, 4096);
+        SENTRY_CALL_RADIUS = BUILDER
+            .comment("Maximum distance from a sentry to a responding route patroller.")
+            .defineInRange("sentryCallRadius", 48, 1, 256);
+        SENTRY_CALL_RESPONDERS = BUILDER
+            .comment("Maximum responding route patrollers per hostile.")
+            .defineInRange("sentryCallResponders", 2, 1, 16);
+        SENTRY_CALL_TICKS = BUILDER
+            .comment("Maximum duration of one patrol diversion, in ticks.")
+            .defineInRange("sentryCallTicks", 200, 20, 1200);
         BUILDER.pop();
 
         BUILDER.push("blueprints");
@@ -191,8 +267,80 @@ public final class FolkwaysVanillaConfig {
         return read(MAX_WAITING_SETTLERS);
     }
 
+    public static int maxDamageControlCells() {
+        return read(MAX_DAMAGE_CONTROL_CELLS);
+    }
+
+    public static int damageControlScanBudget() {
+        return read(DAMAGE_CONTROL_SCAN_BUDGET);
+    }
+
+    public static int damageControlConcurrency() {
+        return read(DAMAGE_CONTROL_CONCURRENCY);
+    }
+
     public static long maxFishCells() {
         return read(MAX_FISH_CELLS);
+    }
+
+    public static int maxSentryCells() {
+        return read(MAX_SENTRY_CELLS);
+    }
+
+    public static int defenderSightRadius() {
+        return read(DEFENDER_SIGHT_RADIUS);
+    }
+
+    public static double sightHeightPerBlock() {
+        return read(SIGHT_HEIGHT_PER_BLOCK);
+    }
+
+    public static int sightHeightLimit() {
+        return read(SIGHT_HEIGHT_LIMIT);
+    }
+
+    public static double darkSightMultiplier() {
+        return read(DARK_SIGHT_MULTIPLIER);
+    }
+
+    public static int darkSightLightLevel() {
+        return read(DARK_SIGHT_LIGHT_LEVEL);
+    }
+
+    public static int fullSightLightLevel() {
+        return read(FULL_SIGHT_LIGHT_LEVEL);
+    }
+
+    public static double observationSightMultiplier() {
+        return read(OBSERVATION_SIGHT_MULTIPLIER);
+    }
+
+    public static int minimumSightRadius() {
+        return read(MINIMUM_SIGHT_RADIUS);
+    }
+
+    public static int maximumSightRadius() {
+        return read(MAXIMUM_SIGHT_RADIUS);
+    }
+
+    public static int spottedTargetTtl() {
+        return read(SPOTTED_TARGET_TTL);
+    }
+
+    public static int maxSpottedTargets() {
+        return read(MAX_SPOTTED_TARGETS);
+    }
+
+    public static int sentryCallRadius() {
+        return read(SENTRY_CALL_RADIUS);
+    }
+
+    public static int sentryCallResponders() {
+        return read(SENTRY_CALL_RESPONDERS);
+    }
+
+    public static int sentryCallTicks() {
+        return read(SENTRY_CALL_TICKS);
     }
 
     public static int maxPatrolPoints() {

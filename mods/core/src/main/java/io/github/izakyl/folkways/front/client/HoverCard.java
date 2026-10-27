@@ -1,5 +1,6 @@
 package io.github.izakyl.folkways.front.client;
 
+import io.github.izakyl.folkways.front.api.ui.OverheadTools;
 import io.github.izakyl.folkways.front.client.ColonyLookCard.Row;
 import io.github.izakyl.folkways.front.engine.net.LookLines;
 import java.util.List;
@@ -49,6 +50,9 @@ final class HoverCard {
 
     // A resident stands in front of the ground they stand on, so their card comes before a zone's.
     private static List<Row> rows(Minecraft minecraft) {
+        if (OverheadTools.active().isPresent()) {
+            return ToolOverlay.aimed().map(mark -> ColonyLookCard.rows(mark.lines())).orElse(List.of());
+        }
         if (Layer.RESIDENTS.cards()) {
             Optional<EntityHitResult> entity = Aim.of(minecraft.player).entity(minecraft.player);
             if (entity.isPresent()) {

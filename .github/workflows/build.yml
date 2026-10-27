@@ -42,13 +42,21 @@ jobs:
       matrix:
         include:
           - mod: core
-            profiles: base cookery
+            profiles: base cookery rts
           - mod: vanilla
-            profiles: base cookery
+            profiles: base cookery rts warfare
           - mod: create
             profiles: base
           - mod: cookery
             profiles: cookery
+          - mod: rts
+            profiles: rts
+          - mod: warfare
+            profiles: warfare
+          - mod: tacz
+            profiles: tacz
+          - mod: firefighting
+            profiles: firefighting
     name: GameTests (${{ matrix.mod }})
     steps:
       - uses: actions/checkout@v5
@@ -83,6 +91,18 @@ jobs:
             gradle_args=("-PgameTestMod=$GAME_TEST_MOD")
             if [[ "$profile" == cookery ]]; then
               gradle_args+=(-PcookeryTests=true)
+            fi
+            if [[ "$profile" == rts ]]; then
+              gradle_args+=(-PrtsTests=true)
+            fi
+            if [[ "$profile" == warfare ]]; then
+              gradle_args+=(-PwarfareTests=true)
+            fi
+            if [[ "$profile" == tacz ]]; then
+              gradle_args+=(-PtaczTests=true)
+            fi
+            if [[ "$profile" == firefighting ]]; then
+              gradle_args+=(-PfirefightingTests=true)
             fi
             status=failure
             if timeout --signal=TERM --kill-after=60s 50m ./gradlew "${gradle_args[@]}" --console=plain runGameTestServer 2>&1 | tee "run/gametest/ci/$GAME_TEST_MOD-$profile.log"; then

@@ -195,7 +195,7 @@ def atempo(speed):
         steps.append(f"atempo={speed:.6f}")
     return ",".join(steps) + "," if steps else ""
 
-def render_shot(name, src, sections, gain, place):
+def render_shot(name, src, sections, gain, place, shade=True):
     pieces = [piece for _, run_ in sections for piece in run_]
     out_len = sum((b - a) / sp for a, b, sp in pieces)
     out = os.path.join(OUT, name + ".mp4")
@@ -224,12 +224,14 @@ def render_shot(name, src, sections, gain, place):
         if caps:
             # every line of the section at once, over its own stretch of the shot, on a gradient on its side
             lo, hi = round(start + 0.7, 2), round(start + span - 0.5, 2)
-            inputs += ["-loop", "1", "-t", str(out_len), "-i", grad]
-            n = inputs.count("-i") - 1
-            chain.append(f"[{n}:v]format=rgba,fade=t=in:st={lo}:d=0.5:alpha=1,"
-                         f"fade=t=out:st={hi - 0.5}:d=0.5:alpha=1[g{k}]")
-            chain.append(f"[{cur}][g{k}]overlay={pos}:shortest=1[vg{k}]")
-            cur = f"vg{k}"
+            # Tactical captions can retain the full brightness of the game UI.
+            if shade:
+                inputs += ["-loop", "1", "-t", str(out_len), "-i", grad]
+                n = inputs.count("-i") - 1
+                chain.append(f"[{n}:v]format=rgba,fade=t=in:st={lo}:d=0.5:alpha=1,"
+                             f"fade=t=out:st={hi - 0.5}:d=0.5:alpha=1[g{k}]")
+                chain.append(f"[{cur}][g{k}]overlay={pos}:shortest=1[vg{k}]")
+                cur = f"vg{k}"
             filters += caption_filters(place, scene.get("tag", ""), "\n".join(caps), lo, hi)
         start += span
     if filters:

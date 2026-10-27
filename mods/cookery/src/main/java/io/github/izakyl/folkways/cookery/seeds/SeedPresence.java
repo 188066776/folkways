@@ -1,14 +1,15 @@
 package io.github.izakyl.folkways.cookery.seeds;
 
 import com.github.ysbbbbbb.kaleidoscopecookery.init.ModItems;
-import io.github.izakyl.folkways.plugins.compost.SeedBudget;
 import com.github.ysbbbbbb.kaleidoscopecookery.init.tag.TagMod;
+import io.github.izakyl.folkways.cookery.KitchenBookings;
 import io.github.izakyl.folkways.core.api.colony.Closing;
 import io.github.izakyl.folkways.core.api.colony.Colony;
 import io.github.izakyl.folkways.core.api.colony.ColonyView;
 import io.github.izakyl.folkways.core.api.colony.Sweep;
 import io.github.izakyl.folkways.core.api.resident.body.Bodies;
 import io.github.izakyl.folkways.core.api.resident.body.Body;
+import io.github.izakyl.folkways.core.api.terms.ItemSpec;
 import io.github.izakyl.folkways.core.api.terms.Reach;
 import io.github.izakyl.folkways.core.api.terms.RefusalKind;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
@@ -31,7 +32,7 @@ import io.github.izakyl.folkways.front.api.Facing;
 import io.github.izakyl.folkways.front.api.Fronts;
 import io.github.izakyl.folkways.front.api.ZoneView;
 import io.github.izakyl.folkways.front.api.notice.Line;
-import io.github.izakyl.folkways.cookery.KitchenBookings;
+import io.github.izakyl.folkways.plugins.compost.SeedBudget;
 import io.github.izakyl.folkways.plugins.farming.FarmingContent;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -177,11 +178,16 @@ public final class SeedPresence implements Facing {
             if (zone.cells().stream().noneMatch(ground -> view.level().isLoaded(ground.above())
                     && view.level().getBlockState(ground.above()).is(Blocks.SHORT_GRASS))) {
                 if (!zone.settings().flag(RESTORE_GRASS)) status = "need_grass";
-                else if (zone.cells().stream().noneMatch(ground -> GrassSources.safeRestore(view.level(), ground, zone.cells()))) status = "need_growth_space";
-                else status = Fronts.of(colony).stocked(view.level().getServer(),
-                    io.github.izakyl.folkways.core.api.terms.Goods.specOf(Items.BONE_MEAL.getDefaultInstance())) == 0
-                    ? "need_bonemeal" : "restoring";
-            } else status = "gathering";
+                    else if (zone.cells().stream()
+                    .noneMatch(ground -> GrassSources.safeRestore(view.level(), ground, zone.cells()))) {
+                    status = "need_growth_space";
+                } else {
+                    status = Fronts.of(colony).stocked(view.level().getServer(), ItemSpec.of(Items.BONE_MEAL)) == 0
+                        ? "need_bonemeal" : "restoring";
+                }
+            } else {
+                status = "gathering";
+            }
         }
         return List.of(Line.text(Component.translatable("folkways.page.cookery.seeds." + status)));
     }
@@ -220,10 +226,14 @@ public final class SeedPresence implements Facing {
             generation = bookings.generation(anchor);
             UUID id = named((restore ? "restore/" : "gather/") + colony.id() + "/" + zone + "/" + ground);
             hold = bookings.hold(anchor, id);
-            spec = NodeSpec.of(id, ID, new WorkSite.AtBlock(ground), stances, Workload.Once.of(10))
-                .vocation(FarmingContent.trade()).gesture(WorkGesture.SWING).leaves(Leaves.room(4))
-                .needs(restore ? List.of(new Need(io.github.izakyl.folkways.core.api.terms.Goods.specOf(Items.BONE_MEAL.getDefaultInstance()), 1, true)) : List.of())
-                .doing(restore ? RESTORING : GATHERING).done();
+            spec =
+                NodeSpec.of(id, ID, new WorkSite.AtBlock(ground), stances, Workload.Once.of(10))
+                .vocation(FarmingContent.trade())
+                .gesture(WorkGesture.SWING)
+                .leaves(Leaves.room(4))
+                .needs(restore ? List.of(new Need(ItemSpec.of(Items.BONE_MEAL), 1, true)) : List.of())
+                .doing(restore ? RESTORING : GATHERING)
+                .done();
         }
         public NodeSpec spec() { return spec; }
         public boolean gathersGrass() { return !restore; }

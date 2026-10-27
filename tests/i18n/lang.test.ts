@@ -4,7 +4,6 @@ import test from "node:test";
 import { calls, patternWords } from "./patterns.ts";
 
 const ROOT = new URL("../../", import.meta.url);
-const LANG = new URL("mods/core/src/main/resources/assets/folkways/lang/", ROOT);
 const MODS = new URL("mods/", ROOT);
 const PATTERNS = new URL("mods/vanilla/src/main/resources/data/folkways/folkways/pattern/", ROOT);
 const LOCALES = ["en_us", "zh_cn", "zh_hk", "zh_tw"];
@@ -40,8 +39,15 @@ function argumentsOf(text: string): number[] {
   return [...new Set(used)].sort((a, b) => a - b);
 }
 
-const catalogs = new Map(readdirSync(LANG).filter(name => name.endsWith(".json"))
-  .map(name => [name, catalog(read(new URL(name, LANG)))]));
+const moduleCatalogs = readdirSync(MODS, { encoding: "utf8" }).flatMap(mod => {
+  const lang = new URL(`${mod}/src/main/resources/assets/folkways/lang/`, MODS);
+  if (!existsSync(lang)) return [];
+  const entries = new Map(readdirSync(lang).filter(name => name.endsWith(".json"))
+    .map(name => [name, catalog(read(new URL(name, lang)))]));
+  return [{ mod, entries }];
+});
+const catalogs = new Map(LOCALES.map(locale => [locale + ".json", Object.assign({},
+  ...moduleCatalogs.map(({ entries }) => entries.get(locale + ".json"))) as Record<string, string>]));
 const english = catalogs.get("en_us.json")!;
 // Every mod's sources, each named from its own src/main/java.
 const sources = readdirSync(MODS, { encoding: "utf8" }).flatMap(mod => {
@@ -54,11 +60,24 @@ const sources = readdirSync(MODS, { encoding: "utf8" }).flatMap(mod => {
 test("language catalogs have matching keys and interpolation arguments", () => {
   assert.ok(english, "en_us is required for fallback");
   for (const locale of LOCALES) assert.ok(catalogs.has(locale + ".json"), `${locale} is required`);
-  const keys = Object.keys(english).sort();
-  for (const [locale, entries] of catalogs) {
-    assert.deepEqual(Object.keys(entries).sort(), keys, `${locale}: missing or extra keys`);
-    for (const key of keys) {
-      assert.deepEqual(argumentsOf(entries[key]), argumentsOf(english[key]), `${locale}: ${key}`);
+  for (const { mod, entries: module } of moduleCatalogs) {
+    const fallback = module.get("en_us.json");
+    assert.ok(fallback, `${mod}: en_us is required`);
+    const keys = Object.keys(fallback).sort();
+    for (const locale of LOCALES) {
+      const entries = module.get(locale + ".json");
+      assert.ok(entries, `${mod}: ${locale} is required`);
+      assert.deepEqual(Object.keys(entries).sort(), keys, `${mod}/${locale}: missing or extra keys`);
+      for (const key of keys) {
+        assert.deepEqual(argumentsOf(entries[key]), argumentsOf(fallback[key]), `${mod}/${locale}: ${key}`);
+      }
+    }
+  }
+  for (const locale of LOCALES) {
+    const owners = new Map<string, string>();
+    for (const { mod, entries } of moduleCatalogs) for (const key of Object.keys(entries.get(locale + ".json")!)) {
+      assert.ok(!owners.has(key), `${locale}: ${key} is duplicated in ${owners.get(key)} and ${mod}`);
+      owners.set(key, mod);
     }
   }
 });
@@ -193,11 +212,11 @@ test("declared task and delegation names have translated dynamic keys", () => {
   const declarations = new Map<string, string>();
   for (const { name, text } of sources) {
     const type = name.split(/[\\/]/).at(-1)!.replace(/\.java$/, "");
-    const helpers = new Set([...text.matchAll(/ResourceLocation\s+(\w+)\(String\s+(\w+)\)\s*\{\s*return\s+ResourceLocation\.fromNamespaceAndPath\((?:"folkways"|FolkwaysMod\.MOD_ID),\s*\2\);/g)]
+    const helpers = new Set([...text.matchAll(/ResourceLocation\s+(\w+)\(String\s+(\w+)\)\s*\{\s*return\s+ResourceLocation\.fromNamespaceAndPath\(\s*(?:"folkways"|FolkwaysMod\.MOD_ID),\s*\2\);/g)]
       .map(match => match[1]));
     for (const constant of text.matchAll(/(?:final\s+)?ResourceLocation\s+(\w+)\s*=\s*([^;]+);/g)) {
       const expression = constant[2];
-      const direct = /ResourceLocation\.fromNamespaceAndPath\("([^"]+)",\s*"([^"]+)"\)/.exec(expression);
+      const direct = /ResourceLocation\.fromNamespaceAndPath\(\s*"([^"]+)",\s*"([^"]+)"\)/.exec(expression);
       const helper = /^(\w+)\("([^"]+)"\)$/.exec(expression.trim());
       const value = direct ? direct[1] + "." + direct[2] : helper && helpers.has(helper[1]) ? "folkways." + helper[2] : undefined;
       if (value) declarations.set(type + "." + constant[1], value);
@@ -209,7 +228,7 @@ test("declared task and delegation names have translated dynamic keys", () => {
     const statics = new Map([...text.matchAll(/import static [\w.]+\.(\w+)\.(\w+);/g)].map(match => [match[2], match[1] + "." + match[2]]));
     for (const method of ["doing", "Delegation"]) for (const call of calls(text, method)) {
       if (!call.args.length) continue;
-      const direct = /ResourceLocation\.fromNamespaceAndPath\("([^"]+)",\s*"([^"]+)"\)/.exec(call.args[0]);
+      const direct = /ResourceLocation\.fromNamespaceAndPath\(\s*"([^"]+)",\s*"([^"]+)"\)/.exec(call.args[0]);
       const ids = direct ? [direct[1] + "." + direct[2]] : [...call.args[0].matchAll(/\b(?:(\w+)\.)?([A-Z][A-Z_0-9]+)\b/g)]
         .map(match => declarations.get(match[1] ? match[1] + "." + match[2] : statics.get(match[2]) ?? type + "." + match[2]))
         .filter((id): id is string => !!id);

@@ -1,7 +1,12 @@
 package io.github.izakyl.folkways.front.api.ui;
 
+import com.lowdragmc.lowdraglib2.gui.ui.UIElement;
+import java.util.List;
+import java.util.UUID;
+import java.util.function.BiFunction;
 import java.util.function.Supplier;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.entity.player.Player;
 import net.neoforged.bus.api.Event;
 import net.neoforged.fml.event.IModBusEvent;
 
@@ -40,8 +45,24 @@ public final class RegisteringUi extends Event implements IModBusEvent {
         registry.inlay(bay, owner, factory);
     }
 
+    public void zoneSettings(List<ResourceLocation> delegations,
+            BiFunction<Player, Supplier<UUID>, UIElement> factory) {
+        writing();
+        ZonePanels.register(delegations, factory);
+    }
+
     public void outline(Outline outline) {
         writing();
         registry.outline(outline);
+    }
+
+    public void mode(OverheadTools.Mode mode) {
+        writing();
+        OverheadTools.registerMode(mode);
+    }
+
+    public void tool(OverheadTools.Tool tool) {
+        writing();
+        OverheadTools.register(tool);
     }
 }

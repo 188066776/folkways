@@ -4,6 +4,7 @@ import io.github.izakyl.folkways.core.api.terms.ClimbableBlocks;
 import io.github.izakyl.folkways.core.api.terms.Realm;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
 import io.github.izakyl.folkways.core.api.terms.WorldSpaces;
+import java.util.List;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
@@ -12,6 +13,7 @@ import net.minecraft.world.entity.ai.navigation.GroundPathNavigation;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.pathfinder.PathFinder;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.shapes.VoxelShape;
 
 public final class ResidentPathNavigation extends GroundPathNavigation {
 
@@ -51,10 +53,15 @@ public final class ResidentPathNavigation extends GroundPathNavigation {
         }
         var evaluator = (ResidentNodeEvaluator) nodeEvaluator;
         evaluator.startingAt(start);
+        // Snapshot native colliders once per live search. Block-only paths otherwise walk through vehicles.
+        evaluator.avoidingEntities(realm instanceof Realm.Frame ? List.of()
+            : level.getEntityCollisions(mob, mob.getBoundingBox().inflate(range + margin + 1)).stream()
+                .map(VoxelShape::bounds).toList());
         try {
             return super.createPath(targets, margin, above, accuracy, range);
         } finally {
             evaluator.startingAt(null);
+            evaluator.avoidingEntities(List.of());
         }
     }
 

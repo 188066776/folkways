@@ -11,6 +11,7 @@ import dev.vfyjxf.taffy.style.AlignItems;
 import dev.vfyjxf.taffy.style.FlexDirection;
 import io.github.izakyl.folkways.front.api.Delegation;
 import io.github.izakyl.folkways.front.api.Shape;
+import io.github.izakyl.folkways.front.api.ToolKinds;
 import io.github.izakyl.folkways.front.api.ui.Rows;
 import io.github.izakyl.folkways.front.api.ui.Tokens;
 import io.github.izakyl.folkways.front.engine.Enrollments;
@@ -121,7 +122,8 @@ public final class Drawing {
                 .flexGrow(1).flexShrink(1).minWidth(0).minHeight(0).gapAll(5));
         detail.setOverflowVisible(false);
         for (Delegation declared : Enrollments.delegations()) {
-            if (declared.shape().gesture().drawn()) {
+            if (declared.shape().gesture().drawn()
+                && !ToolKinds.contains(declared.id())) {
                 add(list, detail, new Picked.Ground(declared.id()), declared.shape().gesture(),
                     Component.translatable("folkways.delegation."
                         + declared.id().getNamespace() + "." + declared.id().getPath()),

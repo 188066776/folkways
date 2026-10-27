@@ -175,8 +175,16 @@ public final class SeedPlanningGameTests {
             var at = WorldPos.of(level, pos);bookings.admit(at);
             var goals = station.recovery(colony, level, at, Stances.WHEREVER, bookings, () -> { }, planning);
             helper.assertValueEqual(goals.size(), 1, "every eligible bucket still offers its original feed task");
-            helper.assertTrue(goals.getFirst().nodes().getFirst().spec().needs().getFirst().spec()
-                .equals(Goods.specOf(Items.WHEAT_SEEDS.getDefaultInstance())), "empty earlier kinds do not hide the affordable last seed");
+            helper.assertTrue(
+                goals.getFirst()
+                .nodes()
+                .getFirst()
+                .spec()
+                .needs()
+                .getFirst()
+                .spec()
+                .equals(ItemSpec.of(Items.WHEAT_SEEDS)),
+                "empty earlier kinds do not hide the affordable last seed");
         }
         helper.assertValueEqual(snapshots.get(), 1, "all thirty-two buckets share one physical inventory read");
         helper.assertValueEqual(budgetCatalogues.get(), 1, "the allowance catalogue is read once");

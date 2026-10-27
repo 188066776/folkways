@@ -1,0 +1,22 @@
+# 新版战斗宣传片。全部字幕集中在此；顺序为 RTS → 混编手持 → 独立武器站 → 灭火 → 修复。
+# flank 不重复手持武器字幕；灭火与修复分镜，各显示对应功能的一行字幕。
+
+[scenes.rts]
+captions = ["新功能：RTS指挥模式"]
+
+[scenes.gate]
+captions = ["已支持：TaCZ & 卓越前线的手持武器"]
+
+[scenes.flank]
+captions = []
+
+[scenes.stations]
+captions = ["已支持：卓越前线的武器站"]
+
+[scenes.damage]
+captions = [
+    "已支持：机械动力 消防附加，可以使用灭火器和消防水带来灭火",
+]
+
+[scenes.repair]
+captions = ["新功能：损害管制，可以划定区域，在遭受损失时自动修复"]

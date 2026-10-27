@@ -1,7 +1,6 @@
 package io.github.izakyl.folkways.plugins.compost;
 
 import io.github.izakyl.folkways.core.api.colony.Closing;
-import io.github.izakyl.folkways.core.api.terms.Goods;
 import io.github.izakyl.folkways.core.api.terms.ItemDrops;
 import io.github.izakyl.folkways.core.api.terms.Reach;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
@@ -19,6 +18,7 @@ import io.github.izakyl.folkways.core.api.work.WorkSite;
 import io.github.izakyl.folkways.core.api.work.Worker;
 import io.github.izakyl.folkways.core.api.work.Workload;
 import io.github.izakyl.folkways.plugins.farming.FarmingContent;
+import io.github.izakyl.folkways.core.api.terms.ItemSpec;
 import java.nio.charset.StandardCharsets;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -32,6 +32,7 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -173,10 +174,17 @@ public final class CompostStation {
                 .getBytes(StandardCharsets.UTF_8));
             generation = bookings.generation(at);
             hold = bookings.hold(at, id);
-            spec = NodeSpec.of(id, CompostContent.ID, new WorkSite.AtBlock(at), stances, Workload.Once.of(10))
-                .vocation(FarmingContent.trade()).leaves(Leaves.room(1))
-                .needs(seed.map(item -> List.of(new Need(Goods.specOf(item.getDefaultInstance()), inputs, true))).orElseGet(List::of))
-                .doing(net.minecraft.resources.ResourceLocation.fromNamespaceAndPath("folkways", "composting")).done();
+            spec =
+                NodeSpec.of(id, CompostContent.ID, new WorkSite.AtBlock(at), stances, Workload.Once.of(10))
+                .vocation(FarmingContent.trade())
+                .leaves(Leaves.room(1))
+                .needs(
+                seed.map(item -> List.of(new Need(ItemSpec.of(item), inputs, true)))
+                .orElseGet(List::of))
+                .doing(
+                ResourceLocation.fromNamespaceAndPath(
+                "folkways", "composting"))
+                .done();
         }
 
         public NodeSpec spec() { return spec; }

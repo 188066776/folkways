@@ -18,10 +18,8 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.item.Item;
 
 /**
  * One package network as the colony draws on it, answering for everything the network holds: its goods taken by hand
@@ -40,16 +38,17 @@ record Depot(UUID key, WorkSite site, Tally tally, List<Dock> docks, List<Shelf>
     }
 
     // A container of the network, and what it held when last read.
-    record Shelf(WorldPos at, Stances stances, Map<Item, Long> held) {
+    record Shelf(WorldPos at, Stances stances, Map<ItemSpec, Long> held) {
 
         Shelf {
             held = Map.copyOf(held);
         }
 
         long heldOf(ItemSpec spec) {
-            Set<Item> wanted = Goods.members(spec);
-            return held.entrySet().stream().filter(lot -> wanted.contains(lot.getKey()))
-                .mapToLong(Map.Entry::getValue).sum();
+            return held.entrySet().stream()
+                .filter(lot -> Goods.overlap(spec, lot.getKey()))
+                .mapToLong(Map.Entry::getValue)
+                .sum();
         }
     }
 
@@ -119,12 +118,15 @@ record Depot(UUID key, WorkSite site, Tally tally, List<Dock> docks, List<Shelf>
     }
 
     private Optional<CollectNode> adrift(Produce produce, Dock dock) {
-        Set<Item> wanted = Goods.members(produce.wanted());
         return tally.collecting().values().stream()
-            .filter(node -> node.adrift() && node.port().equals(dock.at())
-                && node.network().filter(network()::equals).isPresent()
-                && wanted.containsAll(Goods.members(node.goods()))
-                && produce.batching().runs(site, List.of(), node.count(), Optional.empty(), 1) >= 1)
+            .filter(
+            node ->
+                node.adrift()
+                    && node.port().equals(dock.at())
+                    && node.network().filter(network()::equals).isPresent()
+                    && Goods.includes(produce.wanted(), node.goods())
+                    && produce.batching().runs(site, List.of(), node.count(), Optional.empty(), 1)
+                    >= 1)
             .min(Comparator.comparingLong(CollectNode::placedAt));
     }
 

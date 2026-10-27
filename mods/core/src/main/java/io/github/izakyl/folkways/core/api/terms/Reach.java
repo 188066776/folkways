@@ -20,11 +20,11 @@ public final class Reach {
 
     public static final double EYE_HEIGHT = 1.62;
 
+    public static final double IN_THE_CELL = 0.9D;
+
+    public static final double CELL_HEIGHT = 1.0D;
+
     private static final int SPAN = Mth.ceil(PLAYER_BLOCK_REACH);
-
-    private static final double IN_THE_CELL = 0.9D;
-
-    private static final double CELL_HEIGHT = 1.0D;
 
     private Reach() {
     }

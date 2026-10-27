@@ -1,5 +1,6 @@
 package io.github.izakyl.folkways.plugins.person.living;
 
+import com.mojang.authlib.GameProfile;
 import io.github.izakyl.folkways.FolkwaysMod;
 import io.github.izakyl.folkways.core.api.colony.Colonies;
 import io.github.izakyl.folkways.core.api.colony.Colony;
@@ -19,8 +20,13 @@ import io.github.izakyl.folkways.core.api.work.WorkExertion;
 import io.github.izakyl.folkways.plugins.FolkwaysVanillaMod;
 import io.github.izakyl.folkways.plugins.person.PersonBody;
 import io.github.izakyl.folkways.plugins.person.PersonContent;
+import io.github.izakyl.folkways.front.engine.charter.Charter;
+import io.github.izakyl.folkways.front.engine.charter.Charters;
+import io.github.izakyl.folkways.front.engine.registry.FolkwaysItems;
+import io.github.izakyl.folkways.front.engine.registry.FolkwaysPlayerAttachments;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTest;
@@ -28,13 +34,16 @@ import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.world.Container;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Blocks;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.event.RegisterGameTestsEvent;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
+import net.neoforged.neoforge.common.util.FakePlayerFactory;
 
 @EventBusSubscriber(modid = FolkwaysVanillaMod.ID, bus = EventBusSubscriber.Bus.MOD)
 @GameTestHolder(FolkwaysMod.MOD_ID)
@@ -60,8 +69,10 @@ public final class LivingPreemptionGameTests {
             helper.assertTrue(Math.abs(saved.getList("hunger", 10).getCompound(0).getFloat("Exhaustion")
                 - 0.19F) < 0.00001F, "food consumes standard work plus distance, independent of labor ticks");
             var rest = saved.getList("rest", 10).getCompound(0);
-            helper.assertTrue(Math.abs(rest.getFloat("Tired") - (1.0F / 5 + 0.9F)) < 0.00001F,
-                "fatigue consumes elapsed labor ticks plus distance, preserving fractional effort");
+            helper.assertTrue(
+                Math.abs(rest.getFloat("Tired") - 0.9F) < 0.00001F,
+                "settled effort adds distance fatigue once; elapsed time belongs exclusively to"
+                + " the live awake clock");
             Rest loaded = new Rest();
             loaded.load(io.github.izakyl.folkways.base.persist.Reader.of(rest));
             helper.assertTrue(Math.abs(loaded.save().getFloat("Tired") - rest.getFloat("Tired")) < 0.00001F,
@@ -107,6 +118,36 @@ public final class LivingPreemptionGameTests {
             body.mob().discard();
             colony.raze();
         }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void onlyConsecutiveLoadedAwakeTicksAddTimeFatigue(GameTestHelper helper) {
+        AwakeTime clock = new AwakeTime();
+        Rest rest = new Rest();
+        helper.assertValueEqual(clock.observe(100, true), 0, "the first loaded observation has no"
+            + " elapsed interval");
+        for (long tick = 101; tick <= 130; tick++) {
+            rest.awake(clock.observe(tick, true));
+        }
+        helper.assertValueEqual(rest.tiredness(), 1, "thirty actual awake ticks charge one"
+            + " time-fatigue point");
+        helper.assertValueEqual(
+            clock.observe(130, true), 0, "duplicate observation in the same tick never double"
+            + " charges");
+        helper.assertValueEqual(clock.observe(131, false), 0, "sleeping does not count as awake"
+            + " time");
+        helper.assertValueEqual(
+            clock.observe(5000, true), 0, "an unloaded or offline gap is not retroactive awake"
+            + " time");
+        helper.assertValueEqual(
+            new AwakeTime().observe(5001, true), 0, "a reloaded clock starts without catch-up"
+            + " debt");
+        Rest day = new Rest();
+        day.awake(24000);
+        helper.assertValueEqual(
+            day.tiredness(), Rest.SLEEPY, "one loaded awake day reaches the existing sleepy"
+            + " threshold");
         helper.succeed();
     }
 

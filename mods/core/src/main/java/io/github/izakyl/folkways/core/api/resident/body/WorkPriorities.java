@@ -1,5 +1,6 @@
 package io.github.izakyl.folkways.core.api.resident.body;
 
+import io.github.izakyl.folkways.core.api.vocation.Vocations;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -20,12 +21,16 @@ public record WorkPriorities(Map<ResourceLocation, Rule> overrides) {
 
     public WorkPriorities {
         Map<ResourceLocation, Rule> sparse = new LinkedHashMap<>(overrides);
-        sparse.values().removeIf(DEFAULT::equals);
+        sparse.entrySet().removeIf(entry -> defaults(entry.getKey()).equals(entry.getValue()));
         overrides = Map.copyOf(sparse);
     }
 
     public Rule of(ResourceLocation trade) {
-        return overrides.getOrDefault(trade, DEFAULT);
+        return overrides.getOrDefault(trade, defaults(trade));
+    }
+
+    public static Rule defaults(ResourceLocation trade) {
+        return Vocations.of(trade).map(vocation -> new Rule(true, vocation.defaultPriority())).orElse(DEFAULT);
     }
 
     public WorkPriorities with(ResourceLocation trade, Rule rule) {
@@ -54,7 +59,7 @@ public record WorkPriorities(Map<ResourceLocation, Rule> overrides) {
             }
             CompoundTag entry = tag.getCompound(key);
             overrides.put(trade, new Rule(!entry.contains("allowed", Tag.TAG_BYTE) || entry.getBoolean("allowed"),
-                Keenness.ofNumber(entry.getInt("priority")).orElse(Keenness.DEFAULT)));
+                Keenness.ofNumber(entry.getInt("priority")).orElse(defaults(trade).priority())));
         }
         return new WorkPriorities(overrides);
     }

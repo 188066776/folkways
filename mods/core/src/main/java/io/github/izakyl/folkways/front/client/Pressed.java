@@ -73,7 +73,7 @@ final class Pressed {
         };
     }
 
-    private static boolean bound(KeyMapping mapping) {
+    static boolean bound(KeyMapping mapping) {
         if (mapping == null) {
             return false;
         }

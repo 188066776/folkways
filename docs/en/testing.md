@@ -19,14 +19,15 @@ Complete the [development setup](../../CONTRIBUTING.md#development-setup) first.
 
 Choose a test owner and environment:
 
-| Command                                                                             | Scope                                                                        |
-| ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `./gradlew runGameTestServer`                                                       | Combined Core, Vanilla and Create tests in the base environment              |
-| `./gradlew -PcookeryTests=true runGameTestServer`                                   | Combined tests with Cookery, including Core and Vanilla's `src/cookeryTest`  |
-| `./gradlew -PgameTestMod=core runGameTestServer`                                    | Core-owned tests in the base environment; also accepts `vanilla` or `create` |
-| `./gradlew -PgameTestMod=core -PcookeryTests=true runGameTestServer`                | Core-owned tests with Cookery; also accepts `vanilla`                        |
-| `./gradlew -PgameTestMod=cookery -PcookeryTests=true runGameTestServer`             | Cookery-owned tests with Cookery installed                                   |
-| `./gradlew -PgameTestMod=modulargolems -PmodularGolemsTests=true runGameTestServer` | Modular Golems tests with the integration and its dependencies installed     |
+| Command                                                                             | Scope                                                                               |
+| ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `./gradlew runGameTestServer`                                                       | Combined Core, Vanilla and Create tests in the base environment                     |
+| `./gradlew -PcookeryTests=true runGameTestServer`                                   | Combined tests with Cookery, including Core and Vanilla's `src/cookeryTest`         |
+| `./gradlew -PgameTestMod=core runGameTestServer`                                    | Core-owned tests in the base environment; also accepts `vanilla` or `create`        |
+| `./gradlew -PgameTestMod=core -PcookeryTests=true runGameTestServer`                | Core-owned tests with Cookery; also accepts `vanilla`                               |
+| `./gradlew -PgameTestMod=cookery -PcookeryTests=true runGameTestServer`             | Cookery-owned tests with Cookery installed                                          |
+| `./gradlew -PgameTestMod=modulargolems -PmodularGolemsTests=true runGameTestServer` | Modular Golems tests with the integration and its dependencies installed            |
+| `./gradlew runGameTestServer -PgameTestMod=firefighting -PfirefightingTests=true`   | Hydrant hose binding, range, cleanup, native spray and portable extinguisher refill |
 
 Ownership is separate from installed mods: selecting Core still loads Vanilla's
 residents and the integrations its scenarios require. Modular Golems requires
@@ -35,12 +36,14 @@ Core also runs the existing LDLib2 dependency tests; other owners do not repeat 
 
 Game directories are `run/gametest/<mod>/<profile>/`; combined runs use `all` as the mod.
 The profile joins enabled optional suites in the fixed order `cookery`, `modulargolems`,
-`tavern`, or is `base` when none are enabled (for example, `cookery-modulargolems`).
+`tavern`, `firefighting`, or is `base` when none are enabled (for example, `cookery-modulargolems`).
 Tavern requires Cookery and adds its own suffix, even though it reuses Cookery's fixtures,
 so every installed-mod combination has a separate world.
 Before launching a server directly through Gradle, accept
 the [Minecraft EULA](https://www.minecraft.net/eula) in that directory's
 `eula.txt`. Only do so if you accept it.
+
+The optional `firefighting` Blockwright profile installs the pinned addon and integration. Run `npm run setup` after updating its jar or checksum. `-PfirefightingTests=true` without `gameTestMod` runs the whole suite with the addon loaded.
 
 ## Blockwright suites
 
@@ -72,6 +75,26 @@ npm run test:e2e -- tests/e2e/founding-smoke.spec.ts --workers=1
 Each suite under `tests/` has its own `playwright.config.ts` and `tsconfig.json`.
 Generated suite output belongs in the Git-ignored `tests/out/`.
 
+### Resident firefighting visuals
+
+Run `npm run visual:take -- firefighting-spray.spec.ts --workers=1` for the pinned
+`firefighting` profile. Run the same command with `SPRAY_SHADERS=1` for Sodium,
+Iris and Complementary Reimagined (`firefighting_visuals`, GPU display required).
+The spec captures extinguisher and cone-hose idle/spraying/stopped states, plus a
+connected hose without spray, and compares pixels in the jet corridor. It also
+asserts native `SprayParticle` presence and direction, finite water consumption,
+real fire removal, no particles while merely connected, and eventual particle/view
+cleanup without further resource use. A separate recorded pass lets ordinary
+residents complete their watch and automatically suppress one fire with each tool.
+
+The sustained scene explicitly reignites its test fire before paid pulses through
+the real adapter/session; it never sends visual packets or spawns test particles.
+This scene checks the visual bridge, while the automatic pass checks the ordinary
+response lifecycle. Neither establishes arbitrary-terrain or multi-client timing.
+PNG, MP4 and JSON evidence is saved under `tests/out/visual/playwright/` (or the
+Playwright `--output` directory). A single paid pulse is much briefer than the
+sustained scene, so review the automatic recording frame by frame as well.
+
 ### Writing e2e specs
 
 Prefer a black-box e2e spec for behavior a player can observe. Shared helpers
@@ -89,6 +112,25 @@ in `tests/sable/`. See
 
 The repository's `.mcp.json` exposes the same harness to MCP-capable assistants;
 the LDLib2 UI adapter lives in `tests/ldlib2/`.
+
+### Optional RTS input
+
+The default profile leaves `folkways_rts` unloaded. The RTS input specs explicitly
+use `blockwright.toml#rts`, which installs the optional command module on both sides:
+
+```sh
+npm run test:e2e -- tests/e2e/combat-overhead-suspend.spec.ts tests/e2e/combat-rts-input.spec.ts --workers=1
+```
+
+The suspension spec checks real server acknowledgements, unbound task continuation
+and reopening across a client tracking gap. The input spec uses actual pointer and
+keyboard events for selection, shortcuts, route editing and command buttons; Java
+tasks only arrange the fixture or observe state. Its screenshots need visual review.
+Neither spec establishes large-squad performance or arbitrary terrain reliability.
+
+Command, formation and combat-page specs also use `blockwright.toml#rts`. The camera spec opens commands through the explicit page button because ground right-click issues RTS orders. Native hostility and weapon/defence GameTests remain available without RTS; Vanilla alone has no combat page or overhead tool.
+
+Use `./gradlew -PrtsTests=true runGameTestServer` for combined suites, or add `-PgameTestMod=rts` for the RTS suites alone. Vanilla’s optional `rtsTest` source set tests its private defence/living integration with RTS. Base GameTests omit RTS; CI covers both configurations.
 
 ### JEC search compatibility
 
@@ -193,3 +235,30 @@ invocation under `run/gametest/ci/<mod>-<profile>.*`; artifact names are
 passed. Individual GameTest details remain in the server logs.
 
 Client smoke uploads `tests/out/` as `client-smoke-results`.
+
+## Optional Superb Warfare tests
+
+`./gradlew -PwarfareTests=true runGameTestServer` installs `folkways_warfare`,
+Superb Warfare 0.8.9.2 and Kotlin for Forge. Add `-PgameTestMod=warfare` for the
+focused suite. Native jars retain the SHA-512 pins in `blockwright.toml`; test
+worlds are isolated by installed-mod combination. The optional Vanilla
+`warfareTest` fixture exercises actual patrol spotting without exporting its
+internal service or adding a production dependency. CI adds Warfare to Vanilla's
+profiles and runs the dedicated Warfare suite. See [Warfare](warfare.md).
+
+TACZ integration: `./gradlew -PtaczTests=true runGameTestServer` enables its combined suite;
+`./gradlew -PtaczTests=true -PgameTestMod=tacz runGameTestServer` selects only its fixtures.
+The isolated suite directory is `run/gametest/tacz/tacz`. See [TACZ](tacz.md) for the real-client spec.
+
+### Damage-control tool
+
+```sh
+npm run test:e2e -- tests/e2e/damage-control-tool.spec.ts --workers=1
+```
+
+This real-client spec enters the dedicated tool, creates protection, records its baseline,
+checks that extinguish/repair/refill switches reach the server, removes a recorded block,
+and captures `tests/out/e2e/shots/damage-control-missing.png`. It also verifies that mixed
+layer preferences survive switching tools and leaving the overhead view. Vanilla's
+`DamageControlGameTests` cover the same command path, missing/conflict markers, the state
+codec, foreign-area rejection and failed redraw preservation.

@@ -14,6 +14,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.item.Equipable;
 import net.minecraft.world.item.ItemStack;
 
 /** Real clothing slots, independent from borrowed tools and the copies shown in a working hand. */
@@ -26,7 +27,19 @@ public final class Equipment {
         List<Demand> wanted(Colony colony, Body body);
     }
 
-    public record Demand(EquipmentSlot slot, ItemSpec items) {
+    public record Demand(EquipmentSlot slot, ItemSpec items, boolean automaticSupply) {
+        public boolean matches(ItemStack stack) {
+            EquipmentSlot custom = stack.getEquipmentSlot();
+            Equipable equipable = Equipable.get(stack);
+            EquipmentSlot actual =
+                custom != null ? custom : equipable == null ? EquipmentSlot.MAINHAND : equipable.getEquipmentSlot();
+            return actual == slot && Goods.matches(stack, items);
+        }
+
+        public Demand(EquipmentSlot slot, ItemSpec items) {
+            this(slot, items, true);
+        }
+
         public Demand {
             Objects.requireNonNull(slot);
             Objects.requireNonNull(items);
@@ -53,8 +66,9 @@ public final class Equipment {
         for (Provider provider : providers.values()) {
             for (Demand demand : provider.wanted(colony, body)) {
                 ItemStack worn = body.mob().getItemBySlot(demand.slot());
-                // An unrelated player-given helmet is not permission to replace it or buy a spare to hoard.
-                if (worn.isEmpty() || managed(body, demand.slot()) || Goods.matches(worn, demand.items())) {
+                // An unrelated player-given helmet is not permission to replace it or buy a spare
+                // to hoard.
+                if (worn.isEmpty() || managed(body, demand.slot()) || demand.matches(worn)) {
                     chosen.putIfAbsent(demand.slot(), demand);
                 }
             }
@@ -75,8 +89,8 @@ public final class Equipment {
 
     public static long carried(Body body, Demand demand) {
         ItemStack inSlot = body.mob().getItemBySlot(demand.slot());
-        return Goods.countIn(body.pack(), demand.items())
-            + (Goods.matches(inSlot, demand.items()) ? inSlot.getCount() : 0);
+        return body.pack().contents().stream().filter(demand::matches).mapToLong(ItemStack::getCount).sum()
+            + (demand.matches(inSlot) ? inSlot.getCount() : 0);
     }
 
     public static boolean reconcile(Colony colony, Body body) {
@@ -85,14 +99,17 @@ public final class Equipment {
         boolean changed = false;
         for (EquipmentSlot slot : EquipmentSlot.values()) {
             if (slot.getType() != EquipmentSlot.Type.HUMANOID_ARMOR) continue;
-            if (managed(body, slot) && desired.stream().noneMatch(demand -> demand.slot() == slot
-                    && Goods.matches(body.mob().getItemBySlot(slot), demand.items()))) {
+            if (managed(body, slot)
+                && desired.stream()
+                .noneMatch(
+                demand ->
+                    demand.slot() == slot && demand.matches(body.mob().getItemBySlot(slot)))) {
                 changed |= unwear(body, slot);
             }
         }
         for (Demand demand : desired) {
             if (!body.mob().getItemBySlot(demand.slot()).isEmpty()) continue;
-            ItemStack taken = Containers.extract(body.pack(), stack -> Goods.matches(stack, demand.items()), 1);
+            ItemStack taken = Containers.extract(body.pack(), demand::matches, 1);
             if (taken.isEmpty()) continue;
             try {
                 body.mob().setItemSlot(demand.slot(), taken);

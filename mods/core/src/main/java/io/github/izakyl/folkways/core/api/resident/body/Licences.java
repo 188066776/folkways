@@ -78,7 +78,7 @@ public final class Licences implements INBTSerializable<CompoundTag> {
     }
 
     public Keenness keennessOf(Trade trade) {
-        return keenness.getOrDefault(trade.vocation(), Keenness.DEFAULT);
+        return keenness.getOrDefault(trade.vocation(), trade.vocation().defaultPriority());
     }
 
     public void setKeenness(Trade trade, Keenness how) {

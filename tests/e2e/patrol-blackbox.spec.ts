@@ -22,6 +22,7 @@ import {
   markCorner,
   setBookGesture,
 } from "../shared/ui/zone-tools";
+import { staffRoutePanel } from "../shared/ui/patrol-staffing";
 import { settlePanel } from "../shared/ui/site-panel";
 import { waitForElement, safeAction } from "../shared/harness/bw-helpers";
 import { launchPair, type E2EPair } from "../shared/harness/pair";
@@ -99,6 +100,9 @@ for (const stage of twins()) test(stage.title("patrol: player draws a route with
     expect(await pathKindAt(server, registry, 0), "the path built must be the patrol route picked on the page")
       .toBe(PATROL);
 
+    await openColonyPanelViaBook(server, client, playerName, founding.standBlock, stage);
+    await staffRoutePanel(server, client, playerName);
+    await screen.dismiss(client);
     const watch = await watchRoute(server, playerName, ends, offRoute);
     const reasons: string[] = [];
     if (!watch.armed) {

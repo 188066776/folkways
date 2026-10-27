@@ -4,17 +4,21 @@
 
 ## 模组划分
 
-Folkways 包含**两个必装模组和三个可选扩展**，分别对应 `mods/` 下的 Gradle 子项目。
+Folkways 包含**两个必装模组和七个可选扩展**，分别对应 `mods/` 下的 Gradle 子项目。
 它们有独立的模组 ID，共用 `folkways` 内容命名空间。
-根项目负责运行测试和收集 jar，不会构建第六个模组。
+根项目负责运行测试和收集 jar，不会构建自己的模组。
 
-| Gradle 项目                             | 模组 ID                  | 职责                                                     |
-| --------------------------------------- | ------------------------ | -------------------------------------------------------- |
-| `:core` → `mods/core`                   | `folkways_core`          | 殖民地引擎、公共 API、界面与教程；单独安装不提供居民工作 |
-| `:vanilla` → `mods/vanilla`             | `folkways_vanilla`       | 居民及其在原版方块中的工作                               |
-| `:create` → `mods/create`               | `folkways_create`        | 列车、调度、电梯、轨道接缝与机械动力蓝图交接             |
-| `:modulargolems` → `mods/modulargolems` | `folkways_modulargolems` | 傀儡居民                                                 |
-| `:cookery` → `mods/cookery`             | `folkways_cookery`       | 原生 Cookery 农业、厨具、共享工具、森罗酒馆酿酒和教程    |
+| Gradle 项目                             | 模组 ID                  | 职责                                                          |
+| --------------------------------------- | ------------------------ | ------------------------------------------------------------- |
+| `:core` → `mods/core`                   | `folkways_core`          | 殖民地引擎、公共 API、界面与教程；单独安装不提供居民工作      |
+| `:vanilla` → `mods/vanilla`             | `folkways_vanilla`       | 居民及其在原版方块中的工作                                    |
+| `:create` → `mods/create`               | `folkways_create`        | 列车、调度、电梯、轨道接缝与机械动力蓝图交接                  |
+| `:modulargolems` → `mods/modulargolems` | `folkways_modulargolems` | 傀儡居民                                                      |
+| `:rts` → `mods/rts`                     | `folkways_rts`           | 可选直接战斗命令、小队及战术界面                              |
+| `:cookery` → `mods/cookery`             | `folkways_cookery`       | 原生 Cookery 农业、厨具、共享工具、森罗酒馆酿酒和教程         |
+| `:warfare` → `mods/warfare`             | `folkways_warfare`       | 可选 Superb Warfare 武器与武器站                              |
+| `:tacz` → `mods/tacz`                   | `folkways_tacz`          | 可选 TACZ 枪械与配置                                          |
+| `:firefighting` → `mods/firefighting`   | `folkways_firefighting`  | Create: FireFighting Additions 0.2.5-beta-fix2 的消防工具整合 |
 
 ```mermaid
 flowchart BT
@@ -22,6 +26,11 @@ flowchart BT
     Create --> Vanilla
     ModularGolems[Modular Golems] --> Vanilla
     Cookery --> Vanilla
+    RTS --> Vanilla
+    Warfare --> Vanilla
+    TACZ --> Vanilla
+    Firefighting --> Vanilla
+    Firefighting --> Create
 ```
 
 为正确理解已存在的世界结构所需的兼容逻辑放入 Core，例如 Sable 子世界和机械动力装置。
@@ -61,6 +70,9 @@ JEC 及其 PinIn 库只用于编译，不随 Folkways 内嵌。
 
 ## 生命周期与测试归属
 
+Vanilla 的日常防御与可选 RTS 模块的居民命令、实际小队见[战斗与编队说明](combat-architecture.md)。
+RTS 依赖 Vanilla 的武器和防御 API，命令复用 Core 安全劳动中断；枪械兼容仍待独立模块实现。
+
 [`ColonyLifecycle`](../../mods/core/src/main/java/io/github/izakyl/folkways/core/api/colony/ColonyLifecycle.java)
 提供迁移与关闭钩子。关闭监听器通过
 [`Cleanup`](../../mods/core/src/main/java/io/github/izakyl/folkways/base/task/Cleanup.java)
@@ -71,3 +83,32 @@ JEC 及其 PinIn 库只用于编译，不随 Folkways 内嵌。
 Core 的 `src/gameTestFixtures` 提供不注册测试的共享辅助代码，因此其他模组复用准备逻辑时不会顺带发现 Core 的测试。
 选择某个 GameTest 所属模组，不代表移除该场景所需的其他运行时模组。
 筛选参数和 CI 环境见[测试指南](testing.md)。
+
+## 战斗配装
+
+Vanilla 负责 `LoadoutProfiles`、不可变 `LoadoutProfile`／`Entry`、
+`LoadoutRegistry`／`LoadoutProvider`、聚落书「配装」页和居民有限领取。
+多名居民可共用一份聚落配装，但每人各需完整实物。
+有序 `ItemSpec` 条目支持组件身份，分别定义武器、四个护甲栏位及带目标／阈值的补给。
+Core 保留护甲所有权；可选 RTS 只显示分配，并复用目标相关的 `Weapons.select` 和独占 `WeaponSession`。
+
+`LoadoutProvider` 说明实物识别、弹药身份、远程／射程、弹匣容量、已装弹量、周期和建议数量，
+不再决定居民携带内容。添加武器会预填可编辑补给值。
+原生执行仍由 `WeaponAdapter`／`WeaponSession` 负责，枪械模块分别实现参数和真实执行。
+`profile.hasRanged()` 供后续哨所任务查询。
+
+沿用 `folkways:patrol_loadouts` 账本，第三版用 `profiles` 保存
+`id`、`name`、`entries` 和可选原始 `legacy`，用 `assignments` 将 `resident` 指向 `profile`。
+旧枚举和提供者标识／选项一次迁移去重；未知扩展偏好在不可用时仍完整往返保存。
+巡逻的聚落设置决定无配装策略，默认逃跑；使用已有装备迎战也不领取新装备。
+战斗不再依赖职业武器工具默认值，其他职业白名单不变。
+完整格式、界面、生命周期、审计验收及暂缓的副手所有权见[战斗架构](combat-architecture.md)。
+
+哨位由原版巡逻职业拥有，使用核心区域工具与持久化派驻记录。共享目击、支援呼叫与固定武器租约均为临时状态，
+不依赖可选 RTS；详见[战斗架构](combat-architecture.md)。
+
+## 额外俯瞰工具
+
+插件用 `ToolKinds` 注册专用委托，并用 `OverheadTools` 注册客户端控制器。
+Core 提供工具栏、框选编辑、专注显示和悬停卡片；专注显示只屏蔽普通图层，不改写其偏好设置。
+Vanilla 负责损害管制控制器及有数量限制的命令与状态数据包；基准保存和工作行为仍沿用现有 presence 与 colony front。

@@ -1,8 +1,12 @@
 package io.github.izakyl.folkways.front.client;
 
 import com.mojang.blaze3d.vertex.PoseStack;
+import io.github.izakyl.folkways.front.api.ui.ModeOverlays;
+import io.github.izakyl.folkways.front.api.ui.OverheadTools;
+import io.github.izakyl.folkways.front.api.ZoneRing;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import io.github.izakyl.folkways.front.api.Placard;
+import io.github.izakyl.folkways.front.api.ToolKinds;
 import io.github.izakyl.folkways.front.api.notice.Line;
 import io.github.izakyl.folkways.front.engine.colony.ColonyPath;
 import io.github.izakyl.folkways.front.engine.item.HeldBook;
@@ -16,8 +20,8 @@ import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import net.minecraft.Util;
@@ -26,8 +30,8 @@ import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.core.BlockPos;
-import net.minecraft.util.Mth;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.Level;
@@ -79,7 +83,8 @@ public final class ColonyHighlightState {
         MEMBERS.clear();
         MEMBERS.addAll(packet.members());
         ZONES.clear();
-        ZONES.addAll(packet.zones());
+        packet.zones().stream().filter(zone -> !ToolKinds.contains(zone.delegation()))
+            .forEach(ZONES::add);
         Level level = Minecraft.getInstance().level;
         if (level != null) {
             OWED.show(level, packet.ghosts());
@@ -171,7 +176,8 @@ public final class ColonyHighlightState {
             OWED.drawModels(level, camera, partialTick);
         }
 
-        VertexConsumer fills = buffers.getBuffer(RenderType.debugFilledBox());
+        VertexConsumer fills = ModeOverlays.vertices(
+            buffers.getBuffer(RenderType.debugFilledBox()), OverheadTools.BUILD);
         drawZoneFills(level, poseStack, fills, camera, partialTick);
         drawPlacardFills(level, poseStack, fills, camera, partialTick);
         if (works) {
@@ -179,7 +185,8 @@ public final class ColonyHighlightState {
         }
         buffers.endBatch(RenderType.debugFilledBox());
 
-        VertexConsumer lines = buffers.getBuffer(RenderType.lines());
+        VertexConsumer lines = ModeOverlays.vertices(
+            buffers.getBuffer(RenderType.lines()), OverheadTools.BUILD);
         drawMemberBoxes(level, poseStack, lines, camera, partialTick);
         drawZoneOutlines(level, poseStack, lines, camera, partialTick);
         drawPlacardOutlines(level, poseStack, lines, camera, partialTick);
@@ -271,7 +278,32 @@ public final class ColonyHighlightState {
             placed.enter(poseStack);
             LevelRenderer.renderLineBox(poseStack, lines, box.inflate(0.02D),
                 rgb[0], rgb[1], rgb[2], alpha);
+            if (ZoneSelection.highlighted(zone.id())) {
+                for (ZoneRing ring : zone.rings()) {
+                    drawRing(poseStack, lines, ring, zone.min(), rgb);
+                }
+            }
             poseStack.popPose();
+        }
+    }
+
+    private static void drawRing(PoseStack stack, VertexConsumer lines, ZoneRing ring, BlockPos origin, float[] rgb) {
+        if (!Double.isFinite(ring.radius()) || ring.radius() <= 0 || ring.radius() > 256) {
+            return;
+        }
+        Vec3 centre = Vec3.atBottomCenterOf(ring.centre().subtract(origin)).add(0, .08, 0);
+        for (int step = 0; step < 96; step++) {
+            double first = step * Math.PI * 2 / 96;
+            double second = (step + 1) * Math.PI * 2 / 96;
+            Vec3 from = centre.add(Math.cos(first) * ring.radius(), 0, Math.sin(first) * ring.radius());
+            Vec3 to = centre.add(Math.cos(second) * ring.radius(), 0, Math.sin(second) * ring.radius());
+            Vec3 normal = to.subtract(from).normalize();
+            lines.addVertex(stack.last().pose(), (float) from.x, (float) from.y, (float) from.z)
+                .setColor(rgb[0], rgb[1], rgb[2], .8F)
+                .setNormal(stack.last(), (float) normal.x, (float) normal.y, (float) normal.z);
+            lines.addVertex(stack.last().pose(), (float) to.x, (float) to.y, (float) to.z)
+                .setColor(rgb[0], rgb[1], rgb[2], .8F)
+                .setNormal(stack.last(), (float) normal.x, (float) normal.y, (float) normal.z);
         }
     }
 

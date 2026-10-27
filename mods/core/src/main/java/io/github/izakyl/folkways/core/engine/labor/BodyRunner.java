@@ -568,6 +568,9 @@ final class BodyRunner {
             speed *= body.effects().value(Haul.TRAVEL_SPEED);
         }
         double travelSpeed = speed;
+        if (current.directTravel()) {
+            return Trip.afoot(body.kind().locomotion(), footings, travelSpeed, LaborRefusal.NO_WAY_THERE);
+        }
         return labor.ways(level)
             .map(ways -> Trip.to(() -> labor.ways(level).orElse(ways), body.resident(), body.kind().locomotion(), body.mob(),
                 footings, travelSpeed, LaborRefusal.NO_WAY_THERE))
@@ -636,6 +639,10 @@ final class BodyRunner {
     }
 
     private void hold(ColonyLabor labor, ServerLevel level, Body body) {
+        if (current.staysAtWorkSite() && !standing(body)) {
+            setOff(labor, level, body);
+            return;
+        }
         perform(body);
         if (!ongoing.holds(level, labor.hands(body, placement))) {
             commit(labor, level, body);

@@ -122,7 +122,8 @@ final class PersonPresence implements Facing {
 
     private Component workDefaults() {
         WorkPriorities priorities = WorkDefaults.of(colony, PersonBody.ID);
-        long changed = Vocations.ids().stream().filter(trade -> !priorities.of(trade).equals(WorkPriorities.DEFAULT)).count();
+        long changed = Vocations.ids().stream()
+            .filter(trade -> !priorities.of(trade).equals(WorkPriorities.defaults(trade))).count();
         return changed == 0 ? Component.translatable("folkways.work_defaults.usual")
             : Component.translatable("folkways.work_defaults.changed", changed);
     }

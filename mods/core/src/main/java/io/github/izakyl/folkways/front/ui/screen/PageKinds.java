@@ -36,6 +36,7 @@ public final class PageKinds {
             List<PageKind> declared = enrolled.pages();
             if (!declared.isEmpty()) {
                 pages.add(declared.get(0));
+                declared.stream().skip(1).filter(PageKind::navigation).forEach(pages::add);
             }
         }
         return List.copyOf(pages);

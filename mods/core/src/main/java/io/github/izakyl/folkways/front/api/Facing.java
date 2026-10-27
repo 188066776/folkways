@@ -72,6 +72,10 @@ public interface Facing {
         return List.of();
     }
 
+    default List<ZoneRing> zoneRings(ZoneView zone, ColonyView colony) {
+        return List.of();
+    }
+
     default List<Line> pathLines(PathView path, ColonyView colony) {
         return List.of();
     }

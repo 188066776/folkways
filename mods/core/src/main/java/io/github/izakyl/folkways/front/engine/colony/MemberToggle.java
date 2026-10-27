@@ -1,7 +1,10 @@
 package io.github.izakyl.folkways.front.engine.colony;
 
+import io.github.izakyl.folkways.core.api.colony.Colonies;
 import io.github.izakyl.folkways.core.api.colony.Colony;
 import io.github.izakyl.folkways.core.api.colony.ColonyView;
+import io.github.izakyl.folkways.core.api.colony.Held;
+import io.github.izakyl.folkways.core.api.colony.Release;
 import io.github.izakyl.folkways.core.api.terms.RefusalKind;
 import io.github.izakyl.folkways.front.api.Delegation;
 import io.github.izakyl.folkways.front.api.Facing;
@@ -9,12 +12,14 @@ import io.github.izakyl.folkways.front.api.Shape;
 import io.github.izakyl.folkways.front.api.notice.Attempt;
 import io.github.izakyl.folkways.front.api.notice.Notice;
 import io.github.izakyl.folkways.front.api.notice.NoticeKind;
+import io.github.izakyl.folkways.front.engine.Enrollments;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 
@@ -42,6 +47,34 @@ public final class MemberToggle {
     }
 
     private MemberToggle() {
+    }
+
+    public static Attempt toggleEntity(Colony colony, Entity entity, ServerPlayer player) {
+        if (!player.getServer().isSameThread() || entity.level() != player.level()
+            || !entity.isAlive() || entity.isRemoved() || player.distanceToSqr(entity) > 64) {
+            return told(player, Attempt.refused(Refusal.NOT_ENROLLABLE));
+        }
+        var held = colony.holdingOf(entity.getUUID());
+        if (held.isPresent()) {
+            colony.release(held.get().id(), Release.LET_GO);
+            player.displayClientMessage(Notice.of(Moved.LEFT).component(), true);
+            return Attempt.went();
+        }
+        if (Colonies.all(player.getServer()).stream()
+            .anyMatch(other -> other.holdingOf(entity.getUUID()).isPresent())) {
+            return told(player, Attempt.refused(Refusal.ANOTHER_COLONY));
+        }
+        var delegation = Enrollments.delegations().stream()
+            .filter(value -> value.shape() instanceof Shape.Body body && body.accepts().test(entity.getType()))
+            .findFirst();
+        if (delegation.isEmpty()) {
+            return told(player, Attempt.refused(Refusal.NOT_ENROLLABLE));
+        }
+        if (colony.hold(delegation.get().id(), Held.Entity.of(entity)).isEmpty()) {
+            return told(player, Attempt.refused(Refusal.ANOTHER_COLONY));
+        }
+        player.displayClientMessage(Notice.of(Moved.JOINED).component(), true);
+        return Attempt.went();
     }
 
     public static boolean enrollable(Level level, BlockPos pos) {

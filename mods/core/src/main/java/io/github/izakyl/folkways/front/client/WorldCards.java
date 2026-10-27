@@ -4,6 +4,8 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.blaze3d.vertex.VertexSorting;
+import io.github.izakyl.folkways.front.api.ui.ModeOverlays;
+import io.github.izakyl.folkways.front.api.ui.OverheadTools;
 import io.github.izakyl.folkways.front.api.ui.Signs;
 import io.github.izakyl.folkways.front.client.ColonyLookCard.Row;
 import java.nio.DoubleBuffer;
@@ -103,7 +105,8 @@ final class WorldCards {
             CardBackdrop.Ink ink = ink(minecraft, view, card, spots);
             inks.put(key(card), ink);
             if (hidden == 0) {
-                draw(minecraft, poseStack, buffers, card.anchor(), laid, card.scale(), ink);
+                draw(minecraft, poseStack, ModeOverlays.buffers(buffers, OverheadTools.BUILD),
+                    card.anchor(), laid, card.scale(), ink);
                 buffers.endBatch();
             } else {
                 drawInFront(minecraft, poseStack, buffers, card, laid, ink);
@@ -207,7 +210,8 @@ final class WorldCards {
                     // Only clip-space z changes; screen positions, sizes and perspective stay the same.
                     RenderSystem.setProjectionMatrix(new Matrix4f(projection).m22(-1.0F).m32(-depth), sorting);
                 }
-                draw(minecraft, poseStack, buffers, card.anchor(), laid, card.scale(), ink);
+                draw(minecraft, poseStack, ModeOverlays.buffers(buffers, OverheadTools.BUILD),
+                    card.anchor(), laid, card.scale(), ink);
                 buffers.endBatch();
             } finally {
                 RenderSystem.setProjectionMatrix(projection, sorting);
@@ -217,7 +221,7 @@ final class WorldCards {
     }
 
     /** Draws the card facing the camera, its bottom edge centred on the anchor. */
-    private static void draw(Minecraft minecraft, PoseStack poseStack, MultiBufferSource.BufferSource buffers,
+    private static void draw(Minecraft minecraft, PoseStack poseStack, MultiBufferSource buffers,
             Vec3 anchor, LookCardLayout.Laid laid, float scale, CardBackdrop.Ink ink) {
         Font font = minecraft.font;
 

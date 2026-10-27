@@ -4,6 +4,7 @@ import io.github.izakyl.folkways.core.api.colony.Cadence;
 import io.github.izakyl.folkways.core.api.colony.Closing;
 import io.github.izakyl.folkways.core.api.colony.Colony;
 import io.github.izakyl.folkways.core.api.colony.ColonyView;
+import io.github.izakyl.folkways.core.api.terms.WorldPos;
 import io.github.izakyl.folkways.base.persist.Reader;
 import io.github.izakyl.folkways.base.persist.Writer;
 import io.github.izakyl.folkways.core.api.work.Ending;
@@ -21,6 +22,7 @@ import io.github.izakyl.folkways.plugins.build.draft.Hint;
 import io.github.izakyl.folkways.plugins.build.draft.Joint;
 import io.github.izakyl.folkways.plugins.build.draft.Round;
 import io.github.izakyl.folkways.plugins.build.draft.Templates;
+import io.github.izakyl.folkways.core.api.terms.ItemSpec;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -46,6 +48,7 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
+import net.minecraft.core.HolderLookup;
 
 final class BuildPresence implements Facing {
 
@@ -86,7 +89,7 @@ final class BuildPresence implements Facing {
     // Growing sites whose next round is being drawn now.
     private final Set<UUID> drawing = new HashSet<>();
     private final Map<UUID, Drafted> drafted = new LinkedHashMap<>();
-    private final Map<UUID, Map<ResourceLocation, Long>> owed = new ConcurrentHashMap<>();
+    private final Map<UUID, Map<ItemSpec, Long>> owed = new ConcurrentHashMap<>();
     private final Map<UUID, Set<BlockPos>> met = new LinkedHashMap<>();
     private final Map<UUID, Set<Joint>> joined = new LinkedHashMap<>();
     private final Set<UUID> untallied = new LinkedHashSet<>();
@@ -146,6 +149,11 @@ final class BuildPresence implements Facing {
         numbered = Math.max(0, saved.integer(TAG_NUMBERED).orElse(0));
         nameUnnamed();
         book.reportChangesTo(this::keep);
+    }
+
+    boolean buildingAt(ServerLevel level, WorldPos at) {
+        return sites.values().stream().anyMatch(site -> site.target().realm().equals(at.realm())
+            && site.target().in(level).cells().containsKey(at.block(level)));
     }
 
     // Sites kept from before they were named are numbered now; an order a growing site placed shares its name.
@@ -611,8 +619,15 @@ final class BuildPresence implements Facing {
             if (outline.isEmpty()) {
                 continue;
             }
-            placards.add(new Placard(grown != null ? grown.id() : order.id(), outline.get(),
-                BuildPlacards.building(Line.literal(order.name()), seen, owed.getOrDefault(order.id(), Map.of()))));
+            placards.add(
+                new Placard(
+                grown != null ? grown.id() : order.id(),
+                outline.get(),
+                BuildPlacards.building(
+                Line.literal(order.name()),
+                seen,
+                owed.getOrDefault(order.id(), Map.of()),
+                level.registryAccess())));
         }
         return List.copyOf(placards);
     }
@@ -624,7 +639,7 @@ final class BuildPresence implements Facing {
         }
         List<Board.Row> standing = new ArrayList<>();
         for (BlueprintBuildOrder order : book.allBuildOrders()) {
-            standing.add(rowFor(order));
+            standing.add(rowFor(order, view.level().registryAccess()));
         }
         for (Growing one : growing.values()) {
             if (one.order().filter(this::filed).isEmpty()) {
@@ -650,7 +665,7 @@ final class BuildPresence implements Facing {
             Optional.of(Component.translatable("folkways.page.build.empty"))));
     }
 
-    private Board.Row rowFor(BlueprintBuildOrder order) {
+    private Board.Row rowFor(BlueprintBuildOrder order, HolderLookup.Provider registries) {
         BuildSite site = sites.get(order.id());
         Board.Row row = new Board.Row(new ItemStack(Items.BRICKS),
             Component.literal(order.name()),
@@ -662,7 +677,7 @@ final class BuildPresence implements Facing {
                     ResourceLocation.withDefaultNamespace("barrier"))));
         return cancelled.contains(order.id()) || site == null || site.progress().isEmpty()
             ? row
-            : row.told(toldOf(site, owed.getOrDefault(order.id(), Map.of())));
+            : row.told(toldOf(site, owed.getOrDefault(order.id(), Map.of()), registries));
     }
 
     private static Board.Row rowFor(Growing one) {
@@ -678,14 +693,20 @@ final class BuildPresence implements Facing {
                     ResourceLocation.withDefaultNamespace("barrier"))));
     }
 
-    // The building glyph and the first of what is owed, or how far it has come when nothing is; then how many
+    // The building glyph and the first of what is owed, or how far it has come when nothing is;
+    // then how many
     // cells nothing can be done about.
-    private static Sentence toldOf(BuildSite site, Map<ResourceLocation, Long> owed) {
+    private static Sentence toldOf(BuildSite site, Map<ItemSpec, Long> owed, HolderLookup.Provider registries) {
         BuildOrderView seen = site.progress().orElseThrow();
-        Sentence told = owed.isEmpty()
-            ? Sentence.of(Sentence.doing(BuildContent.BUILDING), Sentence.word(new Notice(
-                "folkways.page.build.progress", List.of(Notice.count(seen.placed()), Notice.count(seen.total())))))
-            : BuildPlacards.needs(owed, TOLD_WARES);
+        Sentence told =
+            owed.isEmpty()
+            ? Sentence.of(
+            Sentence.doing(BuildContent.BUILDING),
+            Sentence.word(
+            new Notice(
+            "folkways.page.build.progress",
+            List.of(Notice.count(seen.placed()), Notice.count(seen.total())))))
+            : BuildPlacards.needs(owed, TOLD_WARES, registries);
         int refused = site.refusals().size();
         return refused == 0 ? told : told.then(Sentence.glyph("refuses"),
             Sentence.word(Notice.count(refused)));

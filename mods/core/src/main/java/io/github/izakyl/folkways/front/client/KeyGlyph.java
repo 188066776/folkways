@@ -55,7 +55,16 @@ record KeyGlyph(Kind kind, String name) {
         return new KeyGlyph(Kind.CAP, name);
     }
 
-    private static KeyGlyph bound(KeyMapping mapping) {
+    static KeyMapping mapping(String name) {
+        for (KeyMapping mapping : Minecraft.getInstance().options.keyMappings) {
+            if (mapping.getName().equals(name)) {
+                return mapping;
+            }
+        }
+        return null;
+    }
+
+    static KeyGlyph bound(KeyMapping mapping) {
         if (mapping == null) {
             return cap("?");
         }

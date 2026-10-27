@@ -1,11 +1,18 @@
 package io.github.izakyl.folkways.plugins.patrol;
 
 import io.github.izakyl.folkways.core.api.Declaring;
-import io.github.izakyl.folkways.core.api.terms.ItemSpec;
+import io.github.izakyl.folkways.core.api.colony.Colony;
 import io.github.izakyl.folkways.core.api.vocation.Vocation;
 import io.github.izakyl.folkways.core.api.vocation.VocationSpec;
 import io.github.izakyl.folkways.core.api.vocation.Vocations;
+import io.github.izakyl.folkways.core.api.vocation.KitRules;
+import io.github.izakyl.folkways.plugins.person.ResidentEntity;
 import io.github.izakyl.folkways.core.api.work.ToolNeed;
+import io.github.izakyl.folkways.core.api.resident.body.PackKeeps;
+import io.github.izakyl.folkways.plugins.combat.weapon.PatrolSupplies;
+import io.github.izakyl.folkways.plugins.combat.SpottedTargets;
+import io.github.izakyl.folkways.plugins.combat.ui.LoadoutContent;
+import io.github.izakyl.folkways.core.api.resident.body.Equipment;
 import io.github.izakyl.folkways.effect.Modifier;
 import io.github.izakyl.folkways.effect.Stat;
 import io.github.izakyl.folkways.effect.perk.Perk;
@@ -18,6 +25,7 @@ import io.github.izakyl.folkways.front.api.Shape;
 import io.github.izakyl.folkways.front.api.panel.PageKind;
 import io.github.izakyl.folkways.plugins.FolkwaysVanillaConfig;
 import java.util.List;
+import java.util.Optional;
 import net.minecraft.resources.ResourceLocation;
 import net.neoforged.neoforge.common.Tags;
 
@@ -38,8 +46,8 @@ public final class PatrolContent {
     public static final ResourceLocation FIGHTING =
         ResourceLocation.fromNamespaceAndPath("folkways", "fighting");
 
-    private static final PageKind PAGE = PageKind.boarded(ID, "folkways.page.patrol",
-        ResourceLocation.withDefaultNamespace("iron_sword")).tools(VOCATION);
+    private static final PageKind PAGE =
+        PageKind.boarded(ID, "folkways.page.patrol", ResourceLocation.withDefaultNamespace("iron_sword"));
 
     // Any melee weapon will do; other mods list theirs under the common tag.
     static final ToolNeed WEAPON = new ToolNeed.Tagged(Tags.Items.MELEE_WEAPON_TOOLS);
@@ -76,13 +84,36 @@ public final class PatrolContent {
                 rank -> List.of(Modifier.add(ALERT_RANGE, rank * 2))),
             new Perk("patrolling_reassuring", 3,
                 rank -> List.of(Modifier.add(COMFORT, value(rank, 2, 4, 6))))),
-        List.of(ItemSpec.of(Tags.Items.MELEE_WEAPON_TOOLS)));
+        List.of());
 
     private PatrolContent() {
     }
 
     public static void declare(Declaring declaring) {
         declaring.vocation(SPEC.ordered(600));
+        KitRules.supplyPolicy(
+            ID, (colony, body) -> !(body.mob() instanceof ResidentEntity person) || !person.hasWeaponSession());
+        Equipment.register(
+            ID, (colony, body) -> suppliesOf(colony).map(supplies -> supplies.armor(body)).orElse(List.of()));
+        PackKeeps.add((colony, body) -> suppliesOf(colony).map(supplies -> supplies.keeps(body)).orElse(List.of()));
+        declaring.colony(SpottedTargets.ID, scope -> {
+            SpottedTargets spots = new SpottedTargets(scope.colony());
+            scope.share(spots);
+            scope.tick(spots::tick);
+            scope.closed(why -> spots.clear());
+        });
+        declaring.colony(PatrolStaffing.ID, scope -> {
+            PatrolStaffing staffing = new PatrolStaffing(scope.colony());
+            scope.share(staffing);
+            scope.tick(staffing::tick);
+        });
+        declaring.colony(SentryPosts.ID, scope -> {
+            SentryPosts posts = new SentryPosts(scope.colony());
+            scope.share(posts);
+            scope.tick(posts::tick);
+            scope.urges(posts::urges);
+            scope.closed(why -> posts.close());
+        });
         declaring.colony(ID, scope -> {
             PatrolPresence state = new PatrolPresence(scope.colony());
             scope.share(state);
@@ -92,11 +123,37 @@ public final class PatrolContent {
         });
     }
 
+    public static Optional<PatrolSupplies> suppliesOf(Colony colony) {
+        return colony.service(ID, PatrolPresence.class).map(PatrolPresence::supplies);
+    }
+
     public static void enroll(Registering registering) {
+        registering.facing(SentryPosts.ID,
+            colony -> colony.service(SentryPosts.ID, SentryPosts.class).map(Facing.class::cast));
         registering.facing(ID, colony -> colony.service(ID, PatrolPresence.class).map(Facing.class::cast));
-        registering.enrollment(ID,
-            new Enrollment(List.of(new Delegation(BEAT, new Shape.Path(FolkwaysVanillaConfig.maxPatrolPoints()),
-                ResourceLocation.withDefaultNamespace("iron_sword"))), Schema.none(), List.of(PAGE)));
+        registering.enrollment(
+            ID,
+            new Enrollment(
+            List.of(
+            new Delegation(
+            BEAT,
+            new Shape.Path(FolkwaysVanillaConfig.maxPatrolPoints()),
+            ResourceLocation.withDefaultNamespace("iron_sword")),
+            new Delegation(SentryPosts.ZONE, new Shape.Volume(FolkwaysVanillaConfig.maxSentryCells()),
+                ResourceLocation.withDefaultNamespace("bow"))),
+            new Schema(
+            List.of(
+            new Schema.Setting.Choice(
+            "no_profile",
+            "folkways.loadouts.no_profile",
+            ResourceLocation.withDefaultNamespace("shield"),
+            List.of(
+            ResourceLocation.fromNamespaceAndPath("folkways", "flee"),
+            ResourceLocation.fromNamespaceAndPath("folkways", "engage")),
+            ResourceLocation.fromNamespaceAndPath("folkways", "flee")))),
+            List.of(PAGE, LoadoutContent.PAGE,
+                PageKind.boarded(SentryPosts.ID, "folkways.page.sentry_posts",
+                ResourceLocation.withDefaultNamespace("bow")))));
     }
 
     static Vocation trade() {

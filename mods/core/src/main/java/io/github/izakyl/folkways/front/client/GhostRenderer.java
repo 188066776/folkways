@@ -12,6 +12,8 @@ import com.mojang.blaze3d.vertex.VertexFormat;
 import com.mojang.logging.LogUtils;
 import io.github.izakyl.folkways.core.api.terms.WorldSpaces;
 import io.github.izakyl.folkways.front.api.Ghost;
+import io.github.izakyl.folkways.front.api.ui.ModeOverlays;
+import io.github.izakyl.folkways.front.api.ui.OverheadTools;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -123,6 +125,8 @@ final class GhostRenderer {
 
     private void pass(RenderType layer, List<Matrix4f> views) {
         layer.setupRenderState();
+        float alpha = layer == Layers.COLOR ? ModeOverlays.alpha(OverheadTools.BUILD) : 1.0F;
+        RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, alpha);
         ShaderInstance shader = RenderSystem.getShader();
         if (shader != null) {
             for (int at = 0; at < meshes.size(); at++) {
@@ -132,6 +136,7 @@ final class GhostRenderer {
             }
             VertexBuffer.unbind();
         }
+        RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
         layer.clearRenderState();
     }
 

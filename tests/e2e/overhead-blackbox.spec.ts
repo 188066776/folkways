@@ -16,6 +16,7 @@ import { seededServer } from "../shared/harness/mod-settings";
 import { BUDGET } from "../shared/harness/budgets";
 import { frames, screenName, safeScreen } from "../shared/harness/bw-helpers";
 import { newRunId } from "../shared/harness/run-id";
+import { MODE_PROBE } from "../shared/ui/mode-layers";
 import { twins } from "../shared/harness/stage";
 
 const BOOK_ITEM = "folkways:colony_book";
@@ -200,8 +201,10 @@ for (const stage of twins()) test(stage.title("view from above: the book's box g
     await tap(KEY_TAB);
     await tick.sprint(server, 5);
     evidence.tabbed = await readActionBar(client);
-    expect(evidence.tabbed.text, "Tab turns the book to the next gesture").toMatch(/^Book: /);
-    expect(evidence.tabbed.text).not.toMatch(/drawing a line/);
+    const tabMode = await client.run(MODE_PROBE);
+    expect(tabMode.mode, "Tab leaves the last Build gesture for the registered Damage Control mode")
+      .toBe("folkways:damage_control");
+    expect((await screen.widgets(client)).map((widget: any) => widget.label)).not.toContain("Draw a line");
 
     await input.key(client, { keyCode: KEY_V, action: "press" });
     await input.key(client, { keyCode: KEY_V, action: "release" });

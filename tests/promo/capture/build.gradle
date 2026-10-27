@@ -1,0 +1,9 @@
+plugins {
+    id "net.neoforged.moddev"
+    id "java-library"
+    id "maven-publish"
+}
+
+ext.modId = "folkways_capture"
+ext.modName = "folkways-capture"
+apply from: rootProject.file("gradle/mod.gradle")

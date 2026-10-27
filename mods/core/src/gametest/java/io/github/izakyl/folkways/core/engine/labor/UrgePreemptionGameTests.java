@@ -156,6 +156,93 @@ public final class UrgePreemptionGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty")
+    public static void passiveReservationReleasesPlannedWorkButAllowsPersonalUrges(GameTestHelper helper)
+        throws Exception {
+        for (Workload load : List.of(Workload.Once.of(1000), (Workload.Continuous) (level, who) -> true)) {
+            try (Harness h = new Harness(helper)) {
+                AtomicInteger released = new AtomicInteger();
+                Node job = h.node(load, true, released);
+                h.start(job);
+                Urge reserve = Urge.reserve(id("reserved"));
+                h.offers(reserve);
+                helper.assertTrue(h.interrupt(), "reservation is reported to the runner's claim"
+                    + " gate");
+                helper.assertTrue(
+                    !h.runner.executing() && h.runner.ownUrge().isEmpty(),
+                    "the passive marker does not become an idle node that could compete with"
+                    + " combat");
+                helper.assertValueEqual(released.get(), 1, "planned work uses its normal release"
+                    + " lifecycle once");
+                helper.assertTrue(
+                    h.labor.state(job.id()).orElseThrow() == NodeState.PENDING,
+                    "interrupted work remains retryable");
+                h.interrupt();
+                helper.assertValueEqual(released.get(), 1, "a continuing reservation never repeats"
+                    + " release");
+                Urge need = h.urge("fear_or_combat", .001, true);
+                h.offers(reserve, need);
+                helper.assertTrue(h.interrupt(), "personal work does not remove the labour"
+                    + " reservation");
+                helper.assertValueEqual(
+                    h.runner.ownUrge().orElseThrow(),
+                    need.id(),
+                    "even a low-weight ordinary personal urge executes while labour is"
+                    + " reserved");
+                h.interrupt();
+                helper.assertValueEqual(
+                    h.runner.ownUrge().orElseThrow(),
+                    need.id(),
+                    "the reservation does not interrupt a personal combat, fear or"
+                    + " physiological urge");
+            }
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void deliberateControlPreemptsAnArbitrarilyHeavyNeedAndKeepsOwnership(GameTestHelper helper)
+        throws Exception {
+        try (Harness h = new Harness(helper)) {
+            Urge need = h.urge("heavy_need", Double.MAX_VALUE, true);
+            h.offers(need);
+            h.interrupt();
+            Urge control =
+                new Urge(
+                id("control"),
+                1,
+                true,
+                () -> h.node(Workload.Once.of(1000), true, new AtomicInteger()),
+                Urge.Priority.CONTROL);
+            h.offers(need, control);
+            h.interrupt();
+            helper.assertTrue(
+                h.runner.ownUrge().orElseThrow().equals(control.id()),
+                "the control tier takes the same runner immediately, independently of need"
+                + " weights");
+            h.offers(need, control, h.urge("other_need", Double.POSITIVE_INFINITY, true));
+            h.interrupt();
+            helper.assertTrue(
+                h.runner.ownUrge().orElseThrow().equals(control.id()),
+                "an ordinary preemptive need cannot regain the body while deliberate control is"
+                + " active");
+            Urge replacement =
+                new Urge(
+                id("replacement_control"),
+                1,
+                true,
+                () -> h.node(Workload.Once.of(1000), true, new AtomicInteger()),
+                Urge.Priority.CONTROL);
+            h.offers(need, replacement);
+            h.interrupt();
+            helper.assertTrue(
+                h.runner.ownUrge().orElseThrow().equals(replacement.id()),
+                "a new order identity replaces the cancelled order without a larger numeric"
+                + " weight");
+        }
+        helper.succeed();
+    }
+
     private static ResourceLocation id(String path) {
         return ResourceLocation.fromNamespaceAndPath("folkways_test", path);
     }
@@ -194,6 +281,22 @@ public final class UrgePreemptionGameTests {
                 net.neoforged.neoforge.common.NeoForge.EVENT_BUS.unregister(listener);
             }
         }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void expiredOneShotUrgeBackoffsDoNotAccumulate(GameTestHelper helper) throws Exception {
+        Urges urges = new Urges();
+        for (int n = 0; n < 128; n++) {
+            urges.refused(id("temporary_" + n), LaborRefusal.WORK_BROKE, 0);
+        }
+        urges.keenest(List.of(), 100, urge -> true);
+        var field = Urges.class.getDeclaredField("cooling");
+        field.setAccessible(true);
+        helper.assertTrue(
+            ((Map<?, ?>) field.get(urges)).isEmpty(),
+            "expired refusals must be removed even when a temporary controller never offers its"
+            + " identity again");
         helper.succeed();
     }
 
@@ -250,11 +353,11 @@ public final class UrgePreemptionGameTests {
             runner.tick(labor, level, body);
         }
 
-        void interrupt() throws ReflectiveOperationException {
+        boolean interrupt() throws ReflectiveOperationException {
             var method = ColonyLabor.class.getDeclaredMethod("interrupt", ServerLevel.class, ColonyView.class,
                 Body.class, BodyRunner.class);
             method.setAccessible(true);
-            method.invoke(labor, level, view, body, runner);
+            return (boolean) method.invoke(labor, level, view, body, runner);
         }
 
         public void close() {

@@ -344,6 +344,11 @@ public final class TransferNode implements Node, Staged {
                 return Containers.accepts(container, slot, stack);
             }
             @Override public int getMaxStackSize() { return container.getMaxStackSize(); }
+
+            @Override
+            public int getMaxStackSize(ItemStack stack) {
+                return container.getMaxStackSize(stack);
+            }
         };
         copy(container, copy);
         return copy;

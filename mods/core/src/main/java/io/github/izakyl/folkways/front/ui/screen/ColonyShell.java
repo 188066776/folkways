@@ -57,6 +57,7 @@ public final class ColonyShell
 
     // The block a book was used on, kept from the click until the window built for it takes it.
     private static final Map<Player, BlockPos> AIMED = new WeakHashMap<>();
+    private static final Map<Player, ResourceLocation> REQUESTED_PAGE = new WeakHashMap<>();
 
     private static final int PANEL_WIDTH = 500;
     private static final int PANEL_HEIGHT = 310;
@@ -83,6 +84,7 @@ public final class ColonyShell
     private static final int FORM_HEIGHT = 340;
 
     private final Optional<UUID> colonyId;
+    private final Optional<ResourceLocation> initialPage;
     private final Optional<BlockPos> site;
     private final boolean atSite;
     private Map<ResourceLocation, Pane> opened = Map.of();
@@ -101,6 +103,7 @@ public final class ColonyShell
         site = at;
         this.atSite = atSite;
         colonyId = CurrentColony.id(player).or(() -> siteColonyId(player, at));
+        initialPage = Optional.ofNullable(REQUESTED_PAGE.remove(player));
     }
 
     private static Optional<SiteBoard> answeringSite(Player player, Optional<BlockPos> at) {
@@ -230,6 +233,20 @@ public final class ColonyShell
 
     public static void open(ServerPlayer player) {
         PlayerUIMenuType.openUI(player, ID);
+    }
+
+    /** A requested main page still has to be declared, visible, and owned by the book's current holder. */
+    public static void open(ServerPlayer player, ResourceLocation page) {
+        if (CurrentColony.of(player).filter(colony -> PageKinds.shows(colony, page)).isEmpty()
+            || PageKinds.all().stream().noneMatch(kind -> kind.id().equals(page))) {
+            return;
+        }
+        REQUESTED_PAGE.put(player, page);
+        try {
+            open(player);
+        } finally {
+            REQUESTED_PAGE.remove(player);
+        }
     }
 
     // The panel again, for another colony: on the next tick, once the press that asked for it is done with this one.
@@ -416,6 +433,26 @@ public final class ColonyShell
                 settled[0] = kept;
                 workspace.setDisplay(kept && !choosing[0]);
                 chooser.setDisplay(!kept || choosing[0]);
+            })
+            .build()
+            .getSyncValue());
+        root.addSyncValue(
+            DataBindingBuilder.stringS2C(
+            () ->
+                initialPage
+                    .filter(
+                    page ->
+                        Pages.colonyOf(player)
+                            .filter(colony -> PageKinds.shows(colony, page))
+                            .isPresent())
+                    .map(ResourceLocation::toString)
+                    .orElse(""))
+            .onSyncReceived(
+            value -> {
+                ResourceLocation target = ResourceLocation.tryParse(value);
+                if (target != null && pages.containsKey(target)) {
+                    show(pages, marks, target);
+                }
             })
             .build()
             .getSyncValue());

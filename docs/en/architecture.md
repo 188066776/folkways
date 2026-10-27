@@ -4,10 +4,10 @@
 
 ## Modules
 
-Folkways has **two required mods and three optional extensions**, each a Gradle
+Folkways has **two required mods and seven optional extensions**, each a Gradle
 project under `mods/`. They use separate mod IDs and share the `folkways`
 content namespace. The root project runs tests and collects jars rather than
-building a sixth mod.
+building a mod of its own.
 
 | Gradle project                          | Mod ID                   | Responsibility                                                                         |
 | --------------------------------------- | ------------------------ | -------------------------------------------------------------------------------------- |
@@ -15,7 +15,11 @@ building a sixth mod.
 | `:vanilla` → `mods/vanilla`             | `folkways_vanilla`       | Residents and their work among vanilla blocks                                          |
 | `:create` → `mods/create`               | `folkways_create`        | Rail, dispatch, elevators, track joints and schematic hand-off                         |
 | `:modulargolems` → `mods/modulargolems` | `folkways_modulargolems` | Golems as residents                                                                    |
+| `:rts` → `mods/rts`                     | `folkways_rts`           | Optional direct combat commands, squads and tactical UI                                |
 | `:cookery` → `mods/cookery`             | `folkways_cookery`       | Native Cookery farming, appliances, shared tools, Kaleidoscope Tavern wine and lessons |
+| `:warfare` → `mods/warfare`             | `folkways_warfare`       | Optional Superb Warfare weapons and stations                                           |
+| `:tacz` → `mods/tacz`                   | `folkways_tacz`          | Optional TACZ firearms and profiles                                                    |
+| `:firefighting` → `mods/firefighting`   | `folkways_firefighting`  | Damage control tools for Create: FireFighting Additions 0.2.5-beta-fix2                |
 
 ```mermaid
 flowchart BT
@@ -23,6 +27,11 @@ flowchart BT
     Create --> Vanilla
     ModularGolems[Modular Golems] --> Vanilla
     Cookery --> Vanilla
+    RTS --> Vanilla
+    Warfare --> Vanilla
+    TACZ --> Vanilla
+    Firefighting --> Vanilla
+    Firefighting --> Create
 ```
 
 Core handles integrations needed to read an existing world correctly, such as
@@ -69,6 +78,10 @@ so client language and optional integrations cannot change server filtering.
 
 ## Lifecycle and test ownership
 
+Vanilla's everyday defence and optional RTS resident orders and groups are described in
+[Combat and formations](combat-architecture.md). RTS depends on Vanilla's weapon and defence APIs;
+orders use Core's safe labour preemption. Warfare and TACZ provide optional native gun integrations.
+
 [`ColonyLifecycle`](../../mods/core/src/main/java/io/github/izakyl/folkways/core/api/colony/ColonyLifecycle.java)
 provides relocation and closing hooks. Closing listeners use
 [`Cleanup`](../../mods/core/src/main/java/io/github/izakyl/folkways/base/task/Cleanup.java)
@@ -81,3 +94,48 @@ package-private internals. Core's `src/gameTestFixtures` contains reusable helpe
 without test registration. An integration can reuse them without discovering
 Core's tests. Selecting a GameTest owner does not remove the other runtime mods
 its scenarios need. See [Testing](testing.md) for selection flags and CI profiles.
+
+## Combat equipment profiles
+
+Vanilla owns `LoadoutProfiles`, immutable `LoadoutProfile` / `Entry` records,
+`LoadoutRegistry` / `LoadoutProvider`, the Loadout profiles book page and finite
+resident collection. One colony-level profile can be assigned to many residents,
+each requiring a full physical set. Ordered component-aware `ItemSpec` entries
+specify weapons, four armor slots and consumables with editable target/threshold.
+Core keeps armor ownership; optional RTS only displays profile assignments and
+uses the same target-aware `Weapons.select` and exclusive `WeaponSession`.
+
+`LoadoutProvider` describes actual stack recognition, ammo identity, ranged/range,
+magazine size, loaded rounds, cycle ticks and suggested amounts. It no longer owns
+resident stock choices. Adding a weapon prefills editable supply values. Native
+execution remains in `WeaponAdapter` / `WeaponSession`; gun modules implement both
+metadata and real execution separately. `profile.hasRanged()` gates patrol-owned sentry assignments; transient colony observations and
+exclusive fixed-weapon hooks support sentry fire and bounded patrol help.
+
+The existing `folkways:patrol_loadouts` ledger is version three: `profiles` contain
+`id`, `name`, `entries` and optional raw `legacy` selection; `assignments` map
+`resident` to `profile`. Legacy enums and provider IDs/options deduplicate into
+profiles once; unknown extension selections round-trip while unavailable.
+No-profile policy is a patrol colony setting, defaulting to flee. At-hand engagement
+never fetches gear. Combat no longer uses vocation weapon/tool defaults; other
+trades keep their whitelist behavior. See [combat architecture](combat-architecture.md)
+for schema, UI, lifecycle, audit acceptance and deferred offhand ownership.
+
+## Overhead modes and tools
+
+Plugins register a dedicated delegation with `ToolKinds` and its client controller with
+`OverheadTools`. A plugin first registers a `Mode` through `RegisteringUi.mode` or
+`OverheadTools.registerMode`, then supplies its mode ID in `Tool` or `FocusedTool.mode()`.
+The legacy tool constructor defaults to Build. Core owns Build and contains no RTS or
+Damage Control ID checks. Modes without installed plugins have no dead toolbar entry.
+Core supplies the mode row, nested tool row, box editor, focused rendering and hover
+cards. Tab retains the full gesture/tool cycle and selects the corresponding mode.
+`ModeOverlays` computes a 220 ms smoothstep transition, alpha and desaturation for each
+registered mode. Vertex wrappers cover Build marks/cards and plugin marks; ghost meshes
+use draw-time shader alpha, avoiding remeshing. RTS separates passive health/acknowledged
+route drawing from selected-only battle controls. Saved manual layer preferences remain
+independent of mode emphasis. Focused tools can refresh read-only context-scoped snapshots
+through `backgroundTick`; Damage Control polls once a second, expires after three seconds,
+and clears cached state on book, colony, dimension and logout changes. Vanilla owns
+the damage-control controller and its bounded command/state packets; baseline persistence
+and work behavior continue through the existing presence and colony front.

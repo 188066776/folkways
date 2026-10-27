@@ -6,7 +6,6 @@ import io.github.izakyl.folkways.core.api.work.Ending;
 import io.github.izakyl.folkways.core.api.work.Node;
 import io.github.izakyl.folkways.core.api.work.NodeSpec;
 import io.github.izakyl.folkways.core.api.work.Outcome;
-import io.github.izakyl.folkways.core.api.work.ToolUse;
 import io.github.izakyl.folkways.core.api.work.Unmet;
 import io.github.izakyl.folkways.core.api.work.WorkSite;
 import io.github.izakyl.folkways.core.api.work.Worker;
@@ -31,7 +30,6 @@ final class WatchNode implements Node {
         this.presence = presence;
         this.spec = NodeSpec.of(id, PatrolContent.ID, new WorkSite.AtBlock(this.stop), stop.stances(),
                 Workload.Once.of(WATCH_TICKS))
-            .tools(ToolUse.of(PatrolContent.WEAPON))
             .vocation(PatrolContent.trade())
             .doing(PatrolContent.PATROLLING)
             .done();

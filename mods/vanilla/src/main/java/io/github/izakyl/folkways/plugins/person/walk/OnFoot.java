@@ -14,8 +14,9 @@ import io.github.izakyl.folkways.core.api.work.Doing;
 import io.github.izakyl.folkways.core.api.work.Doings;
 import io.github.izakyl.folkways.core.api.work.Stances;
 import io.github.izakyl.folkways.core.api.work.WorkExertion;
-import io.github.izakyl.folkways.plugins.patrol.PatrolContent;
 import io.github.izakyl.folkways.plugins.build.SiteTravel;
+import io.github.izakyl.folkways.plugins.damagecontrol.DamageControlContent;
+import io.github.izakyl.folkways.plugins.patrol.PatrolContent;
 import java.util.LinkedHashSet;
 import java.util.Optional;
 import java.util.Set;
@@ -64,7 +65,7 @@ public final class OnFoot implements Conveyance {
         }
         // Only dimension-local work areas permit relocation; aboard coordinates keep their usual travel.
         if (to.stream().allMatch(cell -> cell.realm() instanceof Realm.Dimension)
-                && siteTravel.toward(level, body, cells)) {
+                && permitsRelocation(body) && siteTravel.toward(level, body, cells)) {
             closest = Double.MAX_VALUE;
             sinceProgress = 0;
             settling = 0;
@@ -135,6 +136,13 @@ public final class OnFoot implements Conveyance {
         }
         activeWalkingTicks = 0;
         body.getNavigation().stop();
+    }
+
+    private static boolean permitsRelocation(Mob body) {
+        // Suppression includes picking up and carrying a connected hose; both legs must be walked.
+        return Bodies.of(body).flatMap(resident -> resident.doing()).map(doing ->
+            !doing.what().equals(DamageControlContent.EXTINGUISHING)
+                && doing.toward().filter(DamageControlContent.EXTINGUISHING::equals).isEmpty()).orElse(true);
     }
 
     private void measure(Mob body) {

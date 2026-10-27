@@ -25,11 +25,13 @@ import io.github.izakyl.folkways.front.api.notice.Meter;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.animal.Parrot;
 import net.neoforged.neoforge.event.level.BlockEvent;
 import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
@@ -114,6 +116,11 @@ public final class LivingContent {
         for (Colony colony : Colonies.all(level.getServer())) {
             colony.service(ID, LivingPresence.class).ifPresent(living -> living.changed(level, event.getPos()));
         }
+    }
+
+    public static boolean colonyPet(Entity entity, UUID colony) {
+        return entity.level() instanceof ServerLevel level && Colonies.of(level.getServer(), colony)
+            .filter(found -> ColonyPets.belongsTo(entity, found)).isPresent();
     }
 
     public static void petRemoved(EntityLeaveLevelEvent event) {

@@ -137,6 +137,58 @@ experience moved to the new thresholds. Legacy Packmule stays effective for
 existing residents but leaves the draw pool. Data packs can tune recipe refunds,
 byproducts and fishing discoveries; see [Resident data](custom-content.md#resident-data).
 
+## Combat equipment
+
+Open each sentry zone or patrol route's own configuration panel. Choose **Allowed loadouts**
+in the multi-select popup and enter one total **Headcount**. Idle residents with any selected
+assigned profile fill it automatically; zero headcount disables it. Sentries still need ranged
+profiles and safe standing capacity. The panel shows staffed/desired counts and shortage reasons;
+a blocked route has **Retry route**. Valid incumbents stay, and vacant weapon stations fill
+before zones/routes. There is no resident pinning or separate staffing page. Old compositions
+convert to profile union plus slot count, dropping pins; enrolled stations become automatic.
+
+Open **Loadout profiles** in the colony book. The left pane lists profiles and provides
+Create, Rename, Duplicate and Delete; the right pane shows the selected profile's
+summary and equipment. Narrow windows stack the panes. Use **+ Add** for weapons,
+weapon variants, supplies, observation gear or armor by slot. Each entry is one row
+with an icon, name, shortage status, target, reorder arrows, Remove and Replace.
+Only supplies edit targets and **Restock below**; press ✓ to save both quantities.
+Scroll the equipment table sideways in a narrow window. Hover its status to see
+how many items assigned residents still need and how many the warehouse lacks.
+
+Choose **Assign residents…** to open the resident list with names and current work.
+Each row's loadout selector applies immediately, including **No loadout**. Closing
+the window keeps accepted changes. Concurrent edits or changed authority are
+rejected visibly; use the refreshed values to retry. Each resident collects a full
+physical set from registered storage. Deleting a profile clears its assignments.
+Old exact-item and enchantment pins load as plain items/tags; typed gun and
+ammunition identities remain supported.
+
+Under colony patrol settings, residents without a profile flee by default. The
+alternative lets them engage with carried equipment and never fetches gear.
+Assigned residents choose ranged weapons at range and melee up close or without
+ammo. RTS’s combat page displays these assignments; it does not edit equipment.
+Combat gear is independent of production tool lists. Offhand equipment remains
+outside the existing armor handling.
+
+Use **Add observation gear** to request a real spyglass as a supply (1/1).
+Detection is computed per observer and target: elevation extends distance, while
+low effective light at the target shortens it. Required physical gear multiplies
+that distance by 2 by default; missing stock gives no magnification. Night vision,
+burning or glowing targets bypass darkness, but line of sight is always required.
+Without vigilance, defaults are 32 blocks on bright flat ground, 44 with eight
+blocks of eye-height advantage, and 88 from that wall with optics (64 on flat
+ground). Effective light 0–4 gives 8 on flat ground without optics. The close-range
+floor stays 3 and the total cap stays 128. Existing server configs retain their
+chosen baseline; set it to 32 explicitly to adopt the new default. Sentry rings
+show an upper bound, not a promise to detect everything inside. Ordinary
+sentry areas use profile handheld weapons. For artillery, explicitly include and
+automatically staff each enrolled weapon; see [Independent stations](warfare.md).
+Keep a walkable route to clear standing space outside the actual cannon hull.
+Operators choose a reachable cell in the first ring beside the hull and board on
+arrival, even without an enemy; mortars operate from beside the weapon. Blocked travel keeps
+the operator claim and retries after the route is cleared.
+
 ## Rations and food lists
 
 Residents carry three days of food by default and restock when their pack falls
@@ -270,6 +322,93 @@ railways, arcades and terraced fields. Whole structures can also be placed from
 the **Blueprints** page; Create schematics require Folkways × Create.
 
 To add your own patterns and structures, see [Custom content](custom-content.md).
+
+## Overhead modes
+
+The Colony Book's **V** view has three top-level modes: **Build**, **RTS** (when the optional RTS mod is installed), and **Damage Control**. Build contains the point, zone and line tools, construction and production-area controls. The second row shows the tools belonging to the selected mode. A mode with one tool activates that tool directly.
+
+Click a mode to switch. Unfinished drawings and held construction previews are discarded through their existing discard action. Clicking the current mode leaves the current interaction alone. **Tab** retains its existing full cycle through book gestures and registered tools, entering the corresponding mode automatically. Existing combat shortcuts, camera modifiers and damage-control box controls keep their meanings. Leaving RTS suspends interaction while accepted squads and orders continue on the server.
+
+The selected mode's world information remains prominent. Other modes' zones, paths, construction marks, ghosts, protected areas and combat health/route marks fade to 22% of their usual opacity over 220 ms. Colored marks also lose saturation. Switching back restores their normal appearance smoothly. Manual layer controls retain their ALL / MARKS / NONE settings. Inactive overlays are visual context; their tools do not receive clicks. Damage-control snapshots refresh once a second while holding the book, and expire after three seconds without a valid response.
+
+### RTS commands
+
+With the optional RTS module, select residents by left-clicking or dragging; Shift adds or toggles residents.
+Right-click ground to order movement in the current mode, or a nonfriendly mob to attack explicitly.
+Ctrl+right-click queues a mandatory waypoint in that mode; revisit an earlier point to close a patrol.
+Ctrl+1–9 binds the exact selection (the same set clears the shortcut), and 1–9 recalls it.
+The nine group cards sit at the bottom left; selected portraits and their paging controls share that row at the center.
+The compact bar reserves 60 GUI units (about 120 pixels at GUI scale 2). Group slots narrow in small windows;
+portraits keep paging without overlapping them. A group whose complete membership matches the nonempty selection
+uses the book button's pressed appearance, with ordinary ink text. Number keys and card clicks update this state;
+identical shortcut groups can both be pressed, while a partial overlap does not count.
+
+Default command keys are **G — Toggle movement mode (Move / Attack move)**, **H — Stop / hold position**,
+**J — Release Control**. Rebind them under **Controls → Folkways RTS**; the upper-left hints show the actual keys.
+A/S remain camera movement keys. G switches the mode even without a selection and sends no order.
+The right-click hint highlights the current mode and dims the other; the bottom bar also names the input mode
+separately from the current server command. Repeated ground right-clicks use that mode until G switches it back.
+Left-click always selects; there is no G-then-left-click confirmation.
+
+Ctrl+right-click starts an attack-move route in attack-move mode and appends to routes of the same mode.
+If an existing or pending route uses the other mode, the append fails without changing it; right-click ground
+without Ctrl to start a new route in the chosen mode. G does not alter an accepted or pending order.
+Selection, shortcut recall, Stop, Release and the first Esc that clears selection retain the mode.
+Leaving the RTS input screen resets it to Move, including switching tools/modes, closing V, opening a temporary
+book screen or putting the book away. Player/colony/realm changes also reset it. Accepted squads continue.
+Stop keeps control and holds nearby; Release removes the selected residents from all shortcut references and
+returns them to ordinary work when no other control remains.
+
+The paper-and-wood bottom bar shows the input mode, selected count and current server command, phase and result.
+Only operation failures temporarily replace the command row in red: no selection for an order,
+synchronization/busy input, invalid ground, limits, route/mode errors and server rejection. A new failure replaces
+the previous one and expires after about three seconds. Success, acceptance, sending and Updated messages stay
+silent; they do not extend an existing failure. Leaving the tool clears the message. Persistent execution
+failures remain visible after expiry; book-page configuration feedback stays unchanged.
+Hover the status for full details and help.
+
+## Damage control
+
+Hold the **Colony Book**, press **V** for the overhead view, and choose the **Damage Control** mode. Left-click two corners to mark a protected volume; Ctrl/Alt + wheel reuse the box editor's face and movement controls. Choose **Protect marked area** (or right-click the finished box) to save it. Right-click an existing protected area to open its ordinary zone settings panel.
+
+The panel contains **Put out fires**, **Restore missing blocks** and **Borrow and refill firefighting tools**. Repairs
+start disabled. Use **Reset baseline** while the whole area is loaded, then enable repairs. This button also records the
+first baseline. Every damage-control area is surveyed, including old saves that previously disabled an area. The panel's
+ordinary **Release** button deletes the area. To change the footprint, release it and draw a new area with its own
+baseline. The overhead action bar only saves or discards the drawing.
+
+The Damage Control mode dims Build and RTS overlays while keeping protected areas and incident markers prominent. Switching modes preserves the saved layer settings exactly; a layer explicitly hidden by the player stays hidden. Protected areas have green outlines (the selection is brighter). Orange cells mark fires, yellow cells missing blocks, purple cells conflicts and blue cells assigned workers. Hover a marker for its card, including recorded block names, worker names and refusal reasons. The tool refreshes once a second; each update carries up to 128 areas and 512 detailed markers, while area cards retain their full incident counts. The existing **Damage Control** book page shows fire, missing-cell, conflict, unavailable-block, worker and extinguisher-water summaries. Per-area configuration belongs to the zone settings panel.
+
+Enable the **Damage control** trade for residents. Fires in areas with Put out fires enabled become ordinary work
+immediately. Damage control defaults to priority 1 in normal trade work settings, including repairs and refills; saved
+player priorities still apply, and personal needs, fleeing danger and deliberate control retain their normal precedence.
+Overlapping areas share each fire and its responder. Campfires and decorative or industrial flames are preserved.
+
+Leave a walkable opening and safe standing space near the fire. Spray positions reserve room for the normal arrival
+tolerance and check the whole possible sight corridor before travel. Residents use ordinary arrival and then attempt the
+addon's native spray. This conservative planning can reject positions near walls even when an exact shot would fit. Each
+node keeps its selected method and standing positions, including a hose's cabinet pickup and spray stance. After an
+actual paid spray, it waits five server ticks for native effects; if its targeted fire still burns, it smothers that
+block directly and completes. Failed travel, unavailable water or a busy cabinet never authorize this fallback. An
+unreachable route can fail and retry. Protected areas do not themselves prohibit entry.
+
+A baseline records ordinary vanilla building blocks. Containers, crops, fluids, machines and blocks in `#folkways:damage_control_excluded` are excluded. The target is confirmed once through the construction printer and stored with its palette, relative coordinates, revision and Minecraft DataVersion. Existing colonies have no baseline until one is recorded. Unknown blocks are skipped and reported. A zone spanning several structures cannot record a single baseline.
+
+Residents restore only missing cells, using the builder's material requirements and placement adapter. Different blocks are reported and preserved; changing a door's open state does not request repairs. Whole missing doors are placed as one group. A partial group waits rather than resetting a surviving part. Active construction keeps its cells. Fire response takes precedence over repairs. After remodelling, record the baseline again. Baselines do not restore inventories or residents.
+
+Vanilla workers smother nearby fire and soul fire by hand without placing water. With **Folkways × Create: FireFighting Additions**, they prefer a nearby hydrant cabinet containing a hose, a cone or flat nozzle, and water. The cabinet is shared exclusively with one resident or player. A resident stays within the addon's 32-block connection limit; nozzle range uses the addon's effective settings (normally 50 blocks for cone and 35 for flat, clamped by its speed/friction limit). Once connected, a resident sprays from a safe current position or chooses a reachable position near the cabinet, preferring greater separation from the fire. They do not need to approach an already reachable distant fire. The pinned addon's server extinguishes along straight sampled rays; its visible water droplets follow arcs. Planning follows the server effect and can conservatively reject shots near obstacles. Each spray tick draws up to ten mB from the cabinet, including its final partial amount. Player takeover, removing equipment or the cabinet, interruption, death and unloading release the connection and stop sound immediately. After a spray ends, its hose remains visible for four client ticks and emitted water finishes its flight without consuming more fluid. Residents use the addon's spray particles and hose renderer.
+
+When no cabinet can serve the fire, residents borrow a portable extinguisher from colony stores. Water is consumed
+through the addon's spray drain API: five mB per two-tick pulse, at its four-block range, with a clear line of sight.
+The selected fire comes from a surveyed zone; the addon's native cone can also suppress nearby fires along its
+unobstructed samples. Nearby tracking clients receive the native cone mist or hose droplets in the server's target
+direction. Automatic suppression normally finishes in one paid pulse, so its brief mist is much less conspicuous than a
+player holding Use. Continuous paid pulses keep producing spray; stopping leaves only already emitted particles to
+finish. The addon's particle density and the client's particle settings still apply. Only water is supported.
+
+Refill uses fluid capabilities at colony stores, including water buckets. Workers can also gather source water inside an enabled refill zone, using an empty bucket from colony stores. The source is consumed and the bucket returned after filling. Supply discovery shares the zone scan budget. A bucket is emptied only when its whole contents fit; tanks can transfer smaller quantities. Empty tools fall back to hand smothering until refilled. Tools return to ordinary cargo when their owner stops damage control, dies, unloads, or the colony closes. Only water is used by automated firefighting. Moving-structure firefighting has not been verified in a client.
+
+Server settings under `damageControl` cap a zone at 32,768 cells by default, share 512 scan cells per colony per tick, and allow four simultaneous responders. Residents share the surveyed fire list and a per-tick allowance for target footing searches equal to the responder limit. Each selection considers up to 128 rotating fire addresses; unreachable targets wait a second before retrying. Scan allowance rotates between dimensions even when it is only one cell. A fire survey keeps at most 4,096 pending fire addresses. Nearby cabinets announce themselves on their own ticks; each indexed lookup checks up to 64 cabinets and rotates through larger lists, without enumerating unrelated block entities. Partial repairs also rotate, and disabling a zone lets an enabled overlapping zone take over its repairs. The construction printer also limits a baseline's longest edge to 1,024 blocks.
 
 ## Elevators
 

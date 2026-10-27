@@ -1,9 +1,9 @@
 package io.github.izakyl.folkways.core.api.vocation;
 
 import io.github.izakyl.folkways.base.Ledger;
+import io.github.izakyl.folkways.core.api.terms.ItemSpec;
 import io.github.izakyl.folkways.effect.perk.Perk;
 import io.github.izakyl.folkways.effect.perk.PerkPool;
-import io.github.izakyl.folkways.core.api.terms.ItemSpec;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -26,7 +26,8 @@ public final class Vocations {
     }
 
     public static Vocation register(VocationSpec spec) {
-        Vocation vocation = TRADES.claim(new Vocation(spec.id(), spec.perks(), spec.kit(), spec.order()));
+        Vocation vocation = TRADES.claim(new Vocation(spec.id(), spec.perks(), spec.kit(),
+            spec.order(), spec.defaultPriority()));
         for (Perk perk : spec.perks()) {
             PerkPool.register(spec.id(), perk);
         }

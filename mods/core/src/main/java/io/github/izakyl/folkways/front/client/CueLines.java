@@ -28,7 +28,7 @@ record CueLines(Cues cues, boolean inked) implements ClientTooltipComponent {
     private static final int EMPTY_HEADING = 12;
 
     static int width(Font font, Cue cue) {
-        int width = 0;
+        int width = cue.binding() == null ? 0 : KeyGlyph.bound(KeyGlyph.mapping(cue.binding())).width(font);
         for (Cue.Key key : cue.keys()) {
             width += KeyGlyph.of(key).width(font);
         }
@@ -54,6 +54,12 @@ record CueLines(Cues cues, boolean inked) implements ClientTooltipComponent {
 
     static void draw(GuiGraphics graphics, Font font, Cue cue, int x, int y, boolean inked) {
         int at = x;
+        if (cue.binding() != null) {
+            var mapping = KeyGlyph.mapping(cue.binding());
+            KeyGlyph glyph = KeyGlyph.bound(mapping);
+            glyph.draw(graphics, font, at, y, Pressed.bound(mapping));
+            at += glyph.width(font);
+        }
         for (int index = 0; index < cue.keys().size(); index++) {
             if (index > 0) {
                 graphics.drawString(font, AND, at + GAP, y + 2, inked ? INK_JOIN : JOIN, false);

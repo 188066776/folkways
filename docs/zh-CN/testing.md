@@ -27,17 +27,20 @@
 | `./gradlew -PgameTestMod=core -PcookeryTests=true runGameTestServer`                | 加载 Cookery 的 Core 测试；也支持 `vanilla`                        |
 | `./gradlew -PgameTestMod=cookery -PcookeryTests=true runGameTestServer`             | 加载 Cookery，仅运行 Cookery 所属测试                              |
 | `./gradlew -PgameTestMod=modulargolems -PmodularGolemsTests=true runGameTestServer` | 加载模块化傀儡及其依赖，运行集成测试                               |
+| `./gradlew runGameTestServer -PgameTestMod=firefighting -PfirefightingTests=true`   | 消防水带绑定、距离、清理、喷射，以及便携灭火器补液                 |
 
 测试归属与已安装模组分开：选择 Core 时仍会加载 Vanilla 居民和相关集成。
 模块化傀儡需要 `-PmodularGolemsTests=true`，其默认工作配置测试覆盖三类傀儡。
 Core 会一并运行已有 LDLib2 依赖测试，其他模组不重复运行。
 
 游戏目录为 `run/gametest/<mod>/<profile>/`，合并运行的模组名为 `all`。
-环境名按固定顺序拼接已启用的可选套件 `cookery`、`modulargolems`、`tavern`，
+环境名按固定顺序拼接已启用的可选套件 `cookery`、`modulargolems`、`tavern`、`firefighting`，
 未启用时为 `base`，例如 `cookery-modulargolems`。
 Tavern 需要 Cookery；虽然复用 Cookery 的 fixtures，仍有独立后缀，确保每种模组组合使用独立世界。
 直接通过 Gradle 启动服务器前，需要先在对应目录的 `eula.txt` 中接受 [Minecraft EULA](https://www.minecraft.net/eula)。
 仅在同意其条款后执行。
+
+可选的 `firefighting` Blockwright 配置会安装固定版本的消防附加组件与整合模组。更新 jar 或校验和后运行 `npm run setup`。仅传入 `-PfirefightingTests=true` 可在加载消防附加组件时运行整套测试。
 
 ## Blockwright 套件
 
@@ -68,6 +71,22 @@ npm run test:e2e -- tests/e2e/founding-smoke.spec.ts --workers=1
 `tests/` 下每个套件有自己的 `playwright.config.ts` 和 `tsconfig.json`。
 套件输出放在 Git 忽略的 `tests/out/`。
 
+### 居民消防视觉
+
+运行 `npm run visual:take -- firefighting-spray.spec.ts --workers=1`，使用固定版本的
+`firefighting` profile。在命令前加 `SPRAY_SHADERS=1` 可测试 Sodium、Iris 和
+Complementary Reimagined（`firefighting_visuals`，需要 GPU display）。测试截图覆盖
+灭火器和锥形水带的空闲／喷射／停止状态，以及只连接但未喷水的水带，并对喷流区域像素做比较。
+同时断言原生 `SprayParticle` 的存在与方向、真实耗水和火焰移除、仅连接时不产生水滴，
+以及停止后粒子和视觉状态最终清理、不再耗水。另有独立录像让普通居民完成值守，
+再通过自动响应分别使用两种工具扑灭一处火源。
+
+持续场景明确在每次真实 adapter/session 付费脉冲前重新点燃测试火格，不直接发视觉包，
+也不生成测试专用粒子。该场景验证视觉桥接，自动场景验证普通响应生命周期；
+两者均不代表任意地形或多人时序验收。PNG、MP4 和 JSON 证据保存在
+`tests/out/visual/playwright/`（或 Playwright 的 `--output` 目录）。单次付费脉冲远短于
+持续喷射场景，还应逐帧检查自动响应录像。
+
 ### 编写 e2e 场景
 
 玩家可观察到的行为优先使用黑盒测试。共享辅助代码放入 `tests/shared/`；
@@ -80,6 +99,23 @@ npm run test:e2e -- tests/e2e/founding-smoke.spec.ts --workers=1
 船舶专属场景放在 `tests/sable/`，完整例子见 [`founding-smoke.spec.ts`](../../tests/e2e/founding-smoke.spec.ts)。
 
 仓库的 `.mcp.json` 向支持 MCP 的助手暴露相同测试框架，LDLib2 界面适配器位于 `tests/ldlib2/`。
+
+### 可选 RTS 输入
+
+默认配置不加载 `folkways_rts`。两个 RTS 场景显式使用 `blockwright.toml#rts`，
+在客户端和服务端安装可选指挥模块：
+
+```sh
+npm run test:e2e -- tests/e2e/combat-overhead-suspend.spec.ts tests/e2e/combat-rts-input.spec.ts --workers=1
+```
+
+挂起场景检查真实服务端回复、未绑数字组的任务续行，以及客户端追踪缺失后重开界面。
+输入场景以实际鼠标和键盘事件验证选择、快捷组、路线编辑与命令按钮；Java 任务仅布置初始场景或读取状态。
+路线截图需要另外看图验收。两个场景均不能证明大规模性能或任意地形可靠性。
+
+命令、编队与战斗页场景也使用 `blockwright.toml#rts`。相机场景通过明确的页面按钮打开命令页，地面右键负责 RTS 下令。原生敌意及武器／防御 GameTests 可以不装 RTS 运行，Vanilla 单独运行时没有战斗页和俯视战斗工具。
+
+`./gradlew -PrtsTests=true runGameTestServer` 运行组合测试，再加 `-PgameTestMod=rts` 仅运行 RTS 测试。Vanilla 的可选 `rtsTest` 源集验证包内私有防御／生活服务与 RTS 的集成，基础 GameTests 不安装 RTS，CI 覆盖两种配置。
 
 ### JEC 搜索兼容
 
@@ -170,3 +206,27 @@ CI 不运行完整 e2e、Sable、界面截图、Ponder、性能基准或宣传�
 JUnit 用例表示本次服务器调用是否通过；单个 GameTest 的详细结果保留在服务器日志中。
 
 客户端冒烟测试将 `tests/out/` 上传为 `client-smoke-results`。
+
+## 可选 Superb Warfare 测试
+
+`./gradlew -PwarfareTests=true runGameTestServer` 加载 `folkways_warfare`、
+Superb Warfare 0.8.9.2 和 Kotlin for Forge。加上 `-PgameTestMod=warfare` 只跑专用套件。
+原生依赖在 `blockwright.toml` 固定 SHA-512，测试世界按安装组合隔离。Vanilla 的可选
+`warfareTest` 测试夹具运行真实巡逻观察，无需公开内部服务或增加生产依赖。
+CI 增加 Vanilla 加载 Warfare 的组合与 Warfare 专用套件。设置和契约见 [Warfare](warfare.md)。
+
+TACZ 集成：`./gradlew -PtaczTests=true runGameTestServer` 运行组合测试；
+`./gradlew -PtaczTests=true -PgameTestMod=tacz runGameTestServer` 仅运行其测试，
+目录为 `run/gametest/tacz/tacz`。真实客户端场景见 [TACZ](tacz.md)。
+
+### 损害管制工具
+
+```sh
+npm run test:e2e -- tests/e2e/damage-control-tool.spec.ts --workers=1
+```
+
+真实客户端测试进入专用工具、创建保护区域、记录基准，确认灭火、修复与补液开关到达服务器，
+移除已记录的方块，并保存 `tests/out/e2e/shots/damage-control-missing.png`。
+测试还验证切换工具及离开俯瞰视角后，混合图层偏好设置完整保留。
+Vanilla 的 `DamageControlGameTests` 覆盖同一命令路径、缺失与冲突标记、状态编解码、
+拒绝其他委托的区域，以及重画失败时保留原有保护。

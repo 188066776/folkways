@@ -18,7 +18,12 @@ import io.github.izakyl.folkways.front.api.ui.ItemPicker;
 import io.github.izakyl.folkways.front.api.ui.Pages;
 import io.github.izakyl.folkways.front.api.ui.Rows;
 import io.github.izakyl.folkways.front.api.ui.Tokens;
+import io.github.izakyl.folkways.front.api.ui.ZonePanels;
+import io.github.izakyl.folkways.front.client.ZoneSelection;
+import io.github.izakyl.folkways.front.engine.Enrollments;
+import io.github.izakyl.folkways.front.engine.colony.ColonyFront;
 import io.github.izakyl.folkways.front.engine.colony.Zone;
+import io.github.izakyl.folkways.front.engine.colony.ZoneActions;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -43,6 +48,7 @@ final class ZoneSettings {
     private static final String OPEN = "open";
     private static final String TITLE = "title";
     private static final String SETTINGS = "settings";
+    private static final String ACTIONS = "actions";
     private static final String KEY = "key";
     private static final String NAME = "name";
     private static final String ICON = "icon";
@@ -65,6 +71,11 @@ final class ZoneSettings {
     private final List<String> sent = new ArrayList<>();
 
     private final List<Row> rows = new ArrayList<>();
+    private final List<Button> actions = new ArrayList<>();
+    private final String[] actionKeys = new String[SLOTS];
+    private String actionZone = "";
+    private String requestedAction = "";
+    private int actionSequence;
     private final Label title = new Label();
     private final Label noSettings = Rows.note(Component.translatable("folkways.zoneconfig.no_settings"));
 
@@ -115,6 +126,21 @@ final class ZoneSettings {
             rows.add(row);
             table.addChildren(row.element);
         }
+        table.addChildren(ZonePanels.build(player, () -> held));
+        SimpleBinding<String> actionBinding = DataBindingBuilder.stringC2S(value -> act(player, value)).build();
+        actionBinding.setRemoteDataSource(IDataSource.of(ignored -> {
+        }, () -> requestedAction));
+        table.addSyncValue(actionBinding.getSyncValue());
+        for (int slot = 0; slot < SLOTS; slot++) {
+            int index = slot;
+            Button action = new Button().setOnClick(event -> {
+                if (actionKeys[index] != null && !actionZone.isEmpty()) {
+                    requestedAction = ++actionSequence + "|" + actionZone + "|" + actionKeys[index];
+                }
+            });
+            actions.add(action);
+            table.addChildren(action);
+        }
         title.layout(layout -> layout.flexGrow(1).flexShrink(1).minWidth(0));
         title.textStyle(style -> style.textWrap(
             com.lowdragmc.lowdraglib2.gui.ui.data.TextWrap.HOVER_ROLL));
@@ -139,6 +165,21 @@ final class ZoneSettings {
         return page;
     }
 
+    void act(Player player, String value) {
+        String[] parts = value.split("\\|", 3);
+        if (parts.length != 3 || held == null || !held.toString().equals(parts[1])) {
+            return;
+        }
+        Pages.colonyOf(player).ifPresent(colony -> Pages.levelOf(player).ifPresent(level -> {
+            var result = ZoneActions.act(level, colony, held, parts[2]);
+            if (result.isEmpty()) {
+                player.displayClientMessage(Component.translatable("folkways.zoneconfig.action_unavailable"), true);
+            } else {
+                result.get().refusal().ifPresent(why -> player.displayClientMessage(why.component(), true));
+            }
+        }));
+    }
+
     private void release(Player player) {
         UUID zone = held;
         held = null;
@@ -146,7 +187,7 @@ final class ZoneSettings {
             return;
         }
         Pages.colonyOf(player).ifPresent(colony -> {
-            var front = io.github.izakyl.folkways.front.engine.colony.ColonyFront.of(colony);
+            var front = ColonyFront.of(colony);
             front.erase(zone);
         });
     }
@@ -168,6 +209,8 @@ final class ZoneSettings {
         if (zone.isEmpty()) {
             return tag;
         }
+        tag.putUUID("zone", held);
+        tag.putBoolean("extension", ZonePanels.has(zone.get().delegation()));
         HolderLookup.Provider registries = player.registryAccess();
         tag.put(TITLE, Pages.text(registries,
             line(zone.get().delegation(), zone.get().position())));
@@ -187,6 +230,17 @@ final class ZoneSettings {
             list.add(row);
         }
         tag.put(SETTINGS, list);
+        ListTag extra = new ListTag();
+        Pages.colonyOf(player).flatMap(colony -> ColonyFront.of(colony).zone(held))
+            .filter(area -> area.dimension().equals(player.level().dimension()))
+            .flatMap(area -> Enrollments.delegation(area.delegation()))
+            .ifPresent(delegation -> delegation.actions().stream().limit(SLOTS).forEach(action -> {
+                CompoundTag entry = new CompoundTag();
+                entry.putString(KEY, action.key());
+                entry.putString(NAME, action.nameKey());
+                extra.add(entry);
+            }));
+        tag.put(ACTIONS, extra);
         return tag;
     }
 
@@ -290,17 +344,23 @@ final class ZoneSettings {
                             SettingsPage.Scope scope) { }
 
     private Optional<Selected> zone(Player player) {
-        if (held == null) return Optional.empty();
+        if (held == null) {
+            return Optional.empty();
+        }
         return Pages.colonyOf(player).flatMap(colony -> {
-            var front = io.github.izakyl.folkways.front.engine.colony.ColonyFront.of(colony);
-            return front.zone(held).map(zone -> new Selected(zone.id(), zone.delegation(),
-                Zone.over(zone).min(), new SettingsPage.Scope.OnZone(zone.id(), zone.delegation())))
-                .or(() -> front.path(held).map(path -> new Selected(path.id(), path.delegation(),
-                    path.points().getFirst(), new SettingsPage.Scope.OnPath(path.id(), path.delegation()))));
+            var front = ColonyFront.of(colony);
+            return front.zone(held).filter(zone -> zone.dimension().equals(player.level().dimension()))
+                .map(zone -> new Selected(zone.id(), zone.delegation(), Zone.over(zone).min(),
+                    new SettingsPage.Scope.OnZone(zone.id(), zone.delegation())))
+                .or(() -> front.path(held).filter(path -> path.dimension().equals(player.level().dimension()))
+                    .map(path -> new Selected(path.id(), path.delegation(), path.points().getFirst(),
+                        new SettingsPage.Scope.OnPath(path.id(), path.delegation()))));
         });
     }
 
-    private static SettingsPage.Scope on(Selected zone) { return zone.scope(); }
+    private static SettingsPage.Scope on(Selected zone) {
+        return zone.scope();
+    }
 
     private static Component line(ResourceLocation delegation, net.minecraft.core.BlockPos min) {
         return Component.translatable(
@@ -312,10 +372,21 @@ final class ZoneSettings {
     boolean show(Player player, Tag tag) {
         CompoundTag reading = tag instanceof CompoundTag compound ? compound : new CompoundTag();
         boolean open = reading.getBoolean(OPEN);
+        ZoneSelection.selected(open && reading.hasUUID("zone") ? reading.getUUID("zone") : null);
         HolderLookup.Provider registries = player.registryAccess();
         title.setText(Pages.readText(registries, reading.get(TITLE)));
         ListTag list = reading.getList(SETTINGS, Tag.TAG_COMPOUND);
-        noSettings.setDisplay(open && list.isEmpty());
+        ListTag extra = reading.getList(ACTIONS, Tag.TAG_COMPOUND);
+        actionZone = open && reading.hasUUID("zone") ? reading.getUUID("zone").toString() : "";
+        for (int slot = 0; slot < actions.size(); slot++) {
+            Button action = actions.get(slot);
+            boolean shown = slot < extra.size();
+            action.setDisplay(shown);
+            actionKeys[slot] = shown ? extra.getCompound(slot).getString(KEY) : null;
+            Tokens.name(action, shown ? "folkways.zoneconfig.action." + actionKeys[slot] : Tokens.NONE);
+            action.setText(shown ? Component.translatable(extra.getCompound(slot).getString(NAME)) : Component.empty());
+        }
+        noSettings.setDisplay(open && list.isEmpty() && extra.isEmpty() && !reading.getBoolean("extension"));
         for (int slot = 0; slot < rows.size(); slot++) {
             Row row = rows.get(slot);
             boolean shown = slot < list.size();

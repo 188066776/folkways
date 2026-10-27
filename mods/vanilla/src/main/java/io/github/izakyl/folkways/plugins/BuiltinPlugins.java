@@ -1,6 +1,7 @@
 package io.github.izakyl.folkways.plugins;
 
 import io.github.izakyl.folkways.plugins.build.BuildPlugin;
+import io.github.izakyl.folkways.plugins.damagecontrol.DamageControlPlugin;
 import io.github.izakyl.folkways.plugins.wares.WaresPlugin;
 import io.github.izakyl.folkways.plugins.farming.FarmingPlugin;
 import io.github.izakyl.folkways.plugins.fishing.FishingPlugin;
@@ -27,6 +28,7 @@ public final class BuiltinPlugins {
         FishingPlugin.install(modBus);
         GroundworkPlugin.install(modBus);
         PatrolPlugin.install(modBus);
+        DamageControlPlugin.install(modBus);
         OrdersPlugin.install(modBus);
         io.github.izakyl.folkways.plugins.supply.SupplyContent.install(modBus);
     }

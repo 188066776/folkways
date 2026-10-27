@@ -4,6 +4,7 @@ import io.github.izakyl.folkways.core.api.resident.Searches;
 import io.github.izakyl.folkways.core.api.terms.ClimbableBlocks;
 import io.github.izakyl.folkways.core.api.terms.Footing;
 import io.github.izakyl.folkways.core.api.terms.Keepouts;
+import java.util.List;
 import javax.annotation.Nullable;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -19,6 +20,8 @@ import net.minecraft.world.level.pathfinder.Node;
 import net.minecraft.world.level.pathfinder.PathType;
 import net.minecraft.world.level.pathfinder.PathfindingContext;
 import net.minecraft.world.level.pathfinder.WalkNodeEvaluator;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.BooleanOp;
 import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
@@ -32,6 +35,7 @@ public final class ResidentNodeEvaluator extends WalkNodeEvaluator {
     private BlockPos start;
     private boolean outOfBounds;
     private Keepouts.Keepout escapeWalls;
+    private List<AABB> entityObstacles = List.of();
 
     public ResidentNodeEvaluator(@Nullable BlockPos start) {
         this.start = start;
@@ -39,6 +43,10 @@ public final class ResidentNodeEvaluator extends WalkNodeEvaluator {
 
     void startingAt(@Nullable BlockPos cell) {
         start = cell;
+    }
+
+    void avoidingEntities(List<AABB> bounds) {
+        entityObstacles = bounds;
     }
 
     // Someone already standing where nobody should may still walk out of it.
@@ -87,6 +95,14 @@ public final class ResidentNodeEvaluator extends WalkNodeEvaluator {
     // hurt still may.
     @Override
     public PathType getPathType(PathfindingContext context, int x, int y, int z) {
+        if (!entityObstacles.isEmpty()) {
+            AABB standing = mob.getDimensions(mob.getPose()).makeBoundingBox(new Vec3(x + .5, y, z + .5));
+            for (AABB obstacle : entityObstacles) {
+                if (standing.intersects(obstacle)) {
+                    return PathType.BLOCKED;
+                }
+            }
+        }
         if (context.getBlockState(probePos.set(x, y, z)).is(Blocks.BARRIER)
                 || context.getBlockState(probePos.set(x, y - 1, z)).is(Blocks.BARRIER)) {
             return PathType.BLOCKED;

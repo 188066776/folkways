@@ -55,3 +55,28 @@ tasks.named("processGametestResources") {
         file("${destinationDir}/data/folkways/tags/block/forage.json").text = groovy.json.JsonOutput.toJson(merged) + "\n"
     }
 }
+
+// These tests exercise RTS orders through Vanilla's package-private defence and living services.
+sourceSets { rtsTest }
+neoForge { addModdingDependenciesTo sourceSets.rtsTest }
+configurations {
+    rtsTestCompileOnly.extendsFrom gametestCompileOnly
+    rtsTestImplementation.extendsFrom gametestImplementation
+    rtsTestRuntimeOnly.extendsFrom gametestRuntimeOnly
+}
+dependencies {
+    rtsTestImplementation sourceSets.main.output
+    rtsTestImplementation project(":rts")
+}
+
+// Warfare's scout acceptance fixture exercises the package-private patrol service in Vanilla's module.
+sourceSets { warfareTest }
+neoForge { addModdingDependenciesTo sourceSets.warfareTest }
+configurations {
+    warfareTestCompileOnly.extendsFrom gametestCompileOnly
+    warfareTestImplementation.extendsFrom gametestImplementation
+    warfareTestRuntimeOnly.extendsFrom gametestRuntimeOnly
+}
+dependencies {
+    warfareTestImplementation sourceSets.main.output
+}

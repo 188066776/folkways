@@ -5,11 +5,15 @@ import com.github.ysbbbbbb.kaleidoscopecookery.blockentity.kitchen.ShawarmaSpitB
 import com.github.ysbbbbbb.kaleidoscopecookery.init.ModBlocks;
 import com.github.ysbbbbbb.kaleidoscopecookery.init.ModItems;
 import io.github.izakyl.folkways.FolkwaysMod;
-import io.github.izakyl.folkways.effect.Effects;
+import io.github.izakyl.folkways.cookery.CookeryContent;
+import io.github.izakyl.folkways.cookery.KitchenBookings;
+import io.github.izakyl.folkways.cookery.testing.RecoveryAsking;
 import io.github.izakyl.folkways.core.api.resident.Resident;
 import io.github.izakyl.folkways.core.api.terms.Containers;
-import io.github.izakyl.folkways.core.api.terms.Reach;
 import io.github.izakyl.folkways.core.api.terms.Goods;
+import io.github.izakyl.folkways.core.api.terms.ItemSpec;
+import io.github.izakyl.folkways.core.api.terms.Reach;
+import io.github.izakyl.folkways.core.api.terms.WorldPos;
 import io.github.izakyl.folkways.core.api.work.Ending;
 import io.github.izakyl.folkways.core.api.work.Grown;
 import io.github.izakyl.folkways.core.api.work.Hold;
@@ -23,11 +27,8 @@ import io.github.izakyl.folkways.core.api.work.Tools;
 import io.github.izakyl.folkways.core.api.work.WorkSite;
 import io.github.izakyl.folkways.core.api.work.Worker;
 import io.github.izakyl.folkways.core.api.work.Workload;
-import io.github.izakyl.folkways.core.api.terms.WorldPos;
 import io.github.izakyl.folkways.core.engine.labor.Commit;
-import io.github.izakyl.folkways.cookery.CookeryContent;
-import io.github.izakyl.folkways.cookery.KitchenBookings;
-import io.github.izakyl.folkways.cookery.testing.RecoveryAsking;
+import io.github.izakyl.folkways.effect.Effects;
 import io.github.izakyl.folkways.plugins.person.PersonBody;
 import io.github.izakyl.folkways.plugins.person.ResidentEntity;
 import java.util.List;
@@ -42,6 +43,7 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
@@ -429,7 +431,11 @@ public final class SpitGameTests {
             return result;
         }
         List<ItemEntity> drops() { return level.getEntitiesOfClass(ItemEntity.class, new AABB(cell).inflate(2)); }
-        long count(net.minecraft.world.item.Item item) { return Goods.countIn(pack, Goods.specOf(new ItemStack(item))); }
+
+        long count(Item item) {
+            return Goods.countIn(pack, ItemSpec.of(item));
+        }
+
         public Resident resident() { return actor.resident(); }
         public Mob body() { return actor; }
         public Container pack() { return pack; }

@@ -5,7 +5,6 @@ import com.github.ysbbbbbb.kaleidoscopecookery.blockentity.kitchen.TeapotBlockEn
 import com.github.ysbbbbbb.kaleidoscopecookery.crafting.recipe.TeapotRecipe;
 import com.github.ysbbbbbb.kaleidoscopecookery.crafting.serializer.TeapotRecipeSerializer;
 import com.github.ysbbbbbb.kaleidoscopecookery.init.ModBlocks;
-import com.github.ysbbbbbb.kaleidoscopecookery.init.ModItems;
 import com.github.ysbbbbbb.kaleidoscopecookery.item.TeacupItem;
 import io.github.izakyl.folkways.plugins.FolkwaysVanillaConfig;
 import io.github.izakyl.folkways.core.api.terms.Goods;
@@ -82,7 +81,9 @@ public final class TeapotStation implements KitchenStation {
         mystery(level).ifPresent(jobs::add);
         return List.copyOf(jobs);
     }
+
     static final ResourceLocation MYSTERY = ResourceLocation.fromNamespaceAndPath("folkways", "cookery/procedural/mystery_tea");
+
     static Optional<Job> mystery(ServerLevel level) {
         if (FolkwaysVanillaConfig.refusedRecipes().contains(MYSTERY)) return Optional.empty();
         var job = new Job(MYSTERY, ResourceLocation.withDefaultNamespace("water"),
@@ -131,7 +132,11 @@ public final class TeapotStation implements KitchenStation {
             return actual.filter(holder -> holder.id().equals(recipe) && holder.value().time() == time
                 && ItemStack.matches(holder.value().assemble(container, level.registryAccess()), output)).isPresent();
         }
-        ItemSpec ingredient() { return Goods.specOf(input); }
+
+        ItemSpec ingredient() {
+            return ItemSpec.of(input.getItem());
+        }
+
         ItemStack bucket() {
             ItemStack candidate = new ItemStack(BuiltInRegistries.FLUID.get(fluid).getBucket());
             var cap = candidate.getCapability(Capabilities.FluidHandler.ITEM);

@@ -1,9 +1,10 @@
 package io.github.izakyl.folkways.front.engine.net;
 
 import io.github.izakyl.folkways.FolkwaysMod;
+import io.github.izakyl.folkways.base.persist.Reader;
 import io.github.izakyl.folkways.core.api.colony.Colony;
 import io.github.izakyl.folkways.core.api.colony.ColonyView;
-import io.github.izakyl.folkways.base.persist.Reader;
+import io.github.izakyl.folkways.core.api.resident.body.Bodies;
 import io.github.izakyl.folkways.core.api.resident.body.Body;
 import io.github.izakyl.folkways.front.api.Facing;
 import io.github.izakyl.folkways.front.api.Ghost;
@@ -73,10 +74,16 @@ public final class FolkwaysUiNetworkEvents {
                 .ifPresent(authority -> toggleColonyMember(player, authority))));
         registrar.playToServer(ToggleColonyResidentPacket.TYPE, ToggleColonyResidentPacket.STREAM_CODEC,
             asPlayer((packet, player) -> ColonyAuthority.ofHeldBook(player, packet.colonyId())
-                .ifPresent(authority -> AtBody.of(player, packet.entityId())
-                    .ifPresent(aimed -> toggleColonyResident(player, authority, aimed.body())))));
+                .ifPresent(authority -> toggleColonyEntity(player, authority, packet.entityId()))));
         registrar.playToServer(SetBookGesturePacket.TYPE, SetBookGesturePacket.STREAM_CODEC,
             asPlayer(FolkwaysUiNetworkEvents::setBookGesture));
+        registrar.playToServer(
+            OpenBookPagePacket.TYPE,
+            OpenBookPagePacket.STREAM_CODEC,
+            asPlayer(
+            (packet, player) ->
+                ColonyAuthority.ofHeldBook(player, packet.colonyId())
+                    .ifPresent(authority -> ColonyShell.open(player, packet.page()))));
         registrar.playToServer(CreateZonePacket.TYPE, CreateZonePacket.STREAM_CODEC,
             asPlayer(FolkwaysUiNetworkEvents::createZone));
         registrar.playToServer(CreatePathPacket.TYPE, CreatePathPacket.STREAM_CODEC,
@@ -128,6 +135,20 @@ public final class FolkwaysUiNetworkEvents {
         PacketDistributor.sendToPlayer(player, ColonyOverviews.of(player, colony));
     }
 
+    static void toggleColonyEntity(ServerPlayer player, ColonyAuthority authority, int entityId) {
+        var entity = player.serverLevel().getEntity(entityId);
+        if (entity == null || !entity.isAlive() || entity.isRemoved() || player.distanceToSqr(entity) > 64) {
+            return;
+        }
+        if (Bodies.of(entity).isPresent()) {
+            AtBody.of(player, entityId)
+                .ifPresent(aimed -> toggleColonyResident(player, authority, aimed.body()));
+            return;
+        }
+        MemberToggle.toggleEntity(authority.colony(), entity, player);
+        PacketDistributor.sendToPlayer(player, ColonyOverviews.of(player, authority.colony()));
+    }
+
     public static void toggleColonyMember(ServerPlayer player, ColonyAuthority authority) {
         ServerLevel level = player.serverLevel();
         BlockPos pos = authority.at().orElseThrow().pos();
@@ -170,7 +191,8 @@ public final class FolkwaysUiNetworkEvents {
     static ColonyOverviewPacket buildOverview(ServerLevel level, Colony colony, BlockPos near) {
         List<ZoneSnapshot> zones = new ArrayList<>();
         for (ColonyZone zone : ColonyFront.of(colony).zonesIn(level)) {
-            zones.add(ZoneSnapshot.of(zone));
+            zones.add(ZoneSnapshot.of(zone, Facing.all(colony).stream()
+                .flatMap(facing -> facing.zoneRings(zone, colony.view(level)).stream()).limit(64).toList()));
         }
         List<Ghost> ghosts = ColonyViews.of(colony, level)
             .map(view -> ColonyGhosts.owed(view, colony, ColonyOverviewPacket.MAX_GHOSTS, near))

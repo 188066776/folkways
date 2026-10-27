@@ -4,10 +4,13 @@ import com.github.ysbbbbbb.kaleidoscopecookery.blockentity.kitchen.MillstoneBloc
 import com.github.ysbbbbbb.kaleidoscopecookery.init.ModBlocks;
 import com.github.ysbbbbbb.kaleidoscopecookery.init.ModItems;
 import io.github.izakyl.folkways.FolkwaysMod;
-import io.github.izakyl.folkways.effect.Effects;
+import io.github.izakyl.folkways.cookery.CookeryContent;
+import io.github.izakyl.folkways.cookery.KitchenBookings;
+import io.github.izakyl.folkways.cookery.testing.RecoveryAsking;
 import io.github.izakyl.folkways.core.api.resident.Resident;
 import io.github.izakyl.folkways.core.api.terms.Containers;
 import io.github.izakyl.folkways.core.api.terms.Goods;
+import io.github.izakyl.folkways.core.api.terms.ItemSpec;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
 import io.github.izakyl.folkways.core.api.work.Ending;
 import io.github.izakyl.folkways.core.api.work.Grown;
@@ -31,12 +34,10 @@ import io.github.izakyl.folkways.core.engine.plan.Solving;
 import io.github.izakyl.folkways.core.engine.plan.Stands;
 import io.github.izakyl.folkways.core.engine.plan.Stock;
 import io.github.izakyl.folkways.core.engine.plan.Unassigned;
-import io.github.izakyl.folkways.cookery.CookeryContent;
-import io.github.izakyl.folkways.cookery.KitchenBookings;
-import io.github.izakyl.folkways.cookery.testing.RecoveryAsking;
-import io.github.izakyl.folkways.plugins.wares.WaresContent;
+import io.github.izakyl.folkways.effect.Effects;
 import io.github.izakyl.folkways.plugins.person.PersonBody;
 import io.github.izakyl.folkways.plugins.person.ResidentEntity;
+import io.github.izakyl.folkways.plugins.wares.WaresContent;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -50,6 +51,7 @@ import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
@@ -492,7 +494,11 @@ public final class MillstoneGameTests {
             }
             return outcome;
         }
-        long count(net.minecraft.world.item.Item item) { return Goods.countIn(pack, Goods.specOf(new ItemStack(item))); }
+
+        long count(Item item) {
+            return Goods.countIn(pack, ItemSpec.of(item));
+        }
+
         public Resident resident() { return actor.resident(); }
         public Mob body() { return actor; }
         public Container pack() { return pack; }
