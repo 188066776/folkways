@@ -44,6 +44,8 @@ public final class ElevatorPlugin {
             new Delegation(ID, new Shape.Block(state -> state.getBlock() instanceof ElevatorPulleyBlock,
                 ElevatorPlugin::mainPulley), ResourceLocation.fromNamespaceAndPath("create", "elevator_pulley"))))));
         modBus.addListener(FMLCommonSetupEvent.class, event -> event.enqueueWork(() -> Keepouts.install(ElevatorShafts.INSTANCE)));
+        NeoForge.EVENT_BUS.addListener(ElevatorShafts::joined);
+        NeoForge.EVENT_BUS.addListener(ElevatorShafts::left);
         NeoForge.EVENT_BUS.addListener(ElevatorShafts::tick);
         NeoForge.EVENT_BUS.addListener(ElevatorShafts::unload);
         NeoForge.EVENT_BUS.addListener(ElevatorDispatch::tick);

@@ -10,8 +10,8 @@ import net.minecraft.client.Minecraft;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 public final class ColonyLookState {
-    private static final long REFRESH_MS = 250L;
-    private static final long CACHE_TTL_MS = 1000L;
+    private static final long REFRESH_MS = 500L;
+    private static final long CACHE_TTL_MS = 2000L;
 
     private static List<LookLines> residents = List.of();
     private static long lastRequestMs;

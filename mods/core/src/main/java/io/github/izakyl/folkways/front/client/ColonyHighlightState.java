@@ -43,7 +43,7 @@ import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 public final class ColonyHighlightState {
-    private static final int REQUEST_INTERVAL_TICKS = 20;
+    private static final int REQUEST_INTERVAL_TICKS = 40;
     private static final double OUTLINE_RANGE = 160.0D;
     private static final double FILL_RANGE = 128.0D;
     private static final double CARD_RANGE = 128.0D;

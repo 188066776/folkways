@@ -18,13 +18,10 @@ import io.github.izakyl.folkways.front.engine.authority.ColonyAuthority;
 import io.github.izakyl.folkways.front.engine.charter.CurrentColony;
 import io.github.izakyl.folkways.front.engine.colony.BlockSweep;
 import io.github.izakyl.folkways.front.engine.colony.ColonyFront;
-import io.github.izakyl.folkways.front.engine.colony.ColonyGhosts;
 import io.github.izakyl.folkways.front.engine.colony.ColonyGround;
-import io.github.izakyl.folkways.front.engine.colony.ColonyLooks;
 import io.github.izakyl.folkways.front.engine.colony.ColonyPath;
 import io.github.izakyl.folkways.front.engine.colony.ColonySettings;
 import io.github.izakyl.folkways.front.engine.colony.ColonyStalls;
-import io.github.izakyl.folkways.front.engine.colony.ColonyViews;
 import io.github.izakyl.folkways.front.engine.colony.ColonyZone;
 import io.github.izakyl.folkways.front.engine.colony.Endorsements;
 import io.github.izakyl.folkways.front.engine.colony.MemberToggle;
@@ -32,7 +29,6 @@ import io.github.izakyl.folkways.front.engine.colony.ZoneDrafts;
 import io.github.izakyl.folkways.front.engine.item.ColonyBookItem;
 import io.github.izakyl.folkways.front.ui.screen.ColonyShell;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -132,7 +128,7 @@ public final class FolkwaysUiNetworkEvents {
             return;
         }
         answered.get().refusal().ifPresent(why -> player.displayClientMessage(why.component(), true));
-        PacketDistributor.sendToPlayer(player, ColonyOverviews.of(player, colony));
+        PacketDistributor.sendToPlayer(player, ColonyOverviews.fresh(player, colony));
     }
 
     static void toggleColonyEntity(ServerPlayer player, ColonyAuthority authority, int entityId) {
@@ -156,7 +152,7 @@ public final class FolkwaysUiNetworkEvents {
         if (MemberToggle.toggleAt(level, colony, pos, player).refused()) {
             return;
         }
-        PacketDistributor.sendToPlayer(player, ColonyOverviews.of(player, colony));
+        PacketDistributor.sendToPlayer(player, ColonyOverviews.fresh(player, colony));
     }
 
     private static void createZone(CreateZonePacket packet, ServerPlayer player) {
@@ -178,29 +174,30 @@ public final class FolkwaysUiNetworkEvents {
             Colony colony = authority.colony();
             if (!BlockSweep.take(player.serverLevel(), colony, packet.min(), packet.max(),
                     Set.copyOf(packet.kinds()), player).refused()) {
-                PacketDistributor.sendToPlayer(player, ColonyOverviews.of(player, colony));
+                PacketDistributor.sendToPlayer(player, ColonyOverviews.fresh(player, colony));
             }
         });
     }
 
     private static void opened(ServerPlayer player, Colony colony, UUID id) {
         ColonyShell.editSelection(player, id);
-        PacketDistributor.sendToPlayer(player, ColonyOverviews.of(player, colony));
+        PacketDistributor.sendToPlayer(player, ColonyOverviews.fresh(player, colony));
     }
 
-    static ColonyOverviewPacket buildOverview(ServerLevel level, Colony colony, BlockPos near) {
+    static ColonyOverviewPacket buildOverview(ServerLevel level, Colony colony) {
         List<ZoneSnapshot> zones = new ArrayList<>();
         for (ColonyZone zone : ColonyFront.of(colony).zonesIn(level)) {
             zones.add(ZoneSnapshot.of(zone, Facing.all(colony).stream()
                 .flatMap(facing -> facing.zoneRings(zone, colony.view(level)).stream()).limit(64).toList()));
         }
-        List<Ghost> ghosts = ColonyViews.of(colony, level)
-            .map(view -> ColonyGhosts.owed(view, colony, ColonyOverviewPacket.MAX_GHOSTS, near))
-            .orElseGet(List::of);
         List<ColonyPath> paths = ColonyFront.of(colony).paths().stream()
             .filter(path -> path.dimension().equals(level.dimension())).toList();
         ColonyView view = colony.view(level);
         List<Facing> facings = Facing.all(colony);
+        List<Ghost> ghosts = new ArrayList<>();
+        for (Facing facing : facings) {
+            ghosts.addAll(facing.ghosts(view));
+        }
         List<Placards.Note> notes = new ArrayList<>();
         List<Placard> placards = new ArrayList<>();
         for (ColonyZone zone : ColonyFront.of(colony).zonesIn(level)) {
@@ -216,9 +213,7 @@ public final class FolkwaysUiNetworkEvents {
                 placards.add(stalled(colony, level, placard));
             }
         }
-        // The packet carries only so many: the ones nearest the player go first.
-        placards.sort(Comparator.comparingDouble(placard -> corner(placard.outline()).distSqr(near)));
-        return new ColonyOverviewPacket(ColonyGround.cells(level, colony), zones, ghosts,
+        return new ColonyOverviewPacket(ColonyGround.cells(level, colony), zones, List.copyOf(ghosts),
             paths.stream().map(ColonyPath::save).toList(), notes, placards);
     }
 
@@ -237,7 +232,7 @@ public final class FolkwaysUiNetworkEvents {
         return lines.size() == placard.lines().size() ? placard : new Placard(placard.id(), placard.outline(), lines);
     }
 
-    private static BlockPos corner(Placard.Outline outline) {
+    static BlockPos corner(Placard.Outline outline) {
         return switch (outline) {
             case Placard.Outline.Box box -> box.min();
             case Placard.Outline.Path path -> path.points().getFirst();
@@ -258,19 +253,8 @@ public final class FolkwaysUiNetworkEvents {
 
     private static void requestLookAt(RequestLookAtPacket packet, ServerPlayer player) {
         ColonyAuthority.ofHeldBook(player, packet.colonyId())
-            .ifPresent(authority -> PacketDistributor.sendToPlayer(player, new LookAtSnapshotPacket(
-                buildResidentLooks(player.serverLevel(), authority, player))));
+            .ifPresent(authority -> PacketDistributor.sendToPlayer(player,
+                ColonyOverviews.looks(player, authority.colony())));
     }
 
-    static List<LookLines> buildResidentLooks(ServerLevel level, ColonyAuthority authority,
-            ServerPlayer player) {
-        Colony colony = authority.colony();
-        List<ColonyView> views = colony.views(level.getServer());
-        List<LookLines> looks = new ArrayList<>();
-        for (Body resident : ColonyLooks.nearest(level, colony, player, LookLines.MAX_RESIDENTS)) {
-            looks.add(new LookLines(resident.mob().getId(),
-                ColonyLooks.of(colony, resident, views)));
-        }
-        return List.copyOf(looks);
-    }
 }

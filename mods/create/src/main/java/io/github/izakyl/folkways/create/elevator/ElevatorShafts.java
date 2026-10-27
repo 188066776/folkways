@@ -19,6 +19,8 @@ import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
+import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
+import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
 import net.neoforged.neoforge.event.level.LevelEvent;
 import net.neoforged.neoforge.event.tick.LevelTickEvent;
 
@@ -30,23 +32,56 @@ final class ElevatorShafts implements Keepouts.Keepout {
             return y >= bottom && y <= top && columns.contains(ChunkPos.asLong(x, z));
         }
     }
+
     private static final Map<ServerLevel, Map<Long, List<Shaft>>> SNAPSHOTS = new ConcurrentHashMap<>();
 
+    // Track all contraptions: their elevator data may be assigned after the join event.
+    private static final Map<ServerLevel, Set<AbstractContraptionEntity>> VEHICLES = new HashMap<>();
+
     private ElevatorShafts() { }
+
+    static void joined(EntityJoinLevelEvent event) {
+        if (event.getLevel() instanceof ServerLevel level
+                && event.getEntity() instanceof AbstractContraptionEntity vehicle) {
+            VEHICLES.computeIfAbsent(level, ignored -> new HashSet<>()).add(vehicle);
+        }
+    }
+
+    static void left(EntityLeaveLevelEvent event) {
+        if (event.getLevel() instanceof ServerLevel level) {
+            var vehicles = VEHICLES.get(level);
+            if (vehicles != null) {
+                vehicles.remove(event.getEntity());
+                if (vehicles.isEmpty()) {
+                    VEHICLES.remove(level);
+                }
+            }
+        }
+    }
 
     static void tick(LevelTickEvent.Post event) {
         if (event.getLevel() instanceof ServerLevel level) refresh(level);
     }
 
     static void unload(LevelEvent.Unload event) {
-        if (event.getLevel() instanceof ServerLevel level) SNAPSHOTS.remove(level);
+        if (event.getLevel() instanceof ServerLevel level) {
+            SNAPSHOTS.remove(level);
+            VEHICLES.remove(level);
+        }
     }
 
     static void refresh(ServerLevel level) {
+        var vehicles = VEHICLES.get(level);
+        if (vehicles == null || vehicles.isEmpty()) {
+            SNAPSHOTS.remove(level);
+            return;
+        }
         Map<Long, List<Shaft>> byChunk = new HashMap<>();
-        for (var entity : level.getAllEntities()) {
-            if (!(entity instanceof AbstractContraptionEntity vehicle) || !vehicle.isAlive()
-                    || !(vehicle.getContraption() instanceof ElevatorContraption contraption)) continue;
+        for (var vehicle : vehicles) {
+            if (!vehicle.isAlive()
+                    || !(vehicle.getContraption() instanceof ElevatorContraption contraption)) {
+                continue;
+            }
             ElevatorColumn column = ElevatorColumn.get(level, contraption.getGlobalColumn());
             if (column == null) continue;
             List<BlockPos> contacts = column.getContacts().stream()
