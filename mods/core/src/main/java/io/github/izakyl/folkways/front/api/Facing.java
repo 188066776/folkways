@@ -3,18 +3,25 @@ package io.github.izakyl.folkways.front.api;
 import io.github.izakyl.folkways.core.api.colony.Colony;
 import io.github.izakyl.folkways.core.api.colony.ColonyView;
 import io.github.izakyl.folkways.core.api.terms.ItemFilter;
+import io.github.izakyl.folkways.core.api.terms.WorldPos;
 import io.github.izakyl.folkways.front.api.notice.Attempt;
 import io.github.izakyl.folkways.front.api.notice.Line;
 import io.github.izakyl.folkways.front.api.notice.Sentence;
 import io.github.izakyl.folkways.front.api.panel.Board;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.ItemStack;
 
 public interface Facing {
+
+    default Map<WorldPos, List<ItemStack>> stock(ColonyView colony) {
+        return Map.of();
+    }
 
     default boolean shows(ResourceLocation page) {
         return true;

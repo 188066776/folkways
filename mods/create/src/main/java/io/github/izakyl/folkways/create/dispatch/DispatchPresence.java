@@ -386,7 +386,7 @@ public final class DispatchPresence implements Facing {
     }
 
     // One depot for each network in each level: its pick-up points, its containers, and the one tally behind them. The
-    // containers are the network's own, kept out of the colony's stock, whoever offers them as stores.
+    // containers are withheld from ordinary planning stock, whoever offers them as stores.
     private void publish(PackageNetwork network, Map<ServerLevel, Map<WorldPos, Set<UUID>>> byLevel,
                          Map<ServerLevel, Map<UUID, List<WorldPos>>> stocked, NetworkSnapshot taken, long now) {
         int reachTicks = CollectNode.reachTicks();
@@ -613,6 +613,18 @@ public final class DispatchPresence implements Facing {
                             empty.add(new Post(id, where, WorldPos.of(level, seat), cells)));
                     }
                 }
+            }
+        }
+        return found;
+    }
+
+    @Override
+    public Map<WorldPos, List<ItemStack>> stock(ColonyView view) {
+        PackageNetwork network = PackageNetworks.get();
+        Map<WorldPos, List<ItemStack>> found = new LinkedHashMap<>();
+        for (List<WorldPos> containers : containersIn(view, network).values()) {
+            for (WorldPos at : containers) {
+                found.putIfAbsent(at, network.heldIn(view.level(), at.block(view.level())));
             }
         }
         return found;
