@@ -46,6 +46,7 @@ import net.minecraft.gametest.framework.GameTestSequence;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -173,6 +174,134 @@ public final class GrowingGameTests {
     private static void filed(GameTestHelper helper, CompletableFuture<Optional<Component>> grown, String what) {
         Optional<Component> refused = grown.join();
         helper.assertTrue(refused.isEmpty(), what + ", not " + refused.map(Component::getString).orElse(""));
+    }
+
+    private static Growing raising(GameTestHelper helper, int x, int rounds, boolean last, int stuck) {
+        ResourceLocation id = ResourceLocation.fromNamespaceAndPath(FolkwaysMod.MOD_ID, "test_raise");
+        Pattern pattern = Patterns.find(id).orElseThrow();
+        BlockPos start = helper.absolutePos(new BlockPos(x, 2, 2));
+        CompoundTag settings = new CompoundTag();
+        settings.putInt("rounds", rounds);
+        settings.putBoolean("last", last);
+        settings.putInt("stuck", stuck);
+        return Growing.begun(id, "", new Hint.Zone(start, start), Chosen.load(pattern.knobs(), settings).save(),
+            Direction.NORTH, 0L, WorldPos.of(helper.getLevel(), start), Optional.empty(), "");
+    }
+
+    private static void raised(GameTestHelper helper, BuildPackets.Raised result, int rounds) {
+        helper.assertValueEqual(result.rounds(), rounds, "every completed round is counted");
+        helper.assertTrue(result.refusal().isEmpty(), "growth finishes successfully: " + result.refusal());
+    }
+
+    @GameTest(template = "empty_large", timeoutTicks = 600)
+    public static void raisingPast64RoundsMatchesColonyGrowthUntilEnded(GameTestHelper helper) {
+        Rig rig = rig(helper);
+        Growing instant = raising(helper, 2, 80, false, -1);
+        Growing gradual = raising(helper, 13, 80, false, -1);
+        AtomicReference<BuildPresence> presence =
+            new AtomicReference<>(new BuildPresence(rig.colony(), rig.level().getServer()));
+        CompletableFuture<BuildPackets.Raised> raising = BuildPackets.raiseRounds(rig.level(), instant);
+        CompletableFuture<Optional<Component>> first = presence.get().grow(rig.level(), gradual);
+        GameTestSequence steps = helper.startSequence()
+            .thenWaitUntil(() -> drawn(helper, first))
+            .thenExecute(() -> filed(helper, first, "the colony starts the same pattern"));
+        for (int n = 0; n < 80; n++) {
+            int completed = n + 1;
+            BlockPos cell = gradual.hint().anchor().offset(n % 10, 0, n / 10);
+            steps.thenExecute(() -> {
+                helper.assertValueEqual(round(rig), completed, "the colony advances one round at a time");
+                presence.get().settle(rig.level().getServer());
+                rig.level().setBlock(cell, Blocks.STONE.defaultBlockState(), 3);
+                presence.set(new BuildPresence(rig.colony(), rig.level().getServer()));
+                presence.get().settle(rig.level().getServer());
+            }).thenWaitUntil(() -> {
+                presence.get().settle(rig.level().getServer());
+                helper.assertTrue(growing(rig) == 0 || round(rig) > completed,
+                    "the colony advances after round " + completed);
+            });
+        }
+        steps.thenWaitUntil(() -> drawn(helper, raising)).thenExecute(() -> {
+            raised(helper, raising.join(), 80);
+            helper.assertValueEqual(growing(rig), 0, "Ended retires the colony's growth");
+            helper.assertValueEqual(standing(rig), 0, "the colony has no unfinished rounds");
+            for (int n = 0; n < 80; n++) {
+                BlockPos offset = new BlockPos(n % 10, 0, n / 10);
+                helper.assertTrue(rig.level().getBlockState(instant.hint().anchor().offset(offset)).is(Blocks.STONE),
+                    "instant round " + n + " is placed");
+                helper.assertValueEqual(rig.level().getBlockState(instant.hint().anchor().offset(offset)),
+                    rig.level().getBlockState(gradual.hint().anchor().offset(offset)),
+                    "both paths leave the same block");
+            }
+            helper.assertTrue(rig.level().getBlockState(instant.hint().anchor().offset(0, 0, 8)).isAir(),
+                "Ended places no extra round");
+        }).thenSucceed();
+    }
+
+    @GameTest(template = "empty_large", timeoutTicks = 100)
+    public static void raisingCountsTheLastRoundAndDoesNotDrawAgain(GameTestHelper helper) {
+        Growing growing = raising(helper, 2, 3, true, 3);
+        CompletableFuture<BuildPackets.Raised> raising = BuildPackets.raiseRounds(helper.getLevel(), growing);
+        helper.startSequence().thenWaitUntil(() -> drawn(helper, raising)).thenExecute(() -> {
+            raised(helper, raising.join(), 3);
+            TranslatableContents message =
+                (TranslatableContents) raising.join().message(growing.pattern()).getContents();
+            helper.assertValueEqual(message.getKey(), "folkways.draft.grow.raised", "last reports success");
+            helper.assertValueEqual(message.getArgs()[1], 3, "the success message includes the last round");
+        }).thenSucceed();
+    }
+
+    @GameTest(template = "empty_large", timeoutTicks = 100)
+    public static void raisingReportsAnObstructionAfterPartialProgress(GameTestHelper helper) {
+        Growing growing = raising(helper, 2, 5, false, 2);
+        CompletableFuture<BuildPackets.Raised> raising = BuildPackets.raiseRounds(helper.getLevel(), growing);
+        helper.startSequence().thenWaitUntil(() -> drawn(helper, raising)).thenExecute(() -> {
+            BuildPackets.Raised result = raising.join();
+            helper.assertValueEqual(result.rounds(), 2, "only completed rounds are counted");
+            helper.assertTrue(result.refusal().orElseThrow().getString().contains("test obstruction"),
+                "the actual refusal is preserved");
+            TranslatableContents message = (TranslatableContents) result.message(growing.pattern()).getContents();
+            helper.assertValueEqual(message.getKey(), "folkways.draft.grow.interrupted", "Stuck reports interruption");
+            helper.assertValueEqual(message.getArgs()[1], 2, "the interruption includes completed progress");
+            helper.assertValueEqual(message.getArgs()[2], result.refusal().orElseThrow(),
+                "the reason stays translated");
+            helper.assertTrue(helper.getLevel().getBlockState(growing.hint().anchor().offset(2, 0, 0)).isAir(),
+                "the obstructed round is not raised");
+        }).thenSucceed();
+    }
+
+    @GameTest(template = "empty_large", timeoutTicks = 100)
+    public static void raisingReportsItsSafetyLimitWithoutPlacingAnotherRound(GameTestHelper helper) {
+        Growing growing = raising(helper, 2, 5, false, -1);
+        CompletableFuture<BuildPackets.Raised> raising = BuildPackets.raiseRounds(helper.getLevel(), growing, 2);
+        helper.startSequence().thenWaitUntil(() -> drawn(helper, raising)).thenExecute(() -> {
+            BuildPackets.Raised result = raising.join();
+            helper.assertValueEqual(result.rounds(), 2, "the safety limit bounds placements");
+            TranslatableContents reason = (TranslatableContents) result.refusal().orElseThrow().getContents();
+            helper.assertValueEqual(reason.getKey(), "folkways.draft.grow.limit", "the limit is reported honestly");
+            helper.assertTrue(helper.getLevel().getBlockState(growing.hint().anchor().offset(2, 0, 0)).isAir(),
+                "no placement exceeds the limit");
+        }).thenSucceed();
+    }
+
+    @GameTest(template = "empty_large", timeoutTicks = 100)
+    public static void raisingCanEndExactlyAtItsSafetyLimit(GameTestHelper helper) {
+        Growing growing = raising(helper, 2, 2, false, -1);
+        CompletableFuture<BuildPackets.Raised> raising = BuildPackets.raiseRounds(helper.getLevel(), growing, 2);
+        helper.startSequence().thenWaitUntil(() -> drawn(helper, raising))
+            .thenExecute(() -> raised(helper, raising.join(), 2)).thenSucceed();
+    }
+
+    @GameTest(template = "empty_large", timeoutTicks = 100)
+    public static void raisingNothingKeepsTheOriginalRefusal(GameTestHelper helper) {
+        Growing growing = raising(helper, 2, 0, false, -1);
+        CompletableFuture<BuildPackets.Raised> raising = BuildPackets.raiseRounds(helper.getLevel(), growing);
+        helper.startSequence().thenWaitUntil(() -> drawn(helper, raising)).thenExecute(() -> {
+            helper.assertValueEqual(raising.join().rounds(), 0, "nothing was raised");
+            TranslatableContents message =
+                (TranslatableContents) raising.join().message(growing.pattern()).getContents();
+            helper.assertValueEqual(message.getKey(), DraftRefusal.NOTHING_DRAWN.translationKey(),
+                "an empty first round does not claim success");
+        }).thenSucceed();
     }
 
     @GameTest(template = "empty_large", timeoutTicks = 200)
@@ -363,6 +492,32 @@ public final class GrowingGameTests {
             helper.assertTrue(progressed || site.complete(), "headframe construction makes progress; left=" + site.left()
                 + " refusals=" + site.refusals().entrySet().stream().limit(3).toList());
         }
+    }
+
+    @GameTest(template = "empty_large", timeoutTicks = 300)
+    public static void raisingAMineContinuesPastTheHeadframeUntilEnded(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        BlockPos ground = helper.absolutePos(new BlockPos(10, 24, 10));
+        for (int x = -8; x <= 8; x++) {
+            for (int z = -8; z <= 8; z++) {
+                level.setBlock(ground.offset(x, 0, z), Blocks.STONE.defaultBlockState(), 3);
+            }
+        }
+        Pattern mine = Patterns.find(MINE).orElseThrow();
+        CompoundTag settings = defaults(mine, ground.getY() - 16);
+        settings.putInt("pairs", 1);
+        settings.putInt("branch", 4);
+        settings.putBoolean("chase", false);
+        BlockPos mark = ground.above();
+        Hint hint = new Hint.Zone(mark, mark.offset(2, 0, 2));
+        Growing growing = Growing.begun(MINE, "", hint, settings, Direction.NORTH, 3L,
+            WorldPos.of(level, mark), Optional.empty(), "");
+        CompletableFuture<BuildPackets.Raised> raising = BuildPackets.raiseRounds(level, growing);
+        helper.startSequence().thenWaitUntil(() -> drawn(helper, raising)).thenExecute(() -> {
+            BuildPackets.Raised result = raising.join();
+            helper.assertTrue(result.refusal().isEmpty(), "the mine reaches Ended: " + result.refusal());
+            helper.assertTrue(result.rounds() > 2, "the mine raises its headframe, flights and drifts");
+        }).thenSucceed();
     }
 
     @GameTest(template = "empty_large", timeoutTicks = 200)

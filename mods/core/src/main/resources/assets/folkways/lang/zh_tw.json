@@ -191,6 +191,8 @@
   "folkways.draft.grow.local": "自己資料夾裡的建築樣式無法持續生長；請放進資料包或伺服器的 folkways 資料夾，由伺服器逐輪繪製",
   "folkways.draft.grow.placed": "開始持續生長：%s",
   "folkways.draft.grow.raised": "已一次性建成 %s，共 %s 輪",
+  "folkways.draft.grow.interrupted": "%s 已建成 %s 輪，直接建成已中斷：%s",
+  "folkways.draft.grow.limit": "已達 %s 輪安全上限，樣式仍未全部建成",
   "folkways.draft.too_big_to_send": "自己資料夾裡的這個建築樣式繪製結果過大，無法傳送；請放進資料包或伺服器的 folkways 資料夾，由伺服器繪製",
   "folkways.draft.unknown": "伺服器上沒有可用於此標記的建築樣式 %s",
   "folkways.draft.none": "沒有已安裝的建築樣式，folkways/pattern 裡也沒有",

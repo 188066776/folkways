@@ -191,6 +191,8 @@
   "folkways.draft.grow.local": "A pattern from your own folder cannot keep growing; put it in a data pack or the server's folkways folder so the server can draw each round",
   "folkways.draft.grow.placed": "Keeps growing: %s",
   "folkways.draft.grow.raised": "Raised %s through %s rounds at once",
+  "folkways.draft.grow.interrupted": "Stopped raising %s after %s rounds: %s",
+  "folkways.draft.grow.limit": "Reached the safety limit of %s rounds; the pattern has more to build",
   "folkways.draft.too_big_to_send": "This drawing from your own folder is too large to send; put the pattern in a data pack or the server's folkways folder so the server can draw it",
   "folkways.draft.unknown": "The server has no pattern called %s for this mark",
   "folkways.draft.none": "No patterns installed, and none in folkways/pattern",

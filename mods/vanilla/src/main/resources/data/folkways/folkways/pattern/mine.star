@@ -1,11 +1,19 @@
 load("folkways:materials.star", "FENCES", "GATES", "LAMPS", "LOGS", "MASONRY", "PLANKS", "STONE_STAIRS", "WOOD_STAIRS", "offer")
 
 accepts = ["zone"]
+# A branch opens in one round, including the fluid checks beyond its far end.
+capture = 4
 knobs = [
     count("y", -64, 319, default = 16, icon = "minecraft:iron_pickaxe"),
-    count("branch", 4, 32, default = 12, icon = "minecraft:rail"),
     count("spacing", 2, 6, default = 3, icon = "minecraft:stone"),
-    count("pairs", 1, 24, default = 6, icon = "minecraft:stone_pickaxe"),
+    count("main_east", 0, 128, default = 26, icon = "minecraft:stone_pickaxe"),
+    count("branch_east", 0, 48, default = 12, icon = "minecraft:rail"),
+    count("main_south", 0, 128, default = 0, icon = "minecraft:stone_pickaxe"),
+    count("branch_south", 0, 48, default = 12, icon = "minecraft:rail"),
+    count("main_west", 0, 128, default = 0, icon = "minecraft:stone_pickaxe"),
+    count("branch_west", 0, 48, default = 12, icon = "minecraft:rail"),
+    count("main_north", 0, 128, default = 0, icon = "minecraft:stone_pickaxe"),
+    count("branch_north", 0, 48, default = 12, icon = "minecraft:rail"),
     flag("chase", default = True, icon = "minecraft:raw_iron"),
     items("timber", offer(["minecraft:spruce_log"], LOGS),
         default = ["minecraft:spruce_log"], icon = "minecraft:spruce_log"),
@@ -26,9 +34,16 @@ lang = {
     "en_us": {
         "title": "Mine",
         "y": "Mining Y",
-        "branch": "Branch length",
         "spacing": "Branch spacing",
-        "pairs": "Branch pairs",
+        "main_east": "East main length",
+        "branch_east": "East branch length",
+        "main_south": "South main length",
+        "branch_south": "South branch length",
+        "main_west": "West main length",
+        "branch_west": "West branch length",
+        "main_north": "North main length",
+        "branch_north": "North branch length",
+        "error.mine.directions": "Choose at least one main tunnel longer than zero",
         "chase": "Chase veins",
         "timber": "Timber",
         "planks": "Planks",
@@ -47,9 +62,16 @@ lang = {
     "zh_cn": {
         "title": "矿井",
         "y": "开采 Y 值",
-        "branch": "支巷长度",
         "spacing": "支巷间距",
-        "pairs": "支巷对数",
+        "main_east": "东主巷长度",
+        "branch_east": "东支巷长度",
+        "main_south": "南主巷长度",
+        "branch_south": "南支巷长度",
+        "main_west": "西主巷长度",
+        "branch_west": "西支巷长度",
+        "main_north": "北主巷长度",
+        "branch_north": "北支巷长度",
+        "error.mine.directions": "至少选择一个长度大于零的主巷方向",
         "chase": "追矿脉",
         "timber": "支护木",
         "planks": "木板",
@@ -68,9 +90,16 @@ lang = {
     "zh_hk": {
         "title": "礦井",
         "y": "開採 Y 值",
-        "branch": "支巷長度",
         "spacing": "支巷間距",
-        "pairs": "支巷對數",
+        "main_east": "東主巷長度",
+        "branch_east": "東支巷長度",
+        "main_south": "南主巷長度",
+        "branch_south": "南支巷長度",
+        "main_west": "西主巷長度",
+        "branch_west": "西支巷長度",
+        "main_north": "北主巷長度",
+        "branch_north": "北支巷長度",
+        "error.mine.directions": "至少選擇一個長度大於零的主巷方向",
         "chase": "追礦脈",
         "timber": "支護木",
         "planks": "木板",
@@ -89,9 +118,16 @@ lang = {
     "zh_tw": {
         "title": "礦井",
         "y": "開採 Y 值",
-        "branch": "支巷長度",
         "spacing": "支巷間距",
-        "pairs": "支巷對數",
+        "main_east": "東主巷長度",
+        "branch_east": "東支巷長度",
+        "main_south": "南主巷長度",
+        "branch_south": "南支巷長度",
+        "main_west": "西主巷長度",
+        "branch_west": "西支巷長度",
+        "main_north": "北主巷長度",
+        "branch_north": "北支巷長度",
+        "error.mine.directions": "至少選擇一個長度大於零的主巷方向",
         "chase": "追礦脈",
         "timber": "支護木",
         "planks": "木材",
@@ -122,6 +158,8 @@ AROUND = [(1, 0), (-1, 0), (0, 1), (0, -1)]
 # One quarter of the stair's round, from the centre (4, 4): a flat landing, three steps down, then a
 # landing that zigzags round the bend. Turned four times it closes a 32-cell lap of the 9-wide shaft.
 QUARTER = [(-2, -4), (-1, -4), (0, -4), (1, -4), (2, -4), (2, -3), (3, -3), (3, -2)]
+DIRS = ["east", "south", "west", "north"]
+WORLD = [(1, 0), (0, 1), (-1, 0), (0, -1)]
 LAP = 32
 FALL = 12
 
@@ -257,6 +295,17 @@ def flooded(site, m, boxes):
         top = max(found)
         reject("error.mine.flooded", top)
 
+def protected(site):
+    return "|".join([v for key in ["timber", "planks", "stairs", "rail", "gate", "lamp"]
+                     for v in site.items(key)])
+
+def cut(shape, taken):
+    return subtract(shape, taken) if shape != None and taken != None else shape
+
+def bare(site, m, bx):
+    scope = scoped(m, bx)
+    return cut(terrain(scope, of = "!air"), terrain(scope, of = protected(site)))
+
 def guarded(site, m, boxes):
     flooded(site, m, boxes)
     seal = []
@@ -266,11 +315,11 @@ def guarded(site, m, boxes):
         scope = scoped(m, bx)
         wet = terrain(scope.outset(x = 1, y = 1, z = 1), of = "fluid")
         if wet != None:
-            seal.append(wet)
+            seal.append(cut(wet, m.get("roads")))
         loose = terrain(scoped(m, [bx[0], bx[1] + bx[4], bx[2], bx[3], 1, bx[5]]), of = FALLING)
         if loose != None:
-            prop.append(loose)
-        solid = terrain(scope, of = "!air")
+            prop.append(cut(loose, m.get("roads")))
+        solid = bare(site, m, bx)
         if solid != None:
             dig.append(solid)
     parts = []
@@ -372,7 +421,7 @@ def head(site):
     for c in corners:
         parts.append(lamp(site, m, c[0], y0 + 1, c[1]))
     return grown(parts, keep = {"ox": m["ox"], "oz": m["oz"], "y0": y0, "n": n, "i": 0, "t": 0,
-        "dug": flat(boxes)})
+        "dug": flat(boxes), "d": 0, "hub": False})
 
 def flight(site, m, k, chased):
     y0 = k["y0"]
@@ -437,20 +486,82 @@ def flight(site, m, k, chased):
         parts.append(part("post", group(posts), site.items("timber"), orient = "y"))
     if rails:
         parts.append(fence("rail", site, m, rails.keys()))
-    return grown(parts + built, keep = {"ox": k["ox"], "oz": k["oz"], "y0": y0, "n": n, "i": i1 + 1, "t": 0,
-        "dug": flat(boxes + well + chased)})
+    next = dict(k)
+    next.update({"i": i1 + 1, "dug": flat(boxes + well + chased)})
+    return grown(parts + built, keep = next)
 
-def drift(site, m, k, chased):
-    y0 = k["y0"]
-    n = k["n"]
-    yf = y0 - drop(n)
-    length = site.count("branch")
+def axes(m, d):
+    v = WORLD[d]
+    out = (v[0] * m["xx"] + v[1] * m["xz"], v[0] * m["zx"] + v[1] * m["zz"])
+    return out, (-out[1], out[0])
+
+def course(m, k, d):
+    if k.get("legacy", False):
+        a, b, side, _ = walk(k["n"])
+        return (a, b), OUT[side], TRAVEL[side]
+    out, lat = axes(m, d)
+    return (4 + 8 * out[0], 4 + 8 * out[1]), out, lat
+
+def length(site, k, d):
+    value = site.count("main_" + DIRS[d])
+    return max(26, value) if k.get("legacy", False) and value == 0 else value
+
+def passages(site, m, k):
+    yf = k["y0"] - drop(k["n"])
+    boxes = []
+    for d in range(4):
+        if k.get("legacy", False) and d != k["d"]:
+            continue
+        total = length(site, k, d)
+        if total == 0:
+            continue
+        w, out, lat = course(m, k, d)
+        boxes.append(span(w, out, lat, 1, total, -1, 1, yf + 1, 3))
+        size = site.count("branch_" + DIRS[d])
+        if size > 0:
+            for t in range(site.count("spacing") + 2, total + 1, site.count("spacing") + 1):
+                for sign in [-1, 1]:
+                    boxes.append(span(w, out, lat, t, t, 2 * sign, (size + 1) * sign, yf + 1, 2))
+    return boxes
+
+def junction(k):
+    yf = k["y0"] - drop(k["n"])
+    # Stay outside the shaft: crossing its centre would cut through the last stair and its rail.
+    boxes = [[-4, yf + 1, -4, 17, 3, 3], [-4, yf + 1, 10, 17, 3, 3],
+             [-4, yf + 1, -1, 3, 3, 11], [10, yf + 1, -1, 3, 3, 11]]
+    a, b, side, _ = walk(k["n"])
+    boxes.append(span((a, b), OUT[side], TRAVEL[side], 1, 3, -1, 1, yf + 1, 3))
+    return boxes
+
+def advance(site, m, k):
+    a, b, _, _ = walk(k["n"])
+    yf = k["y0"] - drop(k["n"])
+    # An already open stretch still needs a round to carry its progress to the next direction.
+    air = terrain(room(m, a, yf + 1, b), of = "air")
+    return [clear("advance", air)] if air != None else []
+
+def hub(site, m, k, chased):
+    boxes = junction(k)
+    floors = []
+    for bx in boxes:
+        scope = room(m, bx[0], bx[1] - 1, bx[2], bx[3], 1, bx[5])
+        missing = terrain(scope, of = "air|fluid")
+        if missing != None:
+            floors.append(missing)
+    parts = guarded(site, m, boxes + chased) + advance(site, m, k)
+    if floors:
+        parts.append(part("landing", group(floors), site.items("planks")))
+    next = dict(k)
+    next.update({"hub": True, "dug": flat(boxes + chased)})
+    return grown(parts, keep = next)
+
+def drift(site, m, k, chased, planned):
+    yf = k["y0"] - drop(k["n"])
+    d = k["d"]
+    size = site.count("branch_" + DIRS[d])
     period = site.count("spacing") + 1
-    total = period * site.count("pairs") + 2
-    a, b, side, j = walk(n)
-    w = (a, b)
-    out = OUT[side]
-    lat = TRAVEL[side]
+    total = length(site, k, d)
+    w, out, lat = course(m, k, d)
     t0 = k["t"] + 1
     t1 = min(k["t"] + 2 * period, total)
     boxes = [span(w, out, lat, t0, t1, -1, 1, yf + 1, 3)]
@@ -460,28 +571,34 @@ def drift(site, m, k, chased):
     for t in range(t0, t1 + 1):
         if t == 1 or t % period == (1 + period // 2) % period:
             for s in [-2, 2]:
-                posts.append(scoped(m, span(w, out, lat, t, t, s, s, yf + 1, 3)))
+                bx = span(w, out, lat, t, t, s, s, yf + 1, 3)
+                # A post must not occupy a crossing that another direction will open later.
+                post = cut(bare(site, m, bx), m["roads"])
+                if post != None:
+                    posts.append(post)
             cap = span(w, out, lat, t, t, -1, 1, yf + 4, 1)
-            built.append(part("cap", scoped(m, cap), site.items("timber"), orient = "along"))
+            cap = bare(site, m, cap)
+            if cap != None:
+                built.append(part("cap", cap, site.items("timber"), orient = "along"))
             nooks.append([span(w, out, lat, t + dt, t + dt, s, s, yf + 2, 1) for dt in [-1, 1] for s in [2, -2]])
-        if t > 1 and t % period == 1:
+        if size > 0 and t > 1 and t % period == 1:
             for sign in [-1, 1]:
-                boxes.append(span(w, out, lat, t, t, 2 * sign, (length + 1) * sign, yf + 1, 2))
-                nooks.append([span(w, out, lat, t + dt, t + dt, (length + 1 + ds) * sign, (length + 1 + ds) * sign,
+                boxes.append(span(w, out, lat, t, t, 2 * sign, (size + 1) * sign, yf + 1, 2))
+                nooks.append([span(w, out, lat, t + dt, t + dt, (size + 1 + ds) * sign, (size + 1 + ds) * sign,
                     yf + 1, 1) for dt, ds in [(0, 1), (1, 0), (-1, 0)]])
-                if length > 20:
-                    niche = span(w, out, lat, t + 1, t + 1, (length // 2 + 1) * sign, (length // 2 + 1) * sign,
-                        yf + 1, 1)
-                    boxes.append(niche)
-                    built.append(lamp(site, m, niche[0], niche[1], niche[2]))
-    dug = dug_of(boxes + chased)
+                if size > 20:
+                    nooks.append([span(w, out, lat, t + 1, t + 1, (size // 2 + 1) * sign, (size // 2 + 1) * sign,
+                        yf + 1, 1)])
+    dug = dug_of(planned + boxes + chased)
     for nook in nooks:
-        built.extend(nestled(site, m, nook, dug))
-    parts = guarded(site, m, boxes + chased)
+        cells = [c for c in nook if not site.matches(spot(m, c[0], c[1], c[2]), protected(site))]
+        built.extend(nestled(site, m, cells, dug))
+    parts = guarded(site, m, boxes + chased) + advance(site, m, k)
     if posts:
         parts.append(part("post", group(posts), site.items("timber"), orient = "y"))
-    return grown(parts + built, keep = {"ox": k["ox"], "oz": k["oz"], "y0": y0, "n": n, "i": k["i"], "t": t1,
-        "dug": flat(boxes + chased)})
+    next = dict(k)
+    next.update({"t": t1, "dug": flat(boxes + chased)})
+    return grown(parts + built, keep = next)
 
 def grow(site):
     for key in ["timber", "planks", "stairs", "rail", "gate", "lamp", "seal"]:
@@ -490,16 +607,33 @@ def grow(site):
     light = site.items("lamp")[0]
     if light.startswith("#") or not light.endswith("lantern"):
         reject("error.mine.lamp")
-    k = site.kept
+    k = dict(site.kept)
+    if (not k or ("d" in k and not k.get("legacy", False))) and not [
+        d for d in DIRS if site.count("main_" + d) > 0
+    ]:
+        reject("error.mine.directions")
     if not k:
         return head(site)
     m = frame(site, k["ox"], k["oz"])
+    if "d" not in k:
+        out = OUT[walk(k["n"])[2]]
+        world = (m["xx"] * out[0] + m["zx"] * out[1], m["xz"] * out[0] + m["zz"] * out[1])
+        k.update({"d": WORLD.index(world), "legacy": True, "hub": True})
     chased = chase(site, m, unflat(k["dug"])) if site.flag("chase") else []
     if k["i"] <= k["n"]:
         return flight(site, m, k, chased)
-    if k["t"] < (site.count("spacing") + 1) * site.count("pairs") + 2:
-        return drift(site, m, k, chased)
+    planned = passages(site, m, k) + ([] if k.get("legacy", False) else junction(k))
+    m["roads"] = group([scoped(m, bx) for bx in planned])
+    if not k["hub"]:
+        return hub(site, m, k, chased)
+    for d in range(k["d"], 4):
+        if k.get("legacy", False) and d != k["d"]:
+            break
+        if d != k["d"]:
+            k.update({"d": d, "t": 0})
+        if k["t"] < length(site, k, d):
+            return drift(site, m, k, chased, planned)
     if not chased:
         return []
-    return grown(guarded(site, m, chased), keep = {"ox": k["ox"], "oz": k["oz"], "y0": k["y0"], "n": k["n"],
-        "i": k["i"], "t": k["t"], "dug": flat(chased)})
+    k["dug"] = flat(chased)
+    return grown(guarded(site, m, chased), keep = k)

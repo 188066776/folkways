@@ -1,7 +1,14 @@
 import blockwright.minecraft.core.Args;
 import blockwright.minecraft.core.Sync;
 import dev.blockwright.api.Context;
-import io.github.izakyl.folkways.plugins.build.draft.*;
+import io.github.izakyl.folkways.plugins.build.draft.Commission;
+import io.github.izakyl.folkways.plugins.build.draft.Draft;
+import io.github.izakyl.folkways.plugins.build.draft.Drawn;
+import io.github.izakyl.folkways.plugins.build.draft.Growth;
+import io.github.izakyl.folkways.plugins.build.draft.Hint;
+import io.github.izakyl.folkways.plugins.build.draft.Pattern;
+import io.github.izakyl.folkways.plugins.build.draft.Round;
+import io.github.izakyl.folkways.plugins.build.draft.World;
 import io.github.izakyl.folkways.front.api.Schema;
 import io.github.izakyl.folkways.front.api.Settings;
 import io.github.izakyl.folkways.core.api.terms.ItemFilter;
@@ -10,18 +17,23 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.TreeMap;
 
 public final class Task {
     static final class Knobs implements Settings {
         final Map<String, Object> values = new HashMap<>();
+
         Knobs(Schema schema, Map<String, Object> overrides) {
             Map<String, ResourceLocation> choices = new HashMap<>();
             for (Schema.Setting setting : schema.settings()) {
@@ -36,18 +48,35 @@ public final class Task {
                 }
             }
             overrides.forEach((key, value) -> values.put(key, !(value instanceof String word) ? value
-                : choices.containsKey(key) ? ResourceLocation.fromNamespaceAndPath(choices.get(key).getNamespace(), word)
+                : choices.containsKey(key)
+                    ? ResourceLocation.fromNamespaceAndPath(choices.get(key).getNamespace(), word)
                 : ItemSpec.of(ResourceLocation.parse(word))));
         }
+
         static ItemSpec spec(List<ItemFilter> filters) {
             List<ItemSpec> any = new ArrayList<>();
-            for (ItemFilter f : filters) any.add(f.tag() ? ItemSpec.of(TagKey.create(Registries.ITEM, f.id())) : ItemSpec.of(f.id()));
+            for (ItemFilter filter : filters) {
+                any.add(filter.tag() ? ItemSpec.of(TagKey.create(Registries.ITEM, filter.id()))
+                    : ItemSpec.of(filter.id()));
+            }
             return ItemSpec.anyOf(any);
         }
-        public boolean flag(String key) { return values.get(key) instanceof Boolean b && b; }
-        public int count(String key) { return values.get(key) instanceof Integer i ? i : 0; }
-        public ResourceLocation choice(String key) { return (ResourceLocation) values.get(key); }
-        public Optional<ItemSpec> items(String key) { return Optional.ofNullable((ItemSpec) values.get(key)); }
+
+        public boolean flag(String key) {
+            return values.get(key) instanceof Boolean b && b;
+        }
+
+        public int count(String key) {
+            return values.get(key) instanceof Integer i ? i : 0;
+        }
+
+        public ResourceLocation choice(String key) {
+            return (ResourceLocation) values.get(key);
+        }
+
+        public Optional<ItemSpec> items(String key) {
+            return Optional.ofNullable((ItemSpec) values.get(key));
+        }
     }
 
     static final int SURFACE = 90;
@@ -64,17 +93,29 @@ public final class Task {
     }
 
     static BlockState rock(int x, int y, int z) {
-        if (y == SURFACE) return Blocks.GRASS_BLOCK.defaultBlockState();
-        if (y > SURFACE - 4) return Blocks.DIRT.defaultBlockState();
-        if (y == SURFACE - 10 && x >= 24 && x <= 48 && z >= -12 && z <= 12) return Blocks.GRAVEL.defaultBlockState();
+        if (y == SURFACE) {
+            return Blocks.GRASS_BLOCK.defaultBlockState();
+        }
+        if (y > SURFACE - 4) {
+            return Blocks.DIRT.defaultBlockState();
+        }
+        if (y == SURFACE - 10 && x >= 24 && x <= 48 && z >= -12 && z <= 12) {
+            return Blocks.GRAVEL.defaultBlockState();
+        }
         int cell = hash(Math.floorDiv(x, 3), Math.floorDiv(y, 3), Math.floorDiv(z, 3));
         if (cell % 40 == 0 && hash(x, y, z) % 3 != 0) {
-            if (y < 40) return Blocks.IRON_ORE.defaultBlockState();
+            if (y < 40) {
+                return Blocks.IRON_ORE.defaultBlockState();
+            }
             return cell % 3 == 0 ? Blocks.COPPER_ORE.defaultBlockState() : Blocks.COAL_ORE.defaultBlockState();
         }
         double n = Math.sin(x * 0.21 + y * 0.13) + Math.sin(z * 0.17 - y * 0.11) + Math.sin((x + z) * 0.09 + y * 0.05);
-        if (n > 1.9) return Blocks.ANDESITE.defaultBlockState();
-        if (n < -2.0) return Blocks.GRANITE.defaultBlockState();
+        if (n > 1.9) {
+            return Blocks.ANDESITE.defaultBlockState();
+        }
+        if (n < -2.0) {
+            return Blocks.GRANITE.defaultBlockState();
+        }
         return Blocks.STONE.defaultBlockState();
     }
 
@@ -95,7 +136,8 @@ public final class Task {
     static Map<String, Object> dig(ServerLevel level, Pattern pattern, String name, int cx, int cz,
             Map<String, Object> knobs) {
         Settings settings = new Knobs(pattern.knobs(), knobs);
-        Hint hint = new Hint.Zone(new BlockPos(cx - 1, SURFACE + 1, cz - 1), new BlockPos(cx + 1, SURFACE + 1, cz + 1));
+        Hint hint = new Hint.Zone(new BlockPos(cx - 1, SURFACE + 1, cz - 1),
+            new BlockPos(cx + 1, SURFACE + 1, cz + 1));
         Growth growth = Growth.first(hint);
         List<Map<String, Object>> rounds = new ArrayList<>();
         Map<String, Integer> roles = new TreeMap<>();
@@ -104,7 +146,8 @@ public final class Task {
         int ore = 0;
         String end = "ran out of rounds";
         for (int round = 0; round < MOST_ROUNDS; round++) {
-            Round answered = pattern.growOn(new Commission(hint, settings, World.of(level), Direction.NORTH, 7L, growth));
+            Round answered = pattern.growOn(new Commission(hint, settings, World.of(level), Direction.NORTH, 7L,
+                growth));
             if (answered instanceof Round.Ended) {
                 end = "ended";
                 break;
@@ -121,11 +164,15 @@ public final class Task {
                 BlockPos at = ready.corner().offset(cell.offset());
                 roles.merge(cell.source().role(), 1, Integer::sum);
                 grow(reach, at);
-                if (round == 0) grow(mouth, at);
+                if (round == 0) {
+                    grow(mouth, at);
+                }
                 if (cell.state().isAir()) {
                     opened++;
                     grow(dug, at);
-                    if (level.getBlockState(at).is(ORES)) ore++;
+                    if (level.getBlockState(at).is(ORES)) {
+                        ore++;
+                    }
                 }
                 level.setBlock(at, cell.state(), 2);
             }
@@ -155,17 +202,24 @@ public final class Task {
         var pattern = Pattern.parse(ResourceLocation.parse("folkways:mine"), args.string("source")).orElseThrow();
         ServerLevel level = ctx.server().overworld();
         BlockState air = Blocks.AIR.defaultBlockState();
-        for (int x = X0; x <= X1; x++) for (int z = Z0; z <= Z1; z++) {
-            for (int y = BOTTOM; y <= SURFACE; y++) level.setBlock(new BlockPos(x, y, z), rock(x, y, z), 2);
-            for (int y = SURFACE + 1; y <= SURFACE + 24; y++) level.setBlock(new BlockPos(x, y, z), air, 2);
+        for (int x = X0; x <= X1; x++) {
+            for (int z = Z0; z <= Z1; z++) {
+                for (int y = BOTTOM; y <= SURFACE; y++) {
+                    level.setBlock(new BlockPos(x, y, z), rock(x, y, z), 2);
+                }
+                for (int y = SURFACE + 1; y <= SURFACE + 24; y++) {
+                    level.setBlock(new BlockPos(x, y, z), air, 2);
+                }
+            }
         }
         List<Object> mines = new ArrayList<>();
         mines.add(dig(level, pattern, "iron", -36, 0, Map.of()));
-        mines.add(dig(level, pattern, "copper", 36, 0, Map.of("y", 48, "branch", 8, "spacing", 2,
-            "pairs", 4, "timber", "minecraft:oak_log", "planks", "minecraft:oak_planks",
+        mines.add(dig(level, pattern, "copper", 36, 0, Map.of("y", 48, "branch_east", 8, "spacing", 2,
+            "main_east", 14, "timber", "minecraft:oak_log", "planks", "minecraft:oak_planks",
             "stairs", "minecraft:oak_stairs", "rail", "minecraft:oak_fence", "gate", "minecraft:oak_fence_gate")));
         boolean ok = mines.stream().allMatch(m -> "ended".equals(((Map<?, ?>) m).get("end"))
             && (Integer) ((Map<?, ?>) m).get("rounds") > 3);
-        return Map.of("ok", ok, "surface", SURFACE, "rock", new int[] {X0, BOTTOM, Z0, X1, SURFACE, Z1}, "mines", mines);
+        return Map.of("ok", ok, "surface", SURFACE, "rock", new int[] {X0, BOTTOM, Z0, X1, SURFACE, Z1},
+            "mines", mines);
     }
 }

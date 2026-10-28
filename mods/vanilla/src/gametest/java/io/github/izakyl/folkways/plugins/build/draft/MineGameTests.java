@@ -4,8 +4,11 @@ import io.github.izakyl.folkways.plugins.FolkwaysVanillaConfig;
 import io.github.izakyl.folkways.FolkwaysMod;
 import io.github.izakyl.folkways.front.api.notice.Notice;
 import io.github.izakyl.folkways.plugins.FolkwaysVanillaMod;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.List;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
@@ -95,11 +98,15 @@ public final class MineGameTests {
 
     private static List<Laid> dig(GameTestHelper helper, Pattern pattern, DraftKit.Filled settings,
             DraftKit.Ground world, int rounds) {
+        return dig(helper, pattern, settings, world, rounds, Direction.NORTH, Growth.first(mark()));
+    }
+
+    private static List<Laid> dig(GameTestHelper helper, Pattern pattern, DraftKit.Filled settings,
+            DraftKit.Ground world, int rounds, Direction facing, Growth growth) {
         Hint hint = mark();
-        Growth growth = Growth.first(hint);
         List<Laid> laid = new ArrayList<>();
         for (int round = 0; round < rounds; round++) {
-            Round answered = pattern.growOn(new Commission(hint, settings, world, Direction.NORTH, 7L, growth));
+            Round answered = pattern.growOn(new Commission(hint, settings, world, facing, 7L, growth));
             if (answered instanceof Round.Ended) {
                 return laid;
             }
@@ -195,7 +202,8 @@ public final class MineGameTests {
             int lowest = laid.stream().skip(1).mapToInt(Laid::lowest).min().orElseThrow();
             helper.assertValueEqual(lowest, target, "the stair reaches the requested world Y coordinate");
             Laid drift = laid.get(laid.size() - 1);
-            helper.assertValueEqual(drift.lowest(), target + 1, "the final drift digs just above the requested floor Y");
+            helper.assertValueEqual(drift.lowest(), target + 1,
+                "the final drift digs just above the requested floor Y");
             helper.assertTrue(drift.maxX() - drift.minX() > 10 || drift.maxZ() - drift.minZ() > 10,
                 "the mine opens its branches at Y " + target);
         }
@@ -227,13 +235,13 @@ public final class MineGameTests {
     }
 
     @GameTest(template = "empty", timeoutTicks = 400)
-    public static void fewerBranchesStopSooner(GameTestHelper helper) {
+    public static void shorterMainStopsSooner(GameTestHelper helper) {
         Pattern pattern = mine(helper);
-        int many = dig(helper, pattern, DraftKit.Filled.defaulting(pattern.knobs()).count("pairs", 8), ground(),
+        int many = dig(helper, pattern, DraftKit.Filled.defaulting(pattern.knobs()).count("main_east", 34), ground(),
             MOST_ROUNDS).size();
-        int few = dig(helper, pattern, DraftKit.Filled.defaulting(pattern.knobs()).count("pairs", 2), ground(),
+        int few = dig(helper, pattern, DraftKit.Filled.defaulting(pattern.knobs()).count("main_east", 10), ground(),
             MOST_ROUNDS).size();
-        helper.assertTrue(few < many, "two pairs of branches take fewer rounds than eight: " + few + " / " + many);
+        helper.assertTrue(few < many, "a shorter main takes fewer rounds: " + few + " / " + many);
         helper.succeed();
     }
 
@@ -372,6 +380,260 @@ public final class MineGameTests {
         }
         helper.assertTrue(pattern.growOn(new Commission(hint, settings, world, Direction.NORTH, 7L, growth))
             instanceof Round.Grew, "once the lake is gone the same round goes on");
+        helper.succeed();
+    }
+
+    private static DraftKit.Filled directions(Pattern pattern, int east, int south, int west, int north) {
+        return DraftKit.Filled.defaulting(pattern.knobs()).flag("chase", false)
+            .count("main_east", east).count("main_south", south)
+            .count("main_west", west).count("main_north", north);
+    }
+
+    private static boolean open(DraftKit.Ground world, BlockPos at) {
+        return world.block(at).orElseThrow().isAir() && world.block(at.above()).orElseThrow().isAir();
+    }
+
+    private static Set<BlockPos> connected(DraftKit.Ground world, BlockPos start, int radius) {
+        Set<BlockPos> seen = new HashSet<>();
+        ArrayDeque<BlockPos> todo = new ArrayDeque<>();
+        seen.add(start);
+        todo.add(start);
+        while (!todo.isEmpty()) {
+            BlockPos at = todo.removeFirst();
+            for (Direction direction : Direction.Plane.HORIZONTAL) {
+                BlockPos next = at.relative(direction);
+                if (Math.abs(next.getX() - 1) <= radius && Math.abs(next.getZ() - 1) <= radius
+                        && open(world, next) && seen.add(next)) {
+                    todo.addLast(next);
+                }
+            }
+        }
+        return seen;
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 400)
+    public static void northIsWorldNorthForDifferentDraftFacingsAndZeroMainsStayClosed(GameTestHelper helper) {
+        Pattern pattern = mine(helper);
+        for (Direction facing : new Direction[] {Direction.NORTH, Direction.EAST}) {
+            DraftKit.Ground world = ground();
+            DraftKit.Filled settings = directions(pattern, 0, 0, 0, 14).count("branch_north", 0)
+                .items("seal", "minecraft:stone");
+            List<Laid> laid = dig(helper, pattern, settings, world, MOST_ROUNDS, facing, Growth.first(mark()));
+            helper.assertTrue(laid.size() < MOST_ROUNDS, "the north mine ends for " + facing);
+            BlockPos end = new BlockPos(1, 17, 1 - 8 - 14);
+            helper.assertTrue(open(world, end), "the main ends due world north for " + facing);
+            Set<BlockPos> connected = connected(world, end, 30);
+            for (Direction direction : Direction.Plane.HORIZONTAL) {
+                BlockPos hub = new BlockPos(1, 17, 1).relative(direction, 7);
+                helper.assertTrue(connected.contains(hub), "all four hub sides join for " + facing + ": " + hub);
+                if (direction != Direction.NORTH) {
+                    BlockPos closed = new BlockPos(1, 17, 1).relative(direction, 10);
+                    helper.assertTrue(world.block(closed).orElseThrow().is(Blocks.STONE),
+                        "a zero main stays rock for " + facing + " toward " + direction);
+                }
+            }
+            helper.assertTrue(world.block(end.east(2)).orElseThrow().is(Blocks.STONE),
+                "zero branch length leaves the side wall intact");
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 400)
+    public static void crossingBranchesJoinAndKeepEarlierLampsPostsAndStairs(GameTestHelper helper) {
+        Pattern pattern = mine(helper);
+        DraftKit.Filled settings = directions(pattern, 18, 18, 18, 18);
+        for (String direction : List.of("east", "south", "west", "north")) {
+            settings.count("branch_" + direction, 28);
+        }
+        DraftKit.Ground world = ground();
+        List<Laid> laid = dig(helper, pattern, settings, world, MOST_ROUNDS);
+        helper.assertTrue(laid.size() < MOST_ROUNDS, "all four directions end within the round bound");
+        Map<BlockPos, BlockState> kept = new HashMap<>();
+        Set<String> roles = new HashSet<>();
+        List<Integer> order = new ArrayList<>();
+        for (Laid round : laid) {
+            if (round.kept().getLong("i") <= round.kept().getLong("n")) {
+                continue;
+            }
+            if (round.kept().getLong("t") > 0) {
+                int direction = (int) round.kept().getLong("d");
+                if (order.isEmpty() || order.getLast() != direction) {
+                    order.add(direction);
+                }
+            }
+            for (Draft.Cell cell : round.ready().draft().cells()) {
+                BlockPos at = round.ready().corner().offset(cell.offset());
+                if (kept.containsKey(at)) {
+                    helper.assertValueEqual(cell.state(), kept.get(at), "later rounds preserve " + at);
+                }
+                if (!cell.state().isAir()) {
+                    kept.put(at, cell.state());
+                    roles.add(cell.source().role());
+                }
+            }
+        }
+        helper.assertValueEqual(order, List.of(0, 1, 2, 3), "directions finish east, south, west, north");
+        helper.assertTrue(roles.contains("lamp") && roles.contains("post") && roles.contains("cap"),
+            "the crossing test actually places lamps, posts and caps: " + roles);
+        Set<BlockPos> joined = connected(world, new BlockPos(1 + 26, 17, 1), 60);
+        for (Direction direction : Direction.Plane.HORIZONTAL) {
+            BlockPos end = new BlockPos(1, 17, 1).relative(direction, 26);
+            helper.assertTrue(joined.contains(end), "main endpoint joins the hub: " + end);
+        }
+        // East and south branches cross at world offsets (13, 13) from the shaft centre.
+        BlockPos crossing = new BlockPos(14, 17, 14);
+        helper.assertTrue(joined.contains(crossing), "adjacent branches meet in the southeast quadrant");
+        for (Direction direction : Direction.Plane.HORIZONTAL) {
+            helper.assertTrue(open(world, crossing.relative(direction)), "the crossing opens toward " + direction);
+        }
+        for (Laid round : laid) {
+            for (Draft.Cell cell : round.ready().draft().cells()) {
+                String role = cell.source().role();
+                if (role.equals("stairs") || role.equals("rail") || role.equals("landing")) {
+                    BlockPos at = round.ready().corner().offset(cell.offset());
+                    helper.assertValueEqual(world.block(at).orElseThrow(), cell.state(),
+                        "the junction preserves the shaft at " + at);
+                }
+            }
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 400)
+    public static void everyFinalStairHeightJoinsTheHubWithoutLosingItsFloor(GameTestHelper helper) {
+        Pattern pattern = mine(helper);
+        for (int target = 26; target < 38; target++) {
+            Direction facing = target % 2 == 0 ? Direction.SOUTH : Direction.WEST;
+            DraftKit.Ground world = ground();
+            DraftKit.Filled settings = directions(pattern, 0, 0, 0, 4)
+                .count("y", target).count("branch_north", 0);
+            List<Laid> laid = dig(helper, pattern, settings, world, MOST_ROUNDS, facing, Growth.first(mark()));
+            helper.assertTrue(laid.size() < MOST_ROUNDS, "the mine ends at Y " + target);
+            Set<BlockPos> joined = connected(world, new BlockPos(1, target + 1, 1 - 8 - 4), 25);
+            boolean reachesStair = false;
+            for (Laid round : laid) {
+                for (Draft.Cell cell : round.ready().draft().cells()) {
+                    String role = cell.source().role();
+                    if (!role.equals("landing") && !role.equals("stairs") && !role.equals("rail")) {
+                        continue;
+                    }
+                    BlockPos at = round.ready().corner().offset(cell.offset());
+                    helper.assertValueEqual(world.block(at).orElseThrow(), cell.state(),
+                        "the hub keeps the shaft at Y " + target + ": " + at);
+                    if (role.equals("landing") && at.getY() == target && joined.contains(at.above())) {
+                        reachesStair = true;
+                    }
+                }
+            }
+            helper.assertTrue(reachesStair, "the final stair joins all exits at Y " + target);
+            for (Direction direction : Direction.Plane.HORIZONTAL) {
+                BlockPos exit = new BlockPos(1, target, 1).relative(direction, 7);
+                helper.assertTrue(!world.block(exit).orElseThrow().isAir(), "the hub has a floor: " + exit);
+                helper.assertTrue(open(world, exit.above()) && world.block(exit.above(3)).orElseThrow().isAir(),
+                    "the hub has three blocks of headroom: " + exit);
+            }
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 400)
+    public static void alreadyOpenStretchesStillAdvanceThroughAllDirections(GameTestHelper helper) {
+        Pattern pattern = mine(helper);
+        DraftKit.Filled settings = directions(pattern, 12, 12, 12, 12);
+        DraftKit.Ground world = ground();
+        List<Laid> shaft = dig(helper, pattern, settings, world, 7);
+        for (int x = -50; x <= 50; x++) {
+            for (int z = -50; z <= 50; z++) {
+                if (Math.max(Math.abs(x - 1), Math.abs(z - 1)) < 6) {
+                    continue;
+                }
+                for (int y = 17; y <= 20; y++) {
+                    world.place(x, y, z, Blocks.AIR.defaultBlockState());
+                }
+            }
+        }
+        Laid last = shaft.getLast();
+        Growth growth = Growth.first(mark()).next(last.kept(), last.ready().corner(), last.ready().draft(),
+            mark().anchor());
+        List<Laid> continued = dig(helper, pattern, settings, world, MOST_ROUNDS, Direction.NORTH, growth);
+        helper.assertTrue(continued.size() < MOST_ROUNDS, "open passages do not keep growing forever");
+        helper.assertValueEqual(continued.getLast().kept().getLong("d"), 3L, "the north direction is reached");
+        helper.assertValueEqual(continued.getLast().kept().getLong("t"), 12L, "the last direction finishes");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 400)
+    public static void maximumLengthsFitEachRoundAndFinishWithinABound(GameTestHelper helper) {
+        Pattern pattern = mine(helper);
+        DraftKit.Filled settings = directions(pattern, 128, 128, 128, 128).count("spacing", 2);
+        for (String direction : List.of("east", "south", "west", "north")) {
+            settings.count("branch_" + direction, 48);
+        }
+        List<Laid> laid = dig(helper, pattern, settings, ground(), 100);
+        helper.assertTrue(laid.size() < 100, "maximum settings finish within one hundred rounds");
+        helper.assertValueEqual(laid.getLast().kept().getLong("d"), 3L, "maximum settings reach north");
+        helper.assertValueEqual(laid.getLast().kept().getLong("t"), 128L, "north reaches its exact maximum length");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 80)
+    public static void allZeroMainsAreRefusedAndOldSettingsUseNewDefaults(GameTestHelper helper) {
+        Pattern pattern = mine(helper);
+        Round round = pattern.growOn(new Commission(mark(), directions(pattern, 0, 0, 0, 0), ground(),
+            Direction.NORTH, 7L, Growth.first(mark())));
+        helper.assertTrue(round instanceof Round.Stuck stuck && stuck.refused().explanation()
+            .filter(notice -> notice.key().equals(DraftKit.key(pattern, "error.mine.directions"))).isPresent(),
+            "zero mains have a translated refusal, got " + round);
+        CompoundTag old = new CompoundTag();
+        old.putInt("pairs", 8);
+        old.putInt("branch", 24);
+        Chosen loaded = Chosen.load(pattern.knobs(), old);
+        helper.assertValueEqual(loaded.count("main_east"), 26, "old settings default to an east main");
+        helper.assertValueEqual(loaded.count("main_north"), 0, "other directions default to zero");
+        helper.assertValueEqual(loaded.count("branch_east"), 12, "old branch key is ignored");
+        helper.assertTrue(!loaded.save().contains("pairs") && !loaded.save().contains("branch"),
+            "obsolete keys are not saved again");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 400)
+    public static void oldKeepContinuesItsOriginalSideAndProgress(GameTestHelper helper) {
+        Pattern pattern = mine(helper);
+        DraftKit.Filled settings = directions(pattern, 18, 18, 18, 18);
+        DraftKit.Ground world = ground();
+        List<Laid> shaft = dig(helper, pattern, settings, world, 7);
+        Laid last = shaft.getLast();
+        helper.assertTrue(last.kept().getLong("i") > last.kept().getLong("n"), "the old shaft reached its floor");
+        CompoundTag old = last.kept().copy();
+        old.remove("d");
+        old.remove("hub");
+        old.putLong("t", 3);
+        Growth growth = Growth.first(mark()).next(old, last.ready().corner(), last.ready().draft(), mark().anchor());
+        List<Laid> continued = dig(helper, pattern, settings, world, MOST_ROUNDS, Direction.NORTH, growth);
+        helper.assertTrue(!continued.isEmpty() && continued.size() < MOST_ROUNDS, "old progress grows and ends");
+        int direction = (int) continued.getFirst().kept().getLong("d");
+        helper.assertValueEqual(continued.getFirst().kept().getLong("t"), 11L, "old t continues without resetting");
+        for (Laid round : continued) {
+            helper.assertTrue(round.kept().getBoolean("legacy"), "the old lifecycle remains marked");
+            helper.assertValueEqual(round.kept().getLong("d"), (long) direction, "only the old side grows");
+        }
+        helper.assertValueEqual(continued.getLast().kept().getLong("t"), 18L, "the new matching knob sets length");
+        List<Laid> fallback = dig(helper, pattern, directions(pattern, 0, 0, 0, 0), world, MOST_ROUNDS,
+            Direction.NORTH, growth);
+        helper.assertTrue(!fallback.isEmpty() && fallback.size() < MOST_ROUNDS, "old missing counts still finish");
+        helper.assertValueEqual(fallback.getLast().kept().getLong("t"), 26L,
+            "an unavailable old-direction knob falls back to the former default length");
+        DraftKit.Ground earlyWorld = ground();
+        Laid head = dig(helper, pattern, settings, earlyWorld, 1).getFirst();
+        CompoundTag early = head.kept().copy();
+        early.remove("d");
+        early.remove("hub");
+        Growth oldFlight = Growth.first(mark()).next(early, head.ready().corner(), head.ready().draft(),
+            mark().anchor());
+        List<Laid> finished = dig(helper, pattern, settings, earlyWorld, MOST_ROUNDS, Direction.NORTH, oldFlight);
+        helper.assertTrue(finished.size() < MOST_ROUNDS, "a legacy shaft also finishes its original direction");
+        helper.assertValueEqual(finished.getLast().kept().getLong("d"), (long) direction,
+            "migrating during the flight retains the same old side");
         helper.succeed();
     }
 
