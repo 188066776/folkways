@@ -35,7 +35,6 @@ const SUPPLY = "folkways.page.supply";
 
 for (const stage of twins()) test(stage.title("book feedback: bounded stock search in client language and supply membership visibility"), async ({}, testInfo) => {
   test.setTimeout(BUDGET.heavy);
-  const progress = (phase: string) => console.log("book-feedback phase: " + phase);
   let pair: E2EPair | undefined; const evidence: Record<string, any> = { stage: stage.kind };
   const run = newRunId();
   try {
@@ -48,14 +47,12 @@ for (const stage of twins()) test(stage.title("book feedback: bounded stock sear
     await stage.lay(server, foundingBox(origin));
     const founded = await foundColonyFast(server, client, name, { origin, residentCount: 1, stage });
     await world.command(server, "gamerule doDaylightCycle false"); await world.command(server, "time set day");
-    progress("founded");
     const boxes: Vec[] = Array.from({ length: 3 }, (_, i) => ({ x: origin.x + 3 + i, y: origin.y, z: origin.z + 6 }));
     for (let box = 0; box < boxes.length; box++) {
       const items = FIXTURE.slice(box * 27, box * 27 + 27).map((id, slot) => `{Slot:${slot}b,id:"${id}",count:${id.endsWith(":diamond") ? 13 : 7}}`);
       await world.command(server, `setblock ${commandPos(stage.at(boxes[box]!))} minecraft:barrel{Items:[${items.join(",")}]}`);
       expect((await optInViaBook(server, client, name, boxes[box]!, "chest", stage)).member).toBe(true);
     }
-    progress("fixture-stores-claimed");
     const source = { x: origin.x - 6, y: origin.y, z: origin.z + 5 };
     await openColonyPanelViaBook(server, client, name, founded.standBlock, stage);
     await expect.poll(async () => shown(await panelElements(client), SUPPLY), { timeout: 10_000 }).toBe(false);
@@ -69,7 +66,6 @@ for (const stage of twins()) test(stage.title("book feedback: bounded stock sear
     await openColonyPanelViaBook(server, client, name, founded.standBlock, stage);
     await clickElement(client, { id: SUPPLY }, { scrollIntoView: true });
     evidence.claimed = await panelElements(client);
-    progress("supply-claimed-and-open");
     // The book's native point gesture removes the same actual membership.
     await screen.dismiss(client);
     const stand = stage.stand(source);
@@ -81,11 +77,9 @@ for (const stage of twins()) test(stage.title("book feedback: bounded stock sear
     await screen.dismiss(client);
     await openColonyPanelViaBook(server, client, name, founded.standBlock, stage);
     await expect.poll(async () => shown(await panelElements(client), SUPPLY), { timeout: 10_000 }).toBe(false);
-    progress("open-storage");
     await clickElement(client, { id: "folkways.tab.metrics" });
     await clickElement(client, { id: "folkways.metrics.refresh" });
     await expect.poll(async () => (await stock(client)).length, { timeout: 15_000 }).toBe(60);
-    progress("first-stock-page");
     const first = await stock(client);
     await clickElement(client, { id: "folkways.metrics.next" });
     await expect.poll(async () => (await stock(client)).some(id => !first.includes(id)), { timeout: 10_000 }).toBe(true);
@@ -95,7 +89,6 @@ for (const stage of twins()) test(stage.title("book feedback: bounded stock sear
     evidence.pages = [first, second];
     await search(client, "minecraft:");
     await expect.poll(() => stock(client), { timeout: 10_000 }).toEqual(first);
-    progress("search-registry");
     await search(client, "concrete");
     await expect.poll(async () => (await stock(client)).length, { timeout: 10_000 }).toBe(16);
     expect((await stock(client)).every(id => id.endsWith("_concrete"))).toBe(true);
@@ -108,7 +101,6 @@ for (const stage of twins()) test(stage.title("book feedback: bounded stock sear
     await search(client, "");
     await expect.poll(() => stock(client), { timeout: 10_000 }).toEqual(first);
     await screen.dismiss(client);
-    progress("switch-to-chinese");
     await client.run(SET_CHINESE, undefined);
     await waitForResourceReload(client);
     await expect.poll(async () => (await client.run(READ_TRANSLATION, undefined))["item.minecraft.diamond"], { timeout: 30_000 }).toBe("钻石");
@@ -117,7 +109,6 @@ for (const stage of twins()) test(stage.title("book feedback: bounded stock sear
     expect(words["folkways.doing.folkways.taking_supplies.about"]).toBe("正在领取补给中的钻石");
     expect(words["folkways.doing.folkways.leaving_millstone"]).toBe("正在离开石磨");
     await openColonyPanelViaBook(server, client, name, founded.standBlock, stage);
-    progress("open-storage");
     await clickElement(client, { id: "folkways.tab.metrics" });
     await search(client, "钻石");
     await expect.poll(() => stock(client), { timeout: 10_000 }).toEqual([PREFIX + "minecraft.diamond"]);

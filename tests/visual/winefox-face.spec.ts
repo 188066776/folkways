@@ -307,7 +307,6 @@ test("winefox face healthy, walking, low health and other maid layers", async ({
       await run.shot(client, name, { subject, worldState: state, camera: pose });
       run.note(`${name}-after-capture`, await stateOf(uuid));
       mirror(`${name}.png`);
-      console.log(name, JSON.stringify(state));
       return state;
     };
     const wine = staged.residents[0];

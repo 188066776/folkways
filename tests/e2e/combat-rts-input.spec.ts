@@ -90,11 +90,11 @@ test("RTS real pointer and keyboard inputs select, bind, queue, stop, suspend an
     evidence.noSelectionFailure = noSelection;
     await failureExpired(client);
 
-    const boxes = await Promise.all(residents.map(entity => project(client, origin, entity)));
-    const from = { x: Math.min(...boxes.map(box => box.left)) - 3, y: Math.min(...boxes.map(box => box.top)) - 3 };
-    const to = { x: Math.max(...boxes.map(box => box.right)) + 3, y: Math.max(...boxes.map(box => box.bottom)) + 3 };
-    visible({ ...boxes[0], x: from.x, y: from.y });
-    visible({ ...boxes[0], x: to.x, y: to.y });
+    // Keep the box-selection fixture stationary while deselected residents are unowned.
+    await server.run(SET_RESIDENT_AI, { residents, enabled: false });
+    await tick.sprint(server, 3);
+    await frames(client, 10);
+    const { boxes, from, to } = await boxAround(client, origin, residents);
     evidence.boxGesture = { from, to, boxes };
     const beforeBox = (await client.run(READ_CLIENT)).control.request;
     await input.drag(client, { from, to, steps: 8, button: "left" });
@@ -139,7 +139,8 @@ test("RTS real pointer and keyboard inputs select, bind, queue, stop, suspend an
     await input.click(client, { x: boxes[0].width / 2, y: frameTop - 1 }, { button: "left" });
     await selection(client, server, context, [], before);
     before = (await client.run(READ_CLIENT)).control.request;
-    await input.drag(client, { from, to, steps: 8, button: "left" });
+    const current = await boxAround(client, origin, residents);
+    await input.drag(client, { from: current.from, to: current.to, steps: 8, button: "left" });
     await selection(client, server, context, residents, before);
     evidence.worldAboveFrameStillSelects = await client.run(READ_CLIENT);
 
@@ -216,6 +217,7 @@ test("RTS real pointer and keyboard inputs select, bind, queue, stop, suspend an
     await bindOne([]);
     await groupTextures([]);
     evidence.pressedGroupSwitching = await client.run(READ_CLIENT);
+    await server.run(SET_RESIDENT_AI, { residents, enabled: true });
 
     const a = { x: origin.x - 5, y: origin.y, z: origin.z + 11 };
     const b = { x: origin.x, y: origin.y, z: origin.z + 14 };
@@ -561,6 +563,27 @@ test("RTS real pointer and keyboard inputs select, bind, queue, stop, suspend an
   }
 });
 
+const SET_RESIDENT_AI = defineTask<{ residents: string[]; enabled: boolean }, boolean>({
+  name: "folkways.combat-rts-input.set-resident-ai", side: "server",
+  source: javaTask({
+    imports: ["java.util.UUID", "net.minecraft.server.MinecraftServer", "net.minecraft.world.entity.Mob"],
+    body: `
+var a=Args.of(ctx);var server=(MinecraftServer)ctx.server();
+for(var id:a.list("residents")){
+  Mob mob=null;
+  for(var level:server.getAllLevels()){
+    var entity=level.getEntity(UUID.fromString((String)id));
+    if(entity instanceof Mob found){mob=found;break;}
+  }
+  if(mob==null){throw new IllegalStateException("missing fixture resident "+id);}
+  mob.getNavigation().stop();
+  mob.setDeltaMovement(0,0,0);
+  mob.setNoAi(!Boolean.TRUE.equals(a.value("enabled")));
+}
+return true;`,
+  }),
+});
+
 function expectMode(state: ClientState, attack: boolean) {
   expect(state.attackMode).toBe(attack);
   expect(state.modeLabel).toBe(attack ? "Attack move" : "Move");
@@ -588,6 +611,16 @@ function visible(at: Pixel) {
 
 async function project(client: MinecraftClient, point: Vec, entity = ""): Promise<Pixel> {
   return client.run(PROJECT, { ...point, entity });
+}
+
+// A drag box around the residents as the client draws them now.
+async function boxAround(client: MinecraftClient, origin: Vec, residents: string[]) {
+  const boxes = await Promise.all(residents.map(entity => project(client, origin, entity)));
+  const from = { x: Math.min(...boxes.map(box => box.left)) - 3, y: Math.min(...boxes.map(box => box.top)) - 3 };
+  const to = { x: Math.max(...boxes.map(box => box.right)) + 3, y: Math.max(...boxes.map(box => box.bottom)) + 3 };
+  visible({ ...boxes[0], x: from.x, y: from.y });
+  visible({ ...boxes[0], x: to.x, y: to.y });
+  return { boxes, from, to };
 }
 
 async function shot(client: MinecraftClient, testInfo: TestInfo, run: string, label: string) {

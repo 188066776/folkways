@@ -41,7 +41,6 @@ test("native monsters acquire residents, deal real damage, and an unarmed worker
           await tick.sprint(server, 4);
           const sample = await server.run(READ, scene);
           readings.push({ kind, sample });
-          if (elapsed % 80 === 0) console.log(kind, elapsed, sample);
           expect(sample.health, `${kind}: resident died; ${sample.debug}`).toBeGreaterThan(0);
           acquired ||= sample.acquired;
           hurt ||= sample.health < 20;

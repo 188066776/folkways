@@ -100,7 +100,6 @@ test("the city lies in blocks on one level and holds everything the colony works
   }
   for (const l of plan.lots) for (const m of plan.lots) if (l !== m)
     assert.ok(l.box.maxX < m.box.minX || m.box.maxX < l.box.minX || l.box.maxZ < m.box.minZ || m.box.maxZ < l.box.minZ, `${l.name} overlaps ${m.name}`);
-  console.log(`planned ${plan.lots.length} lots and ${plan.roads.length} roads in ${ms} ms; ops ${plan.pads.ops.length}+${plan.works.ops.length}`);
 });
 
 test("fallback streets meet both doorsteps at ground height, with golem headroom", () => {

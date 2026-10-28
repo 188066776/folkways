@@ -113,10 +113,16 @@ record Pen(UUID zone, Livestock keeps, int target, boolean shear, WorldPos ancho
     Optional<Stances> workplaces(ServerLevel level, Entity subject, Enclosure enclosure) {
         BlockPos at = WorldSpaces.at(subject).block(level);
         if (enclosure.small()) {
+            // Footings aboard are in storage cells, so the line of sight must end at the subject's storage position.
+            Vec3 center = subject.getBoundingBox().getCenter();
+            Vec3 seen = anchor.realm() instanceof Realm.Frame frame
+                ? WorldSpaces.frame(level, frame.structure())
+                    .map(space -> space.toLocal(center).add(Vec3.atLowerCornerOf(space.storageOrigin()))).orElse(center)
+                : center;
             return Stances.of(level, Reach.footingsAround(level, at, OVER_THE_FENCE, OVER_THE_FENCE).stream()
                 .filter(feet -> !enclosure.inside().contains(feet) && Enclosure.standable(level, feet)
                     && Reach.withinReach(feet, at) && clearOfDoorway(level, feet)
-                    && seenOver(level, Vec3.atBottomCenterOf(feet).add(0.0D, Reach.EYE_HEIGHT, 0.0D), subject))
+                    && seenOver(level, Vec3.atBottomCenterOf(feet).add(0.0D, Reach.EYE_HEIGHT, 0.0D), seen))
                 .toList());
         }
         return Stances.of(level, Reach.workableCells(level, at).stream()
@@ -128,7 +134,10 @@ record Pen(UUID zone, Livestock keeps, int target, boolean shear, WorldPos ancho
     // Seen as a player at a fence sees: over its rail, which stands half a block lower than it stops a body, and
     // past grass and flowers, which stop neither.
     static boolean seenOver(Level level, Vec3 eye, Entity subject) {
-        Vec3 target = subject.getBoundingBox().getCenter();
+        return seenOver(level, eye, subject.getBoundingBox().getCenter());
+    }
+
+    private static boolean seenOver(Level level, Vec3 eye, Vec3 target) {
         return level.clip(new OverTheFence(eye, target)).getType() == HitResult.Type.MISS;
     }
 

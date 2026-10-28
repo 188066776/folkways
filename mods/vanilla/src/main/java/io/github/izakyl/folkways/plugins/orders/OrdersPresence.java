@@ -419,6 +419,14 @@ final class OrdersPresence implements Facing {
                 colony.inventory().ensureObserved(Stash.at(order.into()));
                 continue;
             }
+            // A once order is done when its target holds enough, even if the goods came by another route.
+            if (!order.standing() && observed.filter(store -> store.state() == InventorySnapshot.State.OBSERVED)
+                    .map(store -> held(store, order) >= order.high()).orElse(false)) {
+                orders.remove(order.key());
+                filling.remove(order.key());
+                pending.remove(order.key());
+                continue;
+            }
             Filling delivery = filling.get(order.key());
             if (delivery != null && delivery.complete()) {
                 continue;
@@ -429,8 +437,7 @@ final class OrdersPresence implements Facing {
                     continue;
                 }
                 var target = observed.get();
-                long held = target.slots().stream().map(slot -> slot.stackCopy())
-                    .filter(stack -> Goods.matches(stack, order.what())).mapToLong(ItemStack::getCount).sum();
+                long held = held(target, order);
                 if (order.standing()) { held += OrderReturns.count(colony, order.into(), order.what()); }
                 long count = pending.getOrDefault(order.key(), order.replenishment(held));
                 if (count <= 0) {
@@ -453,6 +460,11 @@ final class OrdersPresence implements Facing {
         }
         write();
         return List.copyOf(wanted);
+    }
+
+    private static long held(InventorySnapshot.Store store, Order order) {
+        return store.slots().stream().map(slot -> slot.stackCopy())
+            .filter(stack -> Goods.matches(stack, order.what())).mapToLong(ItemStack::getCount).sum();
     }
 
     // Every order the colony keeps, under the container it fills: the container a heading that finds it in the world,

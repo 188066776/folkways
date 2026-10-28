@@ -49,6 +49,60 @@ public final class OrdersPlanningGameTests {
         event.register(OrdersPlanningGameTests.class);
     }
 
+    @GameTest(template = "empty", timeoutTicks = 100)
+    public static void onceOrderRetiresWhenActiveTargetIsFilledElsewhere(GameTestHelper helper)
+            throws ReflectiveOperationException {
+        var level = helper.getLevel();
+        BlockPos cell = helper.absolutePos(new BlockPos(2, 1, 2));
+        for (BlockPos floor : BlockPos.betweenClosed(cell.offset(-3, -1, -3), cell.offset(3, -1, 3))) {
+            level.setBlockAndUpdate(floor, Blocks.STONE.defaultBlockState());
+            level.setBlockAndUpdate(floor.above(), Blocks.AIR.defaultBlockState());
+            level.setBlockAndUpdate(floor.above(2), Blocks.AIR.defaultBlockState());
+        }
+        level.setBlockAndUpdate(cell, Blocks.BARREL.defaultBlockState());
+        WorldPos at = WorldPos.of(level, cell);
+        Colony observations = Colonies.mint(level.getServer());
+        try {
+            AtomicReference<CompoundTag> kept = new AtomicReference<>(new CompoundTag());
+            AtomicInteger withdrawals = new AtomicInteger();
+            Colony colony = (Colony) Proxy.newProxyInstance(Colony.class.getClassLoader(),
+                new Class<?>[] {Colony.class}, (proxy, method, args) -> switch (method.getName()) {
+                    case "inventory" -> observations.inventory();
+                    case "id" -> observations.id();
+                    case "kept" -> kept.get().copy();
+                    case "keep" -> { kept.set(((CompoundTag) args[1]).copy()); yield null; }
+                    case "submitted" -> Set.of();
+                    case "submit", "rule" -> null;
+                    case "withdraw" -> { withdrawals.incrementAndGet(); yield null; }
+                    default -> throw new AssertionError(method.getName());
+                });
+            OrdersPresence presence = new OrdersPresence(colony);
+            Order order = new Order(at, ItemSpec.of(Items.IRON_INGOT), 3, 3, false);
+            @SuppressWarnings("unchecked")
+            Map<Order.Key, Order> orders = (Map<Order.Key, Order>) field(presence, "orders");
+            orders.put(order.key(), order);
+            var view = ColonySnapshot.of(new ColonyData(), level);
+            presence.refresh(level.getServer());
+            helper.assertTrue(presence.goals(view).size() == 1, "an empty target starts a delivery batch");
+            Containers.at(level, cell).orElseThrow().setItem(0, new ItemStack(Items.IRON_INGOT, 3));
+            observations.inventoryFeedback().changed(Stash.at(at));
+            presence.refresh(level.getServer());
+            helper.assertTrue(orders.containsKey(order.key()) && presence.goals(view).size() == 1,
+                "a dirty target cannot complete the order from an unobserved change");
+            ColonyData observed = ColonyData.find(level.getServer(), observations.id()).orElseThrow();
+            observed.inventory().advance(level, observed, Map.of());
+            presence.refresh(level.getServer());
+            helper.assertTrue(orders.isEmpty() && presence.goals(view).isEmpty() && withdrawals.get() == 1,
+                "a filled target retires the once order and withdraws its active batch");
+            OrdersPresence restored = new OrdersPresence(colony);
+            helper.assertTrue(((Map<?, ?>) field(restored, "orders")).isEmpty(),
+                "the retired order stays gone after reload");
+        } finally {
+            observations.raze();
+        }
+        helper.succeed();
+    }
+
     @GameTest(template = "empty")
     public static void dirtyOrderTargetWaitsWithoutStartingABatchOrReportingAbsence(GameTestHelper helper)
             throws ReflectiveOperationException {

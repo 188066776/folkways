@@ -5,7 +5,9 @@ import io.github.izakyl.folkways.core.api.colony.ColonyView;
 import io.github.izakyl.folkways.effect.Effects;
 import io.github.izakyl.folkways.effect.Modifier;
 import io.github.izakyl.folkways.core.api.terms.Reach;
+import io.github.izakyl.folkways.core.api.terms.Realm;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
+import io.github.izakyl.folkways.core.api.terms.WorldSpaces;
 import io.github.izakyl.folkways.core.api.work.Grown;
 import io.github.izakyl.folkways.core.api.work.Node;
 import io.github.izakyl.folkways.core.api.work.Outcome;
@@ -23,19 +25,24 @@ import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.SimpleContainer;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.animal.Animal;
 import net.minecraft.world.entity.animal.Cow;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.FenceGateBlock;
 import net.minecraft.world.phys.Vec3;
@@ -555,6 +562,58 @@ public final class PastureBreedingGameTests {
             "the pair is fed over the fence");
         helper.assertTrue(rig.animals.stream().allMatch(Cow::isInLove), "both animals are fed");
         rig.clear();
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void smallPenWorkplacesFollowARotatedFrame(GameTestHelper helper) {
+        Rig rig = new Rig(helper, 5, 4);
+        Enclosure enclosure = rig.survey();
+        Pen ground = rig.pen();
+        Vec3 stored = Vec3.atBottomCenterOf(rig.floor.offset(2, 1, 2));
+        ItemEntity egg = new ItemEntity(rig.level, stored.x, stored.y, stored.z, new ItemStack(Items.EGG));
+        var expected = ground.workplaces(rig.level, egg, enclosure).orElseThrow();
+        UUID id = UUID.randomUUID();
+        Vec3 origin = Vec3.atLowerCornerOf(rig.floor.offset(30, 10, 30));
+        WorldSpaces.Frame frame = new WorldSpaces.Frame() {
+            public UUID id() { return id; }
+            public Level level() { return rig.level; }
+            public BlockPos storageOrigin() { return rig.floor; }
+            public Vec3 toWorld(Vec3 local) { return origin.add(-local.z, local.y, local.x); }
+            public Vec3 toLocal(Vec3 world) {
+                Vec3 delta = world.subtract(origin);
+                return new Vec3(delta.z, delta.y, -delta.x);
+            }
+        };
+        Runnable remove = WorldSpaces.install(new WorldSpaces.Source() {
+            public Optional<WorldSpaces.Frame> frame(Level level, UUID key) {
+                return level == rig.level && key.equals(id) ? Optional.of(frame) : Optional.empty();
+            }
+            public Optional<WorldSpaces.Frame> containing(Level level, BlockPos cell) {
+                return level == rig.level && cell.distSqr(rig.floor) < 400 ? Optional.of(frame) : Optional.empty();
+            }
+            public Optional<WorldSpaces.Frame> aboard(Entity entity) {
+                return entity == egg ? Optional.of(frame) : Optional.empty();
+            }
+        });
+        try {
+            egg.setPos(frame.toWorld(stored.subtract(Vec3.atLowerCornerOf(rig.floor))));
+            Set<BlockPos> localFloor = ground.floor().stream().map(frame::local).collect(Collectors.toSet());
+            Pen aboard = new Pen(ground.zone(), ground.keeps(), ground.target(), ground.shear(),
+                new WorldPos(new Realm.Frame(id), frame.local(ground.anchor().cell())), localFloor,
+                ground.minY() - rig.floor.getY(), ground.maxY() - rig.floor.getY());
+            var actual = aboard.workplaces(rig.level, egg, enclosure).orElseThrow();
+            Set<BlockPos> actualStorage = actual.cells().stream().map(cell -> frame.storage(cell.cell()))
+                .collect(Collectors.toSet());
+            Set<BlockPos> expectedStorage = expected.cells().stream().map(WorldPos::cell)
+                .collect(Collectors.toSet());
+            helper.assertTrue(actualStorage.equals(expectedStorage),
+                "a rotated ship preserves the same clear workplaces over the fence");
+        } finally {
+            remove.run();
+            egg.discard();
+            rig.clear();
+        }
         helper.succeed();
     }
 

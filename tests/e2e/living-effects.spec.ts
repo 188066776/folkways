@@ -31,6 +31,11 @@ for (const stage of twins()) test(stage.title("residents use idle activities and
     const at = (x: number, y: number, z: number) => commandPos(stage.at({ x, y, z }));
     await tryCommand(server, `fill ${at(box.min.x, origin.y - 1, box.min.z)} ${at(box.max.x, origin.y - 1, box.max.z)} minecraft:stone`);
     await foundColonyFast(server, client, player.name, { origin, residentCount: 2, stage });
+    // Complete a survey before building, so the test exercises the periodic refresh of command changes.
+    await tick.sprint(server, 100);
+    const residents = await world.entities(server, { dimension: "minecraft:overworld", types: ["folkways:resident"], limit: 10 });
+    expect(residents.entities.length).toBe(2);
+    expect((await details(server, residents.entities[0].uuid)).join("\n")).toContain("Basic bed");
     const { x, y, z } = origin;
     await mustCommand(server, `fill ${at(x - 1, y, z - 1)} ${at(x - 1, y + 2, z + 4)} minecraft:stone`);
     await mustCommand(server, `fill ${at(x + 5, y, z - 1)} ${at(x + 5, y + 2, z + 4)} minecraft:stone`);
@@ -43,9 +48,8 @@ for (const stage of twins()) test(stage.title("residents use idle activities and
     await mustCommand(server, `setblock ${at(x + 4, y, z + 3)} minecraft:potted_dandelion`);
     await mustCommand(server, `setblock ${at(x + 1, y, z + 2)} minecraft:red_carpet`);
     await mustCommand(server, `setblock ${at(x + 2, y + 3, z + 1)} minecraft:glowstone`);
-    await tick.sprint(server, 200);
-    const residents = await world.entities(server, { dimension: "minecraft:overworld", types: ["folkways:resident"], limit: 10 });
-    expect(residents.entities.length).toBe(2);
+    // Commands bypass placement events, so allow the 600-tick cache to expire and the survey to finish.
+    await tick.sprint(server, 800);
     const life = await details(server, residents.entities[0].uuid);
     expect(life.join("\n")).toContain("Excellent bedroom");
     expect(life.join("\n")).toContain("Mood");
