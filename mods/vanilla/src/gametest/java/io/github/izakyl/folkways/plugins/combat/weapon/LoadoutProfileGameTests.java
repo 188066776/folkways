@@ -4,6 +4,7 @@ import io.github.izakyl.folkways.core.api.colony.Colonies;
 import io.github.izakyl.folkways.core.api.colony.Colony;
 import io.github.izakyl.folkways.core.api.colony.Held;
 import io.github.izakyl.folkways.core.api.inventory.InventorySnapshot;
+import io.github.izakyl.folkways.core.api.resident.body.Equipment;
 import io.github.izakyl.folkways.core.api.terms.Containers;
 import io.github.izakyl.folkways.core.api.terms.Goods;
 import io.github.izakyl.folkways.core.api.terms.ItemSpec;
@@ -38,6 +39,7 @@ import net.minecraft.world.Container;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.monster.Zombie;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -55,6 +57,111 @@ public final class LoadoutProfileGameTests {
     @SubscribeEvent
     public static void register(RegisterGameTestsEvent event) {
         event.register(LoadoutProfileGameTests.class);
+    }
+
+    @GameTest(template = "empty_large")
+    public static void equippingArmorPublishesTheWornItemBeforePlanningAnotherTrip(GameTestHelper helper) {
+        Scene scene = new Scene(helper, 1);
+        ResidentEntity body = scene.body();
+        var helmet = LoadoutProfile.Entry.armor(EquipmentSlot.HEAD, ItemSpec.of(Items.IRON_HELMET));
+        LoadoutProfile profile = scene.profile(List.of(helmet));
+        scene.store(12).setItem(0, new ItemStack(Items.IRON_HELMET));
+        body.pack().insert(new ItemStack(Items.IRON_HELMET));
+        InventoryObservations.publish(scene.colony, helper.getLevel());
+        helper.assertTrue(Equipment.reconcile(scene.colony, body), "the helmet moves into its armor slot");
+        InventorySnapshot.Resident observed = scene.colony.inventory().snapshot().residents().get(body.id());
+        helper.assertTrue(observed.state() != InventorySnapshot.State.OBSERVED
+            || scene.supplies.observedDeficits(body, profile, observed).get(helmet.id()) == 0,
+            "the inventory index must not publish an observed missing helmet after equipping it");
+        InventoryObservations.publish(scene.colony, helper.getLevel());
+        helper.assertTrue(scene.supplies.urges(WeaponSessionGameTests.worker(body), Optional.empty(),
+            Long.MIN_VALUE, Long.MIN_VALUE).isEmpty(), "worn armor must not trigger another supply trip");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty_large", timeoutTicks = 250)
+    public static void damagedArmorStaysEquippedWithAFullPackAndWeaponSessions(GameTestHelper helper) {
+        Scene scene = new Scene(helper, 1);
+        ResidentEntity body = scene.body();
+        scene.profile(List.of(
+            LoadoutProfile.Entry.weapon(ItemSpec.of(Items.IRON_SWORD)),
+            LoadoutProfile.Entry.armor(EquipmentSlot.HEAD, ItemSpec.of(Items.IRON_HELMET)),
+            LoadoutProfile.Entry.armor(EquipmentSlot.CHEST, ItemSpec.of(Items.IRON_CHESTPLATE)),
+            LoadoutProfile.Entry.armor(EquipmentSlot.LEGS, ItemSpec.of(Items.IRON_LEGGINGS)),
+            LoadoutProfile.Entry.armor(EquipmentSlot.FEET, ItemSpec.of(Items.IRON_BOOTS))));
+        body.pack().insert(new ItemStack(Items.IRON_SWORD));
+        for (var item : List.of(Items.IRON_HELMET, Items.IRON_CHESTPLATE, Items.IRON_LEGGINGS, Items.IRON_BOOTS)) {
+            ItemStack armor = new ItemStack(item);
+            armor.setDamageValue(7);
+            armor.set(DataComponents.CUSTOM_NAME, Component.literal("worn armor"));
+            body.pack().insert(armor);
+        }
+        helper.assertTrue(Equipment.reconcile(scene.colony, body), "the whole suit is equipped");
+        for (int slot = 0; slot < body.pack().getContainerSize(); slot++) {
+            if (body.pack().getItem(slot).isEmpty()) {
+                body.pack().setItem(slot, new ItemStack(Items.WHEAT, 64));
+            }
+        }
+        helper.assertFalse(body.canPickUpLoot(), "residents do not use native mob loot pickup");
+        scene.simulate();
+        int[] damage = {7};
+        helper.onEachTick(() -> {
+            scene.supplies.tick(helper.getLevel().getServer());
+            for (EquipmentSlot slot : List.of(EquipmentSlot.HEAD, EquipmentSlot.CHEST,
+                EquipmentSlot.LEGS, EquipmentSlot.FEET)) {
+                ItemStack worn = body.getItemBySlot(slot);
+                helper.assertTrue(!worn.isEmpty() && worn.getDamageValue() == damage[0]
+                    && Component.literal("worn armor").equals(worn.get(DataComponents.CUSTOM_NAME)),
+                    "damaged named armor remains in its slot on every tick");
+            }
+            helper.assertTrue(helper.getLevel().getEntitiesOfClass(ItemEntity.class,
+                body.getBoundingBox().inflate(8)).isEmpty(), "no equipment falls out");
+            helper.assertTrue(scene.supplies.profiles().assigned(body.id()).isPresent(),
+                "the loadout remains assigned while labor runs");
+        });
+        WeaponSession[] session = new WeaponSession[1];
+        helper.startSequence()
+            .thenIdle(10)
+            .thenExecute(() -> {
+                for (EquipmentSlot slot : List.of(EquipmentSlot.HEAD, EquipmentSlot.CHEST,
+                    EquipmentSlot.LEGS, EquipmentSlot.FEET)) {
+                    body.getItemBySlot(slot).setDamageValue(8);
+                }
+                damage[0] = 8;
+            })
+            .thenIdle(10)
+            .thenExecute(() -> session[0] = Weapons.open(WeaponSessionGameTests.worker(body)).orElseThrow())
+            .thenIdle(40)
+            .thenExecute(() -> session[0].close())
+            .thenIdle(60)
+            .thenSucceed();
+    }
+
+    @GameTest(template = "empty_large", timeoutTicks = 180)
+    public static void mismatchedDamagedArmorCannotBeReequippedByTheSameDemand(GameTestHelper helper) {
+        Scene scene = new Scene(helper, 1);
+        ResidentEntity body = scene.body();
+        ItemSpec pinned = ItemSpec.of(Items.IRON_HELMET)
+            .withComponents(DataComponentMap.builder().set(DataComponents.DAMAGE, 0).build());
+        scene.profile(List.of(LoadoutProfile.Entry.armor(EquipmentSlot.HEAD, pinned)));
+        body.pack().insert(new ItemStack(Items.IRON_HELMET));
+        helper.assertTrue(Equipment.reconcile(scene.colony, body), "the matching helmet is equipped");
+        for (int slot = 0; slot < body.pack().getContainerSize(); slot++) {
+            body.pack().setItem(slot, new ItemStack(Items.WHEAT, 64));
+        }
+        body.getItemBySlot(EquipmentSlot.HEAD).setDamageValue(7);
+        helper.assertTrue(Equipment.reconcile(scene.colony, body), "a component mismatch removes the helmet");
+        List<ItemEntity> dropped = helper.getLevel().getEntitiesOfClass(ItemEntity.class,
+            body.getBoundingBox().inflate(4), item -> item.getItem().is(Items.IRON_HELMET));
+        helper.assertValueEqual(dropped.size(), 1, "a full pack causes one real helmet drop");
+        scene.others.addAll(dropped);
+        helper.assertFalse(Equipment.reconcile(scene.colony, body), "the same mismatched helmet cannot be worn again");
+        helper.assertTrue(body.getItemBySlot(EquipmentSlot.HEAD).isEmpty(), "the armor slot stays empty");
+        helper.assertFalse(body.canPickUpLoot(), "native mob loot pickup is disabled");
+        scene.simulate();
+        helper.onEachTick(() -> helper.assertTrue(body.getItemBySlot(EquipmentSlot.HEAD).isEmpty(),
+            "labor and nearby dropped armor do not re-equip the mismatched helmet"));
+        helper.startSequence().thenIdle(100).thenSucceed();
     }
 
     @GameTest(template = "empty_large", timeoutTicks = 450)

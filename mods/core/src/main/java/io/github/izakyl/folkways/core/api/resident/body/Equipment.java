@@ -128,6 +128,9 @@ public final class Equipment {
             body.mob().setDropChance(demand.slot(), 2.0F);
             changed = true;
         }
+        if (changed) {
+            colony.inventoryFeedback().changedResident(body.id());
+        }
         return changed;
     }
 

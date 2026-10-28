@@ -15,8 +15,9 @@ public interface Node {
         return spec().wares();
     }
 
-    // Additional pack space beyond outputs already promised by the plan. Nodes which estimate their entire
-    // native output may deduct those promises; additive estimates, such as crafting remainders, stay additive.
+    // Additional pack space beyond outputs already promised as carried or placed in a store. Nodes which estimate
+    // their entire native output may deduct those promises; additive estimates, such as crafting remainders,
+    // stay additive.
     default List<Amount> planningLeaves(List<Amount> promised) {
         return spec().leaves();
     }

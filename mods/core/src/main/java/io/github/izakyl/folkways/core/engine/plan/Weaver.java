@@ -2243,7 +2243,14 @@ public final class Weaver {
         // What the work leaves in the pack fills it as goods carried do, though nobody is promised it.
         Node worked = nodes.get(node);
         if (worked != null) {
-            carrying.addAll(worked.planningLeaves(carrying.stream().filter(amount -> amount.count() > 0).toList()));
+            List<Amount> promised = new ArrayList<>(carrying.stream().filter(amount -> amount.count() > 0).toList());
+            // Output booked directly into a store does not occupy the worker's pack.
+            for (Claim claim : claims.since(node, 0)) {
+                if (claim.on() instanceof Resource.Space space && into.contains(space.where())) {
+                    promised.add(new Amount(space.spec(), claim.amount()));
+                }
+            }
+            carrying.addAll(worked.planningLeaves(promised));
         }
         return new Placement(stands == null ? Set.of() : stands, carrying, List.copyOf(from), List.copyOf(into),
             drawsOf(node));

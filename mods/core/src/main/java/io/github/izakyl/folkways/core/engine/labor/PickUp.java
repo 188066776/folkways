@@ -7,6 +7,7 @@ import io.github.izakyl.folkways.core.api.vocation.Vocation;
 import io.github.izakyl.folkways.core.api.vocation.Vocations;
 import io.github.izakyl.folkways.core.api.work.Amount;
 import io.github.izakyl.folkways.core.api.work.Doings;
+import io.github.izakyl.folkways.core.api.work.Leaves;
 import io.github.izakyl.folkways.core.api.work.Node;
 import io.github.izakyl.folkways.core.api.work.NodeSpec;
 import io.github.izakyl.folkways.core.api.work.Outcome;
@@ -34,6 +35,7 @@ final class PickUp implements Node {
         this.spec = NodeSpec.of(nameOf(drop), Salvage.DOMAIN, new WorkSite.AtBlock(at), stances,
                 Workload.Once.of(0))
             .gives(new Amount(what, count))
+            .leaves(List.of(new Amount(what, count)))
             .doing(Doings.PICKING_UP, what)
             .vocation(hauling())
             .gesture(WorkGesture.SWING)
@@ -55,6 +57,11 @@ final class PickUp implements Node {
     @Override
     public NodeSpec spec() {
         return spec;
+    }
+
+    @Override
+    public List<Amount> planningLeaves(List<Amount> promised) {
+        return Leaves.unpromised(spec.leaves(), promised);
     }
 
     @Override
