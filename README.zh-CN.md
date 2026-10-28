@@ -13,8 +13,7 @@ Folkways 是面向 **Minecraft 1.21.1 / NeoForge** 的殖民地模组。
 
 **预发布阶段：** 存档、数据包格式与 Java API 仍可能随版本变化。体验 nightly 构建前，请备份世界。
 
-[安装](#安装) · [快速上手](#快速上手) · [可选集成](#可选集成) ·
-[文档](docs/zh-CN/README.md) · [参与贡献](CONTRIBUTING.zh-CN.md)
+[模组一览](#模组一览) · [安装](#安装) · [快速上手](#快速上手) · [可选集成](#可选集成) · [参与贡献](CONTRIBUTING.zh-CN.md)
 
 ## 玩法特色
 
@@ -27,6 +26,22 @@ Folkways 是面向 **Minecraft 1.21.1 / NeoForge** 的殖民地模组。
 - **照顾有自己生活的居民。** 居民睡在自己的床上，随身带三天口粮，会因工作和行走疲劳，并躲避危险。数据包可以替换殖民地的姓名与外观池。
 - **在实践中成长。** 每个工种有十级，每升一级抽取一个特长；3、6、10 级还会抽取通用特长。
 - **摆好餐桌，盖好住房。** 用餐区供应餐桌饭，床会评定所在房间的等级，心情让工作速度在 75% 到 115% 之间变化。空闲的居民会散步、聊天、抚摸动物；殖民地发展起来后，猫、狼和鹦鹉会来附近安家。
+
+## 模组一览
+
+本仓库构建九个模组，`mods/` 下每个目录对应一个，产物为 `folkways-<目录名>-*.jar`。所有扩展都需要 Core 和 Vanilla。
+
+| 模组                                      | 目录                 | 额外依赖                                                                              | 作用                                                                   |
+| ----------------------------------------- | -------------------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Folkways Core                             | `mods/core`          | —                                                                                     | 殖民地引擎：自行规划工作的居民、寻路、殖民书和管理面板；本身不提供工作 |
+| Folkways Vanilla                          | `mods/vanilla`       | Core                                                                                  | 居民在原版方块中的工种：种植、畜牧、捕鱼、制作、搬运和建造             |
+| Folkways × Create                         | `mods/create`        | 机械动力 6.0+                                                                         | 居民驾驶列车、通过打包机和邮箱收发包裹、铺设轨道、按蓝图施工           |
+| Folkways × Modular Golems                 | `mods/modulargolems` | 模块化傀儡 3.1.43+                                                                    | 傀儡加入居民名单，像人类居民一样承担工种                               |
+| Folkways × Kaleidoscope Cookery           | `mods/cookery`       | 森罗厨房 1.6.0；可选森罗酒馆 1.2.0                                                    | 居民用原生厨具种植、处理、烹饪和储存食物；装有酒馆时还会酿酒、供酒     |
+| Folkways RTS                              | `mods/rts`           | —                                                                                     | 居民指令、编队和即时操控                                               |
+| Folkways × TACZ                           | `mods/tacz`          | TACZ 1.1.8-hotfix-r7                                                                  | 居民使用 TACZ 枪械，弹药取自殖民地库存                                 |
+| Folkways × Superb Warfare                 | `mods/warfare`       | 卓越前线 0.8.9.2、Kotlin for Forge 5.12.0                                             | 居民使用其枪械和火炮阵地，弹药取自殖民地库存                           |
+| Folkways × Create: FireFighting Additions | `mods/firefighting`  | Folkways × Create、机械动力 6.0.10+（低于 6.1）、Create: FireFighting Additions 0.2.5 | 居民用消防栓水带灭火，并为手提灭火器补充灭火剂                         |
 
 ## 安装
 
@@ -42,13 +57,7 @@ Folkways 是面向 **Minecraft 1.21.1 / NeoForge** 的殖民地模组。
 
 **Core 和 Vanilla 必装**，其他扩展按需安装。**所有 Folkways jar 必须来自同一次构建。**
 
-| Jar                                                         | 安装条件                                         |
-| ----------------------------------------------------------- | ------------------------------------------------ |
-| Folkways Core（`folkways-core-*.jar`）                      | 必装：殖民地引擎、殖民书和管理面板               |
-| Folkways Vanilla（`folkways-vanilla-*.jar`）                | 必装：居民及其在原版方块中的工作                 |
-| Folkways × Create（`folkways-create-*.jar`）                | 配合机械动力：列车、包裹、轨道和蓝图             |
-| Folkways × Modular Golems（`folkways-modulargolems-*.jar`） | 配合模块化傀儡：让傀儡成为居民                   |
-| Folkways × Kaleidoscope Cookery（`folkways-cookery-*.jar`） | 配合森罗厨房 1.6.0：作物、原生厨具和共享厨房工具 |
+各个 jar 的作用和依赖见[模组一览](#模组一览)。
 
 Core 已内置 Ponder 和 Flywheel；Vanilla 已内置 Starlark 解释器，无需单独安装这三个组件。
 
@@ -60,7 +69,7 @@ Core 已内置 Ponder 和 Flywheel；Vanilla 已内置 Starlark 解释器，无�
 4. 在已登记的箱子中准备食物，并留出空床。新人会陆续出现，从**人类居民**页允许他们入住。
 5. 潜行并滚动鼠标滚轮，将殖民书切到**圈地**模式；左键点击地块的两个对角，再右键选择**农田**。
 
-面板的**教程**页提供 Ponder 演示。成员管理、容器规则、特长、饮食、用餐、住房、堆肥、建筑和外观设置见[玩法指南](docs/zh-CN/gameplay.md)。
+面板的**教程**页提供 Ponder 演示。
 
 ## 可选集成
 
@@ -78,15 +87,7 @@ Core 已内置 Ponder 和 Flywheel；Vanilla 已内置 Starlark 解释器，无�
 | [FTB Teams](https://www.curseforge.com/minecraft/mc-mods/ftb-teams-forge) 2101.1+                                                      | 创始人可将殖民地交给队伍；队员共同管理，队长持有创始人权限                                                          |
 | [Just Enough Characters（JEC）](https://www.curseforge.com/minecraft/mc-mods/just-enough-characters) 4.5+                              | 在物品选择器、目录选择器、居民分工和库存页使用全拼、首字母与混合输入搜索；仅需客户端安装                            |
 
-JEC 搜索沿用其键盘方案和模糊音设置。输入示例，以及物品搜索与已保存筛选规则的区别，见[搜索](docs/zh-CN/gameplay.md#搜索)。
-车万女仆扩展模型包的安装方法见[女仆模型包](docs/zh-CN/gameplay.md#女仆模型包)。
-
-## 文档
-
-- [玩法指南](docs/zh-CN/gameplay.md)：成员、工作、特长、饮食、用餐、住房、娱乐、容器、堆肥和居民外观。
-- [自定义内容](docs/zh-CN/custom-content.md)：样式、蓝图、皮肤、模型和服务器配置。
-- [测试指南](docs/zh-CN/testing.md)：本地检查、游戏测试、Cookery 测试环境和 CI。
-- [架构说明](docs/zh-CN/architecture.md)：模组边界、公共 API、源码位置和生命周期。
+JEC 搜索沿用其键盘方案和模糊音设置。
 
 ## 从源码构建
 
@@ -99,7 +100,7 @@ npm run setup
 ```
 
 Setup 会下载锁定版本的集成依赖，并生成 Gradle 必需的清单。
-五个模组 jar 汇总到 `build/libs/`。
+九个模组 jar 汇总到 `build/libs/`。
 Blockwright 源码已支持 Windows，当前锁定的 npm 发布包早于这次改动。
 Windows 下可使用从源码构建的 SDK 和 `gradlew.bat`，详见[开发环境](CONTRIBUTING.zh-CN.md#开发环境)。
 
@@ -116,7 +117,7 @@ Folkways 使用 [MIT 许可证](LICENSE)。
 对应许可证文本随 jar 放在 `META-INF/licenses/` 下。第三方组件与素材许可见 [THIRD_PARTY.md](THIRD_PARTY.md)。
 
 `tests/promo/models/` 中按需准备的酒狐模型使用 **CC BY-NC-SA 4.0**，不属于 Folkways 的 MIT 授权范围；
-它们仅用于宣传视频，不随模组分发，详见[模型说明](tests/promo/models/README.md)。
+它们仅用于宣传视频，不随模组分发，详见 [THIRD_PARTY.md](THIRD_PARTY.md)。
 
 [badge-license]: https://img.shields.io/github/license/IzakyL/folkways?style=flat-square&label=license&color=22c55e
 [badge-last-commit]: https://img.shields.io/github/last-commit/IzakyL/folkways/master?style=flat-square&logo=github&logoColor=white&label=last%20commit&color=0ea5e9

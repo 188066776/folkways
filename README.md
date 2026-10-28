@@ -15,9 +15,8 @@ what to fetch, make, haul and build to keep the settlement running.
 **Pre-release:** saves, data pack formats and the Java API may change between
 versions. Back up your world before trying a nightly build.
 
-[Installation](#installation) · [Getting started](#getting-started) ·
-[Integrations](#optional-integrations) · [Documentation](docs/en/README.md) ·
-[Contributing](CONTRIBUTING.md)
+[Mods](#mods) · [Installation](#installation) · [Getting started](#getting-started) ·
+[Integrations](#optional-integrations) · [Contributing](CONTRIBUTING.md)
 
 ## What it does
 
@@ -43,6 +42,23 @@ versions. Back up your world before trying a nightly build.
   rooms, and mood moves work speed between 75% and 115%. Idle residents stroll,
   chat and pet animals; cats, wolves and parrots move in as the colony grows.
 
+## Mods
+
+This repository builds nine mods, one per directory under `mods/`. Each ships as
+`folkways-<directory>-*.jar`. Every extension requires Core and Vanilla.
+
+| Mod                                       | Directory            | Also requires                                                                       | What it does                                                                                                                    |
+| ----------------------------------------- | -------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Folkways Core                             | `mods/core`          | —                                                                                   | The colony engine: residents who plan their own work, their pathfinding, and the Colony Book and panel. Adds no work on its own |
+| Folkways Vanilla                          | `mods/vanilla`       | Core                                                                                | Residents and their trades among vanilla blocks: farming, herding, fishing, crafting, hauling and building                      |
+| Folkways × Create                         | `mods/create`        | Create 6.0+                                                                         | Residents drive trains, send parcels through packaging and postboxes, lay track and build from schematics                       |
+| Folkways × Modular Golems                 | `mods/modulargolems` | Modular Golems 3.1.43+                                                              | Golems join the roster and take trades like people                                                                              |
+| Folkways × Kaleidoscope Cookery           | `mods/cookery`       | Kaleidoscope Cookery 1.6.0; Kaleidoscope Tavern 1.2.0 optional                      | Residents grow, prepare, cook and store food with its native appliances; with Tavern, they make and serve wine                  |
+| Folkways RTS                              | `mods/rts`           | —                                                                                   | Resident commands, squads and real-time controls                                                                                |
+| Folkways × TACZ                           | `mods/tacz`          | TACZ 1.1.8-hotfix-r7                                                                | Residents use TACZ guns with physical ammunition from colony supplies                                                           |
+| Folkways × Superb Warfare                 | `mods/warfare`       | Superb Warfare 0.8.9.2, Kotlin for Forge 5.12.0                                     | Residents use its firearms and emplacements with ammunition from colony stores                                                  |
+| Folkways × Create: FireFighting Additions | `mods/firefighting`  | Folkways × Create, Create 6.0.10+ (below 6.1), Create: FireFighting Additions 0.2.5 | Residents fight fires with hydrant hoses and refill portable extinguishers                                                      |
+
 ## Installation
 
 Get pre-release jars from the upstream
@@ -60,13 +76,7 @@ date until the first versioned release is published.
 Install **Core and Vanilla**, then add extensions for the mods you use.
 **All Folkways jars must come from the same build.**
 
-| Jar                                                        | When to install                                                                    |
-| ---------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Folkways Core (`folkways-core-*.jar`)                      | Always: colony engine, Colony Book and panel                                       |
-| Folkways Vanilla (`folkways-vanilla-*.jar`)                | Always: residents and their work among vanilla blocks                              |
-| Folkways × Create (`folkways-create-*.jar`)                | With Create: trains, parcels, track and schematics                                 |
-| Folkways × Modular Golems (`folkways-modulargolems-*.jar`) | With Modular Golems: golems as residents                                           |
-| Folkways × Kaleidoscope Cookery (`folkways-cookery-*.jar`) | With Kaleidoscope Cookery 1.6.0: native crops, appliances and shared kitchen tools |
+See [Mods](#mods) for what each jar adds and what it needs.
 
 Ponder and Flywheel are bundled in Core; the Starlark interpreter is bundled in
 Vanilla. They do not need separate installation.
@@ -82,8 +92,6 @@ Vanilla. They do not need separate installation.
    corners of a plot, then right-click and choose **Farm**.
 
 The panel's **Lessons** tab contains Ponder tutorials for the rest of the mod.
-See the [gameplay guide](docs/en/gameplay.md) for colony membership, storage rules,
-perks, food, dining, housing, composting, buildings and resident looks.
 
 ## Optional integrations
 
@@ -101,16 +109,7 @@ perks, food, dining, housing, composting, buildings and resident looks.
 | [FTB Teams](https://www.curseforge.com/minecraft/mc-mods/ftb-teams-forge) 2101.1+                                           | A founder can hand the colony to their party; party members keep it and the party owner holds the founder's rights                                                                       |
 | [Just Enough Characters (JEC)](https://www.curseforge.com/minecraft/mc-mods/just-enough-characters) 4.5+                    | Pinyin, initials and mixed-input searches in item and folder pickers, Workforce and stock; install on the client only                                                                    |
 
-JEC searches follow its keyboard and fuzzy-spelling settings. See [Searching](docs/en/gameplay.md#searching)
-for examples and how item searches differ from saved filter rules.
-For Touhou Little Maid add-on installation, see [Maid model packs](docs/en/gameplay.md#maid-model-packs).
-
-## Documentation
-
-- [Gameplay](docs/en/gameplay.md): members, work, perks, food, dining, housing, recreation, storage, composting and resident looks.
-- [Custom content](docs/en/custom-content.md): patterns, blueprints, skins, models and server configuration.
-- [Testing](docs/en/testing.md): local checks, game tests, Cookery fixtures and CI.
-- [Architecture](docs/en/architecture.md): modules, public APIs, source layout and lifecycle.
+JEC searches follow its keyboard and fuzzy-spelling settings.
 
 ## Building from source
 
@@ -124,7 +123,7 @@ npm run setup
 ```
 
 Setup downloads the pinned integration dependencies and writes the manifest
-required by Gradle. The five mod jars are collected in `build/libs/`.
+required by Gradle. The nine mod jars are collected in `build/libs/`.
 Blockwright's native Windows support is available in its source tree; the pinned
 npm release predates it. For Windows builds using a source-built SDK and
 `gradlew.bat`, see [development setup](CONTRIBUTING.md#development-setup).
@@ -147,7 +146,7 @@ texts ship under `META-INF/licenses/` in the relevant jar. See
 
 The Wine Fox models prepared under `tests/promo/models/` are **CC BY-NC-SA 4.0**,
 outside Folkways' MIT license. They are used only for promotional footage and
-are not shipped in the mod; see [their README](tests/promo/models/README.md).
+are not shipped in the mod; see [THIRD_PARTY.md](THIRD_PARTY.md).
 
 [badge-license]: https://img.shields.io/github/license/IzakyL/folkways?style=flat-square&label=license&color=22c55e
 [badge-last-commit]: https://img.shields.io/github/last-commit/IzakyL/folkways/master?style=flat-square&logo=github&logoColor=white&label=last%20commit&color=0ea5e9

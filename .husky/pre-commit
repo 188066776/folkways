@@ -1,2 +1,0 @@
-npm run format:md:check
-node scripts/check-staged-markdown.mjs

@@ -23,7 +23,6 @@ jobs:
           path: .blockwright-store
           key: blockwright-mods-${{ hashFiles('blockwright.toml') }}
       - run: npm ci
-      - run: npm run format:md:check
       - run: npm run setup
       - run: ./gradlew build
       - run: npm run typecheck
@@ -110,7 +109,7 @@ jobs:
             else
               failed=1
             fi
-            if ! node scripts/ci/write-game-test-junit.mjs "$GAME_TEST_MOD-$profile" "$status"; then
+            if ! node .github/scripts/write-game-test-junit.mjs "$GAME_TEST_MOD-$profile" "$status"; then
               failed=1
             fi
           done

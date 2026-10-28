@@ -49,8 +49,8 @@ pinned in [`blockwright.toml`](blockwright.toml) and writes `.blockwright/mods.j
 fixtures. Gradle compiles against optional integration jars even when a particular
 test profile does not load them.
 
-The build gathers six mod jars in `build/libs/` and runtime LDLib2 in `build/deps/`.
-See [Architecture](docs/en/architecture.md) for module boundaries and the source map.
+The build gathers the nine mod jars in `build/libs/` and runtime LDLib2 in `build/deps/`.
+Each mod is a Gradle project under `mods/`; see [Mods](README.md#mods) for what each one does.
 
 For Windows, prepare a compatible source-built SDK using Blockwright's
 [local build instructions](https://github.com/IzakyL/blockwright/blob/master/CONTRIBUTING.md)
@@ -60,27 +60,23 @@ use display device `auto` or `gpu`. After preparing `.blockwright/mods.json` wit
 that SDK, build with `gradlew.bat`. Record the SDK revision and platform when
 reporting results; local Windows tests and Linux CI are separate validation runs.
 
-In local Git checkouts, `npm ci` also installs the Husky pre-commit hook.
-
 ## Validation
 
 Start with checks that do not launch Minecraft:
 
 ```sh
-npm run format:md:check
 npm run test:unit
 npm run typecheck
 ./gradlew check
 ```
 
 Add or update tests for behavioral changes. Prefer a black-box e2e spec for
-behavior a player can observe. Choose the relevant mod, environment and client
-suite from the [testing guide](docs/en/testing.md), including its EULA and platform
-requirements.
+behavior a player can observe. Run the relevant mod's GameTests and client
+suite.
 
 CI runs the build checks, per-mod GameTests and a focused real-client founding
-smoke test. It does not run every client or capture suite. The testing guide
-documents the exact matrix, selection flags and failure artifacts.
+smoke test. It does not run every client or capture suite. See
+`.github/workflows/build.yml` for the exact matrix.
 
 ## Pull requests
 
@@ -106,7 +102,7 @@ feat(draft): add a dock pattern
 - Use no tabs or trailing whitespace; `./gradlew check` checks scaffold formatting.
 - Keep GameTests in the module owning the behavior, including package-private
   scenarios. Shared setup belongs in Core's `src/gameTestFixtures`, without test
-  registration. See [test ownership](docs/en/architecture.md#lifecycle-and-test-ownership).
+  registration.
 - Shared TypeScript helpers belong in `tests/shared/`. A suite can import from
   there and `tests/ldlib2/`, but not from another suite.
 
@@ -136,11 +132,6 @@ feat(draft): add a dock pattern
 
 ### Documentation
 
-Run `npm run format:md` before staging Markdown changes. Every commit checks all
-project Markdown and its staged copies; formatting failures block the commit.
-CI also runs `npm run format:md:check`.
-
 Update English and Chinese pages together. Use the game's locale catalogs for UI
-names and keep commands, paths and Java symbols literal. Put detailed gameplay,
-content, testing and architecture material under `docs/en/` and `docs/zh-CN/`.
-See the [documentation index](docs/README.md) for the layout and maintenance notes.
+names and keep commands, paths and Java symbols literal. Documentation stays at the
+overview level: the READMEs and contribution guides. Do not add detailed reference pages.

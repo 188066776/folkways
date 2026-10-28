@@ -42,8 +42,8 @@ npm run setup
 **第一次运行 Gradle 前必须先执行 setup**，调整锁定依赖后也应重新执行。
 Gradle 编译时需要可选集成的 jar，即使某个测试环境并不加载这些模组。
 
-六个模组 jar 汇总到 `build/libs/`，运行时使用的 LDLib2 放在 `build/deps/`。
-模块边界与源码位置见[架构说明](docs/zh-CN/architecture.md)。
+九个模组 jar 汇总到 `build/libs/`，运行时使用的 LDLib2 放在 `build/deps/`。
+每个模组是 `mods/` 下的一个 Gradle 子项目，各自的作用见[模组一览](README.zh-CN.md#模组一览)。
 
 Windows 下请按 Blockwright 的[本地构建说明](https://github.com/IzakyL/blockwright/blob/master/CONTRIBUTING.md)
 和 [Windows 环境要求](https://github.com/IzakyL/blockwright/blob/master/docs/environment.md#windows-development-candidate)
@@ -51,24 +51,21 @@ Windows 下请按 Blockwright 的[本地构建说明](https://github.com/IzakyL/
 显示设备使用 `auto` 或 `gpu`。通过该 SDK 准备好 `.blockwright/mods.json` 后，使用 `gradlew.bat` 构建。
 报告测试结果时请注明 SDK 版本及平台；本地 Windows 测试与 Linux CI 是不同的验证运行。
 
-在本地 Git 仓库中，`npm ci` 还会安装 Husky 的 pre-commit hook。
-
 ## 验证修改
 
 先运行无需启动 Minecraft 的检查：
 
 ```sh
-npm run format:md:check
 npm run test:unit
 npm run typecheck
 ./gradlew check
 ```
 
 行为变更应新增或更新测试；玩家可观察到的行为优先用黑盒 e2e 测试覆盖。
-按[测试指南](docs/zh-CN/testing.md)选择相关模组、运行环境和客户端测试套件，并留意其中的 EULA 与平台要求。
+运行相关模组的 GameTests 和客户端测试套件。
 
 CI 会运行构建检查、按模组划分的 GameTests，以及真实客户端的建村冒烟测试，
-但不会运行全部客户端和素材录制套件。完整矩阵、筛选参数和失败产物见测试指南。
+但不会运行全部客户端和素材录制套件。完整矩阵见 `.github/workflows/build.yml`。
 
 ## 提交 PR
 
@@ -91,7 +88,7 @@ feat(draft): add a dock pattern
 - 沿用周围代码的命名、注释密度和写法。
 - 不使用制表符和行尾空白；`./gradlew check` 会检查项目约定范围内的格式。
 - GameTests 放在行为所属的模组中，包括需要访问包内成员的测试。
-  共享准备逻辑放入 Core 的 `src/gameTestFixtures`，不注册测试，详见[生命周期与测试归属](docs/zh-CN/architecture.md#生命周期与测试归属)。
+  共享准备逻辑放入 Core 的 `src/gameTestFixtures`，不注册测试。
 - TypeScript 共享辅助代码放在 `tests/shared/`。套件可引用此处及 `tests/ldlib2/`，不可引用其他套件。
 
 ### 翻译与建筑样式
@@ -113,10 +110,5 @@ feat(draft): add a dock pattern
 
 ### 文档
 
-暂存 Markdown 改动前先运行 `npm run format:md`。
-每次提交都会检查全部项目 Markdown 及其暂存版本，格式不合格会阻止提交。
-CI 也会运行 `npm run format:md:check`。
-
 同步更新英文和中文版，界面名称以游戏语言文件为准，命令、路径和 Java 符号保持原文。
-详细玩法、自定义内容、测试与架构说明放入 `docs/en/` 和 `docs/zh-CN/`。
-目录和维护说明见[文档索引](docs/README.md)。
+文档只保留概述层面：README 和贡献指南，不再添加详细参考页面。

@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-const script = fileURLToPath(new URL("../../../scripts/ci/write-game-test-junit.mjs", import.meta.url));
+const script = fileURLToPath(new URL("../../../.github/scripts/write-game-test-junit.mjs", import.meta.url));
 
 async function run(profile: string, conclusion: string, log?: string) {
   const cwd = await mkdtemp(path.join(os.tmpdir(), "folkways-game-test-junit-"));

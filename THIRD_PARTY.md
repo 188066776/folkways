@@ -27,7 +27,7 @@ Players install these separately. Folkways only compiles against them.
 
 ## Repository assets, not shipped in the mod
 
-| Path                                                      | License         | Notes                                                                                                                                                                                                          |
-| --------------------------------------------------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tests/shared/assets/resident-models/`                    | CC0             | Yes Steve Model built-in models (Steve, Default Boy), used by end-to-end tests                                                                                                                                 |
-| `tests/promo/models/` (downloaded on demand, not tracked) | CC BY-NC-SA 4.0 | Wine Fox models from Yes Steve Model's built-in pack, used only to film promotional footage. Downloads retain each folder's `ysm.json` author credits; see [the folder's README](tests/promo/models/README.md) |
+| Path                                                      | License         | Notes                                                                                                                                                 |
+| --------------------------------------------------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tests/shared/assets/resident-models/`                    | CC0             | Yes Steve Model built-in models (Steve, Default Boy), used by end-to-end tests                                                                        |
+| `tests/promo/models/` (downloaded on demand, not tracked) | CC BY-NC-SA 4.0 | Wine Fox models from Yes Steve Model's built-in pack, used only to film promotional footage. Downloads retain each folder's `ysm.json` author credits |
