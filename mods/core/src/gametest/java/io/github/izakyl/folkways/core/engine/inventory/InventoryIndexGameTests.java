@@ -128,6 +128,34 @@ public final class InventoryIndexGameTests {
     }
 
     @GameTest(template = "empty")
+    public static void nonInventoryWorksiteDoesNotBlockCoverage(GameTestHelper helper) {
+        var level = helper.getLevel();
+        BlockPos cell = helper.absolutePos(new BlockPos(1, 1, 1));
+        level.setBlockAndUpdate(cell, Blocks.COMPOSTER.defaultBlockState());
+        WorldPos at = WorldPos.of(level, cell);
+        ColonyData data = new ColonyData();
+        try {
+            data.inventory().observe(OWNER, level, List.of(at));
+            data.inventory().advance(level, data, Map.of());
+            data.inventory().work(level.getServer(), 100);
+            helper.assertTrue(store(data, at).state() == State.UNSUPPORTED && !store(data, at).labor(),
+                "a composter is a worksite without a container");
+            helper.assertTrue(data.inventory().snapshot().coverage().complete(),
+                "a non-inventory worksite does not leave stock coverage incomplete");
+            ENDPOINTS.put(data.colonyId(), List.of(new InventoryProviders.Endpoint(OWNER, at)));
+            data.inventory().providersChanged(OWNER);
+            data.inventory().advance(level, data, Map.of());
+            data.inventory().work(level.getServer(), 100);
+            helper.assertFalse(data.inventory().snapshot().coverage().complete(),
+                "an unsupported provider endpoint still leaves coverage incomplete");
+        } finally {
+            ENDPOINTS.remove(data.colonyId());
+            data.inventory().clear();
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
     public static void providerStockIsObservedOnceAndTotalsNeverReadContainers(GameTestHelper helper) {
         var level = helper.getLevel();
         BlockPos pos = helper.absolutePos(new BlockPos(1, 1, 1));

@@ -678,8 +678,11 @@ public final class InventoryIndex implements ColonyInventory, InventoryFeedback 
             stored.put(entry.where, new Store(entry.where, entry.aliases, entry.dimension, entry.incarnation,
                 entry.version(), entry.state, entry.labor, entry.rules, entry.slots, entry.refused, entry.approach,
                 entry.block));
-            storeCoverage.put(entry.where, entry.state);
-            missing |= entry.state != State.OBSERVED;
+            // An approach-only point may have no inventory, but a stock endpoint must be observed.
+            if (entry.state != State.UNSUPPORTED || entry.labor || entry.provider != null) {
+                storeCoverage.put(entry.where, entry.state);
+                missing |= entry.state != State.OBSERVED;
+            }
         }
         Map<UUID, Resident> carried = new LinkedHashMap<>();
         Map<UUID, State> residentCoverage = new LinkedHashMap<>();
