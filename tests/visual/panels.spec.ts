@@ -1,7 +1,7 @@
 import { launchPair, type E2EPair } from "../shared/harness/pair";
 import { expect, test } from "@playwright/test";
-import { camera, input, player, screen, tick, type MinecraftClient, type MinecraftServer } from "@izakyl/blockwright-minecraft";
-import { clickElement, panelElements } from "../ldlib2";
+import { camera, defineTask, input, javaTask, player, screen, tick, type MinecraftClient, type MinecraftServer } from "@izakyl/blockwright-minecraft";
+import { ancestorsOf, clickElement, panelElements, visibleBox } from "../ldlib2";
 import { foundColonyFast, openColonyPanelViaBook, optInViaBook, setBookGesture, waitForGroundedPlayer, type Vec } from "../shared/colony/colony-founding";
 import { boardActs, enterSitePanel } from "../shared/ui/site-panel";
 import { CONFIG_PATH, VisualRun } from "../shared/capture/visual-kit";
@@ -133,8 +133,39 @@ test("panels and item models on camera", async ({}, testInfo) => {
         hard: true,
       });
       await run.lint(probe, `tab:${tab.name}`);
+      if (tab.name === "folkways.farming" || tab.name === "folkways.damage_control") {
+        const elements = await panelElements(client);
+        const visible = elements.filter(element => visibleBox(elements, element)
+          && [element, ...ancestorsOf(elements, element)].every(one => one.displayed && one.visible));
+        const navigation = elements.find(element => element.id === "folkways.navigation")!;
+        const labels = visible.filter(element => element.className.endsWith(".Label")
+          && element.x >= navigation.x + navigation.width
+          && (tab.name === "folkways.farming" ? /^\d+ cells ·/.test(element.text ?? "")
+            : element.text === "Damage Control"));
+        expect(labels.length, `${tab.name} must expose the inspected text`).toBeGreaterThan(0);
+        for (const label of labels) {
+          expect(label.width, `${tab.name}: ${label.text}`).toBeGreaterThanOrEqual(await probe.measure(label.text!));
+        }
+      }
       await capturePageWindows(server, client, run, tab);
     }
+
+    // This registered secondary page has no navigation entry, so open it through the shell's existing handler.
+    await client.run(defineTask<void, boolean>({
+      name: "folkways.visual.open-sentry-window", side: "client",
+      source: javaTask({ imports: ["net.minecraft.client.Minecraft", "net.minecraft.resources.ResourceLocation",
+        "net.minecraft.world.entity.player.Player", "io.github.izakyl.folkways.front.ui.screen.ColonyShell"], body: `
+var open = ColonyShell.class.getDeclaredMethod("openPage", Player.class, ResourceLocation.class);
+open.setAccessible(true);
+open.invoke(null, Minecraft.getInstance().player, ResourceLocation.parse("folkways:sentry_posts"));
+return true;
+` }),
+    }));
+    await waitForElement(client, { id: "folkways.window.close.folkways.sentry_posts" });
+    await run.shot(client, "sentry-posts-window", {
+      subject: "Registered sentry posts window", worldState: {}, hard: true,
+    });
+    await clickUnverified(client, { id: "folkways.window.close.folkways.sentry_posts" });
 
     if (await run.hover(client, "folkways.panel.orders")) {
       await run.shot(client, "05-0-tab-hover", {
@@ -235,14 +266,14 @@ test("panels and item models on camera", async ({}, testInfo) => {
     await tick.sprint(server, 5);
     await safeAction(() => frames(client, 3));
 
-    await clickTab(client, "folkways.tab.settings");
+    await clickTab(client, "folkways.page.wares");
     await safeAction(() => frames(client, 2));
-    await clickElement(client, { id: "folkways.settings.open.tool" });
+    await clickElement(client, { id: "folkways.settings.open.tool.folkways.crafting.folkways.wares" });
     await softly(() => waitForElement(client, { id: "folkways.selector.close" }, { timeoutMs: 8_000 }));
     await tick.sprint(server, 5);
     await safeAction(() => frames(client, 3));
     await run.shot(client, "05-7-settings-tool", {
-      subject: "Settings · tool list: the item picker, a folder for each mod and, in it, each tag; the rules held below",
+      subject: "Workshop · tool list: the item picker, a folder for each mod and, in it, each tag; the rules held below",
       worldState: { tokens: await tokensOf(client) },
     });
     await run.lint(probe, "window:selector-tree");

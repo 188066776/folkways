@@ -46,6 +46,11 @@ public final class Rows {
     private Rows() {
     }
 
+    public static Component placeholder(Component text) {
+        // LDLib draws empty fields in light gray unless the component carries its own ink.
+        return text.copy().withStyle(style -> style.withColor(QUIET));
+    }
+
     // A list: full-width rows parted by hairlines, as tall as its rows and no taller.
     public static UIElement table() {
         return new UIElement()
@@ -182,7 +187,10 @@ public final class Rows {
     // The page's own name; whatever is added after it sits at the right end of the line.
     public static UIElement title(Component text) {
         UIElement line = headed(text.copy().withStyle(ChatFormatting.BOLD), TITLE, ACT_SIZE);
-        line.layout(layout -> layout.gapAll(GAP + 2));
+        Label label = (Label) line.getChildren().getFirst();
+        label.layout(layout -> layout.flexShrink(0));
+        label.textStyle(style -> style.adaptiveWidth(true));
+        line.layout(layout -> layout.heightAuto().minHeight(ACT_SIZE).flexWrap(FlexWrap.WRAP).gapAll(GAP + 2));
         return line;
     }
 

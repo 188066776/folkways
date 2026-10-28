@@ -8,7 +8,7 @@ import { clickUnverified, frames } from "../shared/harness/bw-helpers";
 
 export { PAGES, clickTab, discoverPages, type Page } from "../shared/ui/colony-pages";
 
-/** Adds one zone of every volume delegation beside the player, in the colony they act for. */
+/** Adds one zone of every enabled volume delegation beside the player, in the colony they act for. */
 export const ZONE_FIXTURES = defineTask<{ player: string }, { ok: true; zones: Array<{ id: string; type: string }> }>({
   name: "folkways.visual.zone-fixtures",
   side: "server",
@@ -16,6 +16,8 @@ export const ZONE_FIXTURES = defineTask<{ player: string }, { ok: true; zones: A
   source: javaTask({
     imports: [
       "net.minecraft.server.MinecraftServer",
+      "net.minecraft.world.level.block.Blocks",
+      "io.github.izakyl.folkways.plugins.groundwork.GroundworkContent",
       "io.github.izakyl.folkways.front.engine.Enrollments",
       "io.github.izakyl.folkways.front.api.Shape",
       "io.github.izakyl.folkways.front.engine.colony.ZoneDrafts",
@@ -33,9 +35,19 @@ if (player == null) {
 var colony = CurrentColony.of(player).orElseThrow();
 var zones = new ArrayList<Map<String, Object>>();
 for (var type : Enrollments.delegations()) {
-    if (!(type.shape() instanceof Shape.Volume)) continue;
+    if (!(type.shape() instanceof Shape.Volume) || type.disabledReason().isPresent()) {
+        continue;
+    }
     var cell = player.blockPosition().below().offset(zones.size(), 0, 0);
-    var id = ZoneDrafts.zone(player.serverLevel(), colony, type.id(), cell, cell, ColonySettings.empty()).orElseThrow().id();
+    var settings = ColonySettings.empty();
+    if (type.id().equals(GroundworkContent.ZONE)) {
+        // Clearing converts the zone into an order; pending weeding keeps its editor available for capture.
+        player.serverLevel().setBlockAndUpdate(cell.below(), Blocks.DIRT.defaultBlockState());
+        player.serverLevel().setBlockAndUpdate(cell, Blocks.SHORT_GRASS.defaultBlockState());
+        settings = settings.with(GroundworkContent.CLEAR, new ColonySettings.Value.Flag(false))
+            .with(GroundworkContent.WEED, new ColonySettings.Value.Flag(true));
+    }
+    var id = ZoneDrafts.zone(player.serverLevel(), colony, type.id(), cell, cell, settings).orElseThrow().id();
     zones.add(Map.of("id", id.toString(), "type", type.id().toString()));
 }
 return Sync.stamp(Map.of("ok", true, "zones", zones));
@@ -69,7 +81,8 @@ export async function capturePageWindows(server: MinecraftServer, client: Minecr
   const elements = await panelElements(client);
   const openers = elements.filter(element => [element, ...ancestorsOf(elements, element)].every(one => one.displayed !== false && one.visible !== false) && element.width > 0
     && element.className.endsWith(".Button")
-    && /^(folkways\.settings\.open\.|folkways\.board\.(open|edit)\.)/.test(element.id ?? ""));
+    && (/^(folkways\.settings\.open\.|folkways\.board\.(open|edit)\.)/.test(element.id ?? "")
+      || element.id === "folkways.loadouts.assign_residents"));
   for (const opener of openers) {
     await clickElement(client, { id: opener.id! }, { scrollIntoView: true });
     await tick.sprint(server, 5);
@@ -77,8 +90,8 @@ export async function capturePageWindows(server: MinecraftServer, client: Minecr
     const opened = await panelElements(client);
     const windows = opened.filter(element =>
       [element, ...ancestorsOf(opened, element)].every(one => one.displayed !== false && one.visible !== false) && visibleBox(opened, element)
-      // A setting that names one item opens the item search in place of a window; it closes the same way.
-      && (element.id?.startsWith("folkways.window.close.") || element.id === "folkways.selector.close")
+      && (element.id?.startsWith("folkways.window.close.") || element.id === "folkways.selector.close"
+        || element.id === "folkways.choice.cancel")
       && element.id !== "folkways.window.close.colony");
     expect(windows.length, `Opening ${opener.id} did not expose a window; add a scenario for inline editors`).toBeGreaterThan(0);
     const name = `page-${page.name}-open-${opener.id}`;
@@ -92,12 +105,20 @@ export async function capturePageWindows(server: MinecraftServer, client: Minecr
       await tick.sprint(server, 5);
       await frames(client, 4);
     }
+    if (windows.some(window => window.id === "folkways.choice.cancel")) {
+      await expect.poll(async () => {
+        const remaining = await panelElements(client);
+        return remaining.some(element => element.id === "folkways.choice.cancel" && visibleBox(remaining, element));
+      }, { timeout: 8000 }).toBe(false);
+    }
   }
 }
 
 export async function captureZoneEditors(server: MinecraftServer, client: MinecraftClient, run: VisualRun, player: string) {
   const fixtures = await runColonyTask(server, ZONE_FIXTURES, { player });
   run.note("discovered_zone_editors", fixtures.zones);
+  // A full groundwork scan must not consume the fixture before its editor is photographed.
+  await tick.sprint(server, 120);
   for (const zone of fixtures.zones) {
     await runColonyTask(server, OPEN_ZONE, { player, zone: zone.id });
     await tick.sprint(server, 5);

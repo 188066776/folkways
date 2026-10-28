@@ -3,7 +3,8 @@ import { input, reflect, screen, tick, world } from "@izakyl/blockwright-minecra
 import { launchPair, type E2EPair } from "../shared/harness/pair";
 import { foundColonyFast, optInViaBook, waitForGroundedPlayer } from "../shared/colony/colony-founding";
 import { enterSitePanel, openContainerScreen } from "../shared/ui/site-panel";
-import { setMaintainDemandViaUI } from "../shared/colony/membership-optin";
+import { openOrderDraft, setMaintainDemandViaUI } from "../shared/colony/membership-optin";
+import { panelElements, scrollElementIntoView, visibleBox } from "../ldlib2";
 import { CONFIG_PATH, VisualRun } from "../shared/capture/visual-kit";
 import { tracePath } from "../shared/harness/out-paths";
 import { seededOffThreadServer } from "../shared/harness/mod-settings";
@@ -90,6 +91,19 @@ test("resident names and cards, and a chest window that fits every GUI scale", a
     }
     await screen.dismiss(client);
     await setMaintainDemandViaUI(server, client, player, chest, "minecraft:cobblestone", 1);
+    const draft = await openOrderDraft(server, client, chest);
+    const order = await scrollElementIntoView(client, {
+      id: `folkways.board.do.folkways.orders.${draft.row + 1}.0`,
+    });
+    const shown = visibleBox(await panelElements(client), order);
+    expect(shown?.height).toBe(order.height);
+    expect(shown?.width).toBe(order.width);
+    await input.move(client, { x: 0, y: 0 });
+    await frames(client, 8);
+    await run.shot(client, "03-order-buttons-scale-3", {
+      subject: "The order buttons scroll fully into view inside the wooden frame at GUI scale 3",
+      worldState: { chest, scale: 3, order }, hard: true,
+    });
   } catch (error) {
     pair?.failing(error);
     throw error;

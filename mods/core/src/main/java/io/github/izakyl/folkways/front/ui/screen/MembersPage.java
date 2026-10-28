@@ -86,7 +86,8 @@ public final class MembersPage implements Draw {
         TextField field = new TextField();
         field.layout(layout -> layout.flexGrow(1).flexShrink(1).minWidth(0));
         field.bind(DataBindingBuilder.stringC2S(text -> typed = text).build());
-        field.textFieldStyle(style -> style.placeholder(Component.translatable("folkways.charter.admit.hint")));
+        field.textFieldStyle(style -> style.placeholder(
+            Rows.placeholder(Component.translatable("folkways.charter.admit.hint"))));
         Tokens.name(field, "folkways.charter.admit.field");
         Button admit = named("folkways.charter.admit", new Button()
             .setText(Component.translatable("folkways.charter.admit"))

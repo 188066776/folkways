@@ -81,7 +81,8 @@ public final class FolderPicker {
         this.ticked = ticked;
         this.say = say;
         search.layout(layout -> layout.widthPercent(100).flexShrink(0));
-        search.textFieldStyle(style -> style.placeholder(Component.translatable("folkways.picker.search")));
+        search.textFieldStyle(style -> style.placeholder(
+            Rows.placeholder(Component.translatable("folkways.picker.search"))));
         search.setTextResponder(typed -> searched(typed == null ? "" : typed.trim()));
         Tokens.name(search, token + ".search");
         Tokens.name(tree, token + ".tree");

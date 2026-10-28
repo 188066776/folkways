@@ -67,7 +67,8 @@ public final class NamesPage implements Draw {
         TextField field = new TextField();
         field.layout(layout -> layout.flexGrow(1).flexShrink(1).minWidth(0));
         field.bind(DataBindingBuilder.stringC2S(text -> typed = text).build());
-        field.textFieldStyle(style -> style.placeholder(Component.translatable("folkways.pool.names.hint")));
+        field.textFieldStyle(style -> style.placeholder(
+            Rows.placeholder(Component.translatable("folkways.pool.names.hint"))));
         Tokens.name(field, "folkways.pool.names.field");
         Button add = named("folkways.pool.names.add", new Button()
             .setText(Component.translatable("folkways.pool.add"))

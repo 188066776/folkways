@@ -1,6 +1,6 @@
 import { launchPair, type E2EPair } from "../shared/harness/pair";
 import { expect, test } from "@playwright/test";
-import { input, screen, tick, type MinecraftClient, type MinecraftServer } from "@izakyl/blockwright-minecraft";
+import { defineTask, input, javaTask, screen, tick, type MinecraftClient, type MinecraftServer } from "@izakyl/blockwright-minecraft";
 import { clickElement, panelElements } from "../ldlib2";
 import { createColonyViaBook, openColonyPanelViaBook, optInViaBook, waitForGroundedPlayer, type Vec } from "../shared/colony/colony-founding";
 import {
@@ -134,7 +134,28 @@ test("the zone panel on camera", async ({}, testInfo) => {
       hard: true,
     });
 
-    const kinds = offered.filter(id => id.startsWith("folkways.zoneconfig.kind."));
+    const kindRows = (await panelElements(client)).filter(element =>
+      offered.includes(element.id ?? "") && element.id?.startsWith("folkways.zoneconfig.kind."));
+    const dining = kindRows.find(element => element.id === "folkways.zoneconfig.kind.folkways.dining");
+    expect(dining, "dining remains discoverable without a table provider").toBeDefined();
+    expect(dining!.active).toBe(false);
+    expect(await run.hover(client, dining!.id!, 12)).toBeTruthy();
+    const tooltip = await client.run(defineTask<void, { lines: string[]; expected: string }>({
+      name: "folkways.visual.disabled-dining-tooltip", side: "client",
+      source: javaTask({ imports: ["net.minecraft.client.Minecraft", "net.minecraft.network.chat.Component",
+        "com.lowdragmc.lowdraglib2.gui.ui.ModularUI"], body: `
+var ui = ModularUI.of(Minecraft.getInstance().screen);
+return Map.of("lines", ui.getTooltipTexts().stream().map(Component::getString).toList(),
+    "expected", Component.translatable("folkways.dining.requires_tables").getString());
+` }),
+    }));
+    expect(tooltip.lines).toContain(tooltip.expected);
+    run.note("disabled_dining_tooltip", tooltip);
+    await run.shot(client, "dining-disabled-tooltip", {
+      subject: "Dining is disabled with an explanation when no supported table mod is installed",
+      worldState: tooltip, hard: true,
+    });
+    const kinds = kindRows.filter(element => element.active).map(element => element.id!);
     run.note("discovered_zone_types", kinds);
     for (const id of kinds) {
       await clickElement(client, { id });
@@ -198,7 +219,7 @@ test("the zone panel on camera", async ({}, testInfo) => {
     await setBookGesture(server, client, playerName, "point");
     await captureZoneEditors(server, client, run, playerName);
     run.expectTaken(["02-zone-settings-farm", "03-drawing-question",
-      "04-draft-parameters", "05-choice-picker", "path-world", "path-types",
+      "04-draft-parameters", "05-choice-picker", "dining-disabled-tooltip", "path-world", "path-types",
       ...kinds.map(id => `parameters-${id}`), ...paths.map(id => `path-parameters-${id}`)]);
   } catch (error) {
     pair?.failing(error);

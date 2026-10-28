@@ -108,7 +108,8 @@ public final class MetricsPage implements Draw {
             .setOnServerClick(event -> reading = null));
         TextField search = new TextField();
         search.layout(layout -> layout.flexGrow(1).flexShrink(1).minWidth(0));
-        search.textFieldStyle(style -> style.placeholder(Component.translatable("folkways.metrics.search")));
+        search.textFieldStyle(style -> style.placeholder(
+            Rows.placeholder(Component.translatable("folkways.metrics.search"))));
         search.setTextResponder(this::search);
         Tokens.name(search, "folkways.metrics.search");
         empty = Rows.text(Component.translatable("folkways.metrics.empty"));

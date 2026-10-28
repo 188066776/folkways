@@ -1,7 +1,9 @@
 package io.github.izakyl.folkways.rts.client;
 
+import com.lowdragmc.lowdraglib2.gui.texture.GuiTextureGroup;
 import com.lowdragmc.lowdraglib2.gui.texture.SpriteTexture;
 import io.github.izakyl.folkways.front.api.ui.Rows;
+import io.github.izakyl.folkways.front.ui.screen.DeskTextures;
 import io.github.izakyl.folkways.plugins.person.ResidentEntity;
 import io.github.izakyl.folkways.plugins.person.look.ResidentLooks;
 import java.util.ArrayList;
@@ -24,8 +26,7 @@ final class CombatCards {
     private static final int CONTENT_INSET = 14;
     private static final int RED = 0xFF9A3324;
     private static final int GREEN = 0xFF557A46;
-    private static final SpriteTexture PANEL = SpriteTexture.of("folkways:textures/gui/desk/panel.png")
-        .setSprite(0, 0, 24, 24).setBorder(7);
+    private static final GuiTextureGroup PANEL = DeskTextures.combatPanel();
     private static final SpriteTexture BUTTON = button("button");
     private static final SpriteTexture HOVER = button("button_hover");
     private static final SpriteTexture PRESSED = button("button_pressed");
@@ -55,6 +56,10 @@ final class CombatCards {
 
     int top() {
         return Minecraft.getInstance().getWindow().getGuiScaledHeight() - HEIGHT;
+    }
+
+    int visibleTop() {
+        return top() - 3;
     }
 
     void reset() {
@@ -94,7 +99,7 @@ final class CombatCards {
         int top = top();
         hits.clear();
         // LDLib sprites are buffered; finish them before scissoring text or drawing vanilla faces.
-        PANEL.draw(graphics, mouseX, mouseY, 4, top - 3, drawnWidth - 8, HEIGHT - 1, 0);
+        PANEL.draw(graphics, mouseX, mouseY, 4, visibleTop(), drawnWidth - 8, HEIGHT - 1, 0);
         graphics.flush();
         Component fullStatus = points > 0
             ? Component.translatable("folkways.rts.status_with_route", status, points) : status;

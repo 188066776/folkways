@@ -300,7 +300,8 @@ final class OverheadScreen extends Screen {
         for (var renderable : renderables) {
             renderable.render(graphics, mouseX, mouseY, partialTick);
         }
-        if (!overButton(mouseX, mouseY)) {
+        int bottomInset = handler().map(OverheadTools.Handler::bottomInset).orElse(0);
+        if (!overButton(mouseX, mouseY) && mouseY < height - bottomInset) {
             HoverCard.render(graphics, minecraft, mouseX, mouseY);
         }
     }

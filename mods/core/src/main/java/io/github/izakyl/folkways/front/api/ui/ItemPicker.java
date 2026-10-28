@@ -174,7 +174,7 @@ public final class ItemPicker {
         TextField search = new TextField();
         search.layout(layout -> layout.flexGrow(1).flexShrink(1).minWidth(0));
         search.style(style -> style.tooltips(help()));
-        search.textFieldStyle(style -> style.placeholder(Component.translatable(TOKEN + ".search")));
+        search.textFieldStyle(style -> style.placeholder(Rows.placeholder(Component.translatable(TOKEN + ".search"))));
         search.setTextResponder(typed -> {
             query = typed == null ? "" : typed.trim();
             searched();

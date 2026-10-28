@@ -533,3 +533,16 @@ tacz = { target = ["server", "client"] }
 folkways_firefighting = { target = ["server", "client"] }
 createfirefightingadd = { target = ["server", "client"] }
 folkways_capture = { target = ["client"] }
+
+# Review the RTS cards at both physical sizes on a GPU display large enough for the full-size shot.
+[profile.visual-rts.mods]
+folkways_rts = { target = ["server", "client"] }
+
+[profile.visual-rts.neoforge.client]
+game_args = ["--width", "1920", "--height", "1080"]
+options = { guiScale = "2", overrideWidth = "1920", overrideHeight = "1080", tutorialStep = "none", pauseOnLostFocus = "false" }
+
+[profile.visual-rts.neoforge.client.display]
+device = "gpu"
+width = 1920
+height = 1080

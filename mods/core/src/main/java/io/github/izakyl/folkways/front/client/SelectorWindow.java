@@ -6,6 +6,7 @@ import com.lowdragmc.lowdraglib2.gui.ui.UI;
 import com.lowdragmc.lowdraglib2.gui.ui.UIElement;
 import com.lowdragmc.lowdraglib2.gui.ui.style.StylesheetManager;
 import io.github.izakyl.folkways.front.api.ui.ItemPicker;
+import io.github.izakyl.folkways.front.ui.screen.DeskTextures;
 import java.util.List;
 import java.util.function.Consumer;
 import net.minecraft.client.Minecraft;
@@ -28,6 +29,7 @@ public final class SelectorWindow {
         UIElement root = new UIElement()
             .layout(layout -> layout.widthPercent(100).heightPercent(100))
             .addClass("folkways_desk");
+        DeskTextures.installPopups(root);
         ModularUI ui = new ModularUI(UI.of(root,
             List.of(StylesheetManager.INSTANCE.getStylesheetSafe(StylesheetManager.MC),
                 StylesheetManager.INSTANCE.getStylesheetSafe(

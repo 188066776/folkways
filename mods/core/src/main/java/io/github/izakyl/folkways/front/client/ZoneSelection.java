@@ -296,18 +296,23 @@ public final class ZoneSelection {
         Aim seen = Aim.of(player);
         ZoneSnapshot best = null;
         double bestDistance = Double.MAX_VALUE;
+        double bestVolume = Double.MAX_VALUE;
         for (ZoneSnapshot zone : ColonyHighlightState.zones()) {
             // A zone keeps the cells of the ship it lies on, if it does: the ray is met there.
             Aim aim = seen.in(player.level(), zone.min());
             Vec3 eye = aim.from();
             AABB box = AABB.encapsulatingFullBlocks(zone.min(), zone.max());
-            Optional<Vec3> hit = box.clip(eye, aim.at(Aim.range()));
+            Optional<Vec3> hit = box.contains(eye) ? Optional.of(eye) : box.clip(eye, aim.at(Aim.range()));
             if (hit.isEmpty()) {
                 continue;
             }
             double distance = eye.distanceToSqr(hit.get());
-            if (distance < bestDistance) {
+            double volume = box.getXsize() * box.getYsize() * box.getZsize();
+            // Prefer the smallest containing zone, then its UUID, so overlapping zones select consistently.
+            if (distance < bestDistance || distance == bestDistance && (volume < bestVolume
+                    || volume == bestVolume && (best == null || zone.id().compareTo(best.id()) < 0))) {
                 bestDistance = distance;
+                bestVolume = volume;
                 best = zone;
             }
         }

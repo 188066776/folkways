@@ -314,6 +314,7 @@ public final class ColonyShell
             .addChildren(coreNav, navList, preferences);
         ScrollerView nav = Rows.box();
         nav.layout(layout -> layout.width(NAV_WIDTH).flexShrink(0).minHeight(0));
+        nav.style(style -> style.background(DeskTextures.paper(true)));
         nav.addScrollViewChild(groups);
         Tokens.name(nav, "folkways.navigation");
         UIElement pane = new UIElement()

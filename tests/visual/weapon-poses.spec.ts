@@ -44,7 +44,11 @@ test("SBW residents use native two-arm poses during combat and clear them on rel
         writeFileSync(info.outputPath("last-poses.json"), JSON.stringify(rows, null, 2));
         return rows.filter(row => row.held && row.aiming).length;
       }, { timeout: 30_000 }).toBe(3);
-      await expect.poll(async () => await pair!.server.run(DAMAGED, scene!), { timeout: 30_000 }).toBe(true);
+      await expect.poll(async () => {
+        const targets = await pair!.server.run(DAMAGED, scene!);
+        writeFileSync(info.outputPath("last-targets.json"), JSON.stringify(targets, null, 2));
+        return targets.length === 3 && targets.every(target => target.hit);
+      }, { timeout: 30_000 }).toBe(true);
       await tick.freeze(pair.server, true);
       const poses = await pair.client.run(READ_POSES, scene);
       for (const pose of poses) {
@@ -99,6 +103,7 @@ const IMPORTS = [
   "io.github.izakyl.folkways.plugins.combat.weapon.LoadoutProfile",
   "io.github.izakyl.folkways.plugins.combat.weapon.LoadoutRegistry",
   "io.github.izakyl.folkways.plugins.patrol.SentryPosts",
+  "io.github.izakyl.folkways.plugins.patrol.PatrolStaffing",
   "net.neoforged.neoforge.common.NeoForge", "net.neoforged.neoforge.event.tick.EntityTickEvent",
   "net.minecraft.world.entity.monster.Zombie",
 ];
@@ -110,7 +115,7 @@ var level = server.overworld();
 var player = server.getPlayerList().getPlayerByName(Args.of(ctx).string("player"));
 var origin = player.blockPosition().offset(4, 0, 4);
 for (int x = -5; x < 15; x++) {
-    for (int z = -5; z < 15; z++) {
+    for (int z = -5; z < 31; z++) {
         level.setBlockAndUpdate(origin.offset(x, -1, z), Blocks.STONE.defaultBlockState());
         for (int y = 0; y < 5; y++) {
             level.setBlockAndUpdate(origin.offset(x, y, z), Blocks.AIR.defaultBlockState());
@@ -130,7 +135,8 @@ var residents = new ArrayList<Map<String, Object>>();
 String[] weapons = {"ak_47", "m_870", "tacz_m4a1"};
 for (int n = 0; n < weapons.length; n++) {
     var body = PersonBody.RESIDENT.get().create(level);
-    body.moveTo(origin.getX() + .5, origin.getY(), origin.getZ() + n * 4 + .5);
+    // Separate firing lanes so each sentry's nearest target stays in its own lane.
+    body.moveTo(origin.getX() + .5, origin.getY(), origin.getZ() + n * 12 + .5);
     body.setLookId(ResourceKey.create(ResidentLooks.REGISTRY, ResourceLocation.parse("folkways:test_skin_fallback")));
     level.addFreshEntity(body);
     colony.hold(PersonContent.ID, Held.Entity.of(body)).orElseThrow();
@@ -186,26 +192,33 @@ for (var entity : level.getAllEntities()) {
         }
     }
     var zone = colony.hold(SentryPosts.ZONE, new Held.Area(cells)).orElseThrow();
-    if (SentryPosts.of(colony).assign(level, zone.id(), body.id()).refused()) {
-        throw new IllegalStateException("sentry refused");
+    var staffing = PatrolStaffing.of(colony);
+    staffing.configure(level, zone.id(), Set.of(profile.id()), 1);
+    if (!staffing.members(zone.id()).equals(List.of(body.id()))) {
+        throw new IllegalStateException("the resident with the zone's unique allowed profile must be staffed");
     }
     var target = EntityType.ZOMBIE.create(level);
     target.setNoAi(true);
     target.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.CARVED_PUMPKIN));
     target.getAttribute(Attributes.MAX_HEALTH).setBaseValue(1024);
+    target.getAttribute(Attributes.KNOCKBACK_RESISTANCE).setBaseValue(1);
     target.setHealth(target.getMaxHealth());
     target.moveTo(body.getX() + 8, body.getY(), body.getZ());
     target.addTag("folkways_weapon_poses");
+    target.getPersistentData().putUUID("folkways_pose_owner", body.id());
     level.addFreshEntity(target);
 }
 return true;
 ` }) });
 
-const DAMAGED = defineTask<Scene, boolean>({
+const DAMAGED = defineTask<Scene, Array<{ uuid: string; owner: string; hit: boolean; x: number; y: number; z: number }>>({
   name: "folkways.weapon-poses.damaged", side: "server", source: javaTask({ imports: IMPORTS, body: `
 var level = ((MinecraftServer) ctx.server()).overworld();
 var targets = level.getEntities(EntityType.ZOMBIE, e -> e.getTags().contains("folkways_weapon_poses"));
-return targets.size() == 3 && targets.stream().allMatch(e -> e.getPersistentData().getBoolean("folkways_pose_hit"));
+return targets.stream().map(e -> Map.of("uuid", e.getUUID().toString(),
+    "owner", e.getPersistentData().getUUID("folkways_pose_owner").toString(),
+    "hit", e.getPersistentData().getBoolean("folkways_pose_hit"),
+    "x", e.getX(), "y", e.getY(), "z", e.getZ())).toList();
 ` }) });
 
 const RELEASE = defineTask<Scene, boolean>({

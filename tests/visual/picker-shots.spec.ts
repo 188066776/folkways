@@ -1,17 +1,26 @@
 import { test } from "@playwright/test";
-import { input, screen, tick, type MinecraftClient, type MinecraftServer } from "@izakyl/blockwright-minecraft";
+import { defineTask, javaTask, input, screen, tick, type MinecraftClient, type MinecraftServer } from "@izakyl/blockwright-minecraft";
 import { foundColonyFast, foundingBox, openColonyPanelViaBook, setBookGesture, waitForGroundedPlayer, type Vec } from "../shared/colony/colony-founding";
 import { createMarkedZone, holdZoneAndOpen } from "../shared/ui/zone-tools";
 import { aimAndWorldLeftClick } from "../shared/ui/world-ui";
 import { CONFIG_PATH, VisualRun } from "../shared/capture/visual-kit";
+import { QUIET_TOASTS } from "../shared/capture/ponder";
 import { clickTab } from "./ui-catalog";
-import { clickElement } from "../ldlib2";
+import { clickElement, hoverElement } from "../ldlib2";
 import { launchPair, type E2EPair } from "../shared/harness/pair";
 import { tracePath } from "../shared/harness/out-paths";
 import { seededOffThreadServer } from "../shared/harness/mod-settings";
 import { BUDGET } from "../shared/harness/budgets";
 import { frames, safeAction, softly, tryCommand, waitForElement } from "../shared/harness/bw-helpers";
 import { newRunId } from "../shared/harness/run-id";
+
+const OPEN_SELECTOR = defineTask<void, boolean>({
+  name: "folkways.visual.picker.open-independent", side: "client",
+  source: javaTask({
+    imports: ["io.github.izakyl.folkways.front.client.SelectorWindow"],
+    body: `SelectorWindow.open(null, stack -> {}); return true;`,
+  }),
+});
 
 // A tour of the item picker in its states, for a reader to look at.
 test("item picker states", async ({}, testInfo) => {
@@ -45,6 +54,16 @@ test("item picker states", async ({}, testInfo) => {
       await safeAction(() => input.key(client, { text }));
       await settle();
     };
+
+    await client.run(QUIET_TOASTS);
+    await client.run(OPEN_SELECTOR);
+    await settle();
+    await input.move(client, { x: 0, y: 0 });
+    await shot("00-independent-placeholder", "Independent selector: the empty search field displays its parchment-colored placeholder");
+    await hoverElement(client, { id: "folkways.selector.search" }, { hoverFrames: 15 });
+    await shot("00-independent-search-help", "Independent selector: search syntax help tooltip over the empty search field");
+    await click("folkways.selector.close");
+    await settle();
 
     // The colony's tool list: rules held, every item filed by mod and tag.
     await openColonyPanelViaBook(server, client, player, founding.standBlock);
@@ -112,6 +131,9 @@ test("item picker states", async ({}, testInfo) => {
     await click("folkways.selector.confirm");
     await settle(5);
     await shot("11-zone-after", "Confirmed: the zone's button wears cobblestone");
+    run.expectTaken(["00-independent-placeholder", "00-independent-search-help", "01-many-tree", "02-mod-open",
+      "03-tag-open", "04-item-ticked", "05-folder-ticked", "06-search", "07-search-ruled", "08-zone-settings",
+      "09-one-tree", "10-one-picked", "11-zone-after"]);
   } catch (error) {
     pair?.failing(error);
     throw error;

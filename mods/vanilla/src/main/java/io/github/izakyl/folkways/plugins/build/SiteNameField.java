@@ -20,7 +20,7 @@ public final class SiteNameField {
     public SiteNameField() {
         field.layout(layout -> layout.flexGrow(1).flexShrink(1).minWidth(0));
         field.setTextRegexValidator(".{0," + SiteNames.MOST + "}");
-        field.textFieldStyle(style -> style.placeholder(Component.translatable(TOKEN + ".unnamed")));
+        field.textFieldStyle(style -> style.placeholder(Rows.placeholder(Component.translatable(TOKEN + ".unnamed"))));
         Tokens.name(field, TOKEN);
         row = Rows.row().addChildren(Rows.name(Component.translatable(TOKEN)), field);
     }

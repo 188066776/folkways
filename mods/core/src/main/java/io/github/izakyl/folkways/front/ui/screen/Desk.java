@@ -29,6 +29,7 @@ public final class Desk {
 
     public Desk() {
         root.addClass("folkways_desk");
+        DeskTextures.installPopups(root);
         root.addEventListener(UIEvents.LAYOUT_CHANGED, event -> clamp());
         if (LDLib2.isRemote()) {
             shown = this;

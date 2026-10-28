@@ -296,7 +296,13 @@ export function isFullyRevealed(elements: Element[], target: Element): boolean {
     return true;
   }
   const box = intersect(elementBox(target), clip);
-  return box.width >= Math.min(target.width, clip.width) - CLIP_EPSILON
-    && box.height >= Math.min(target.height, clip.height) - CLIP_EPSILON;
+  // A partly clipped ancestor still has room for its full content size after scrolling.
+  let width = target.width;
+  let height = target.height;
+  for (const ancestor of clippingAncestors(elements, target)) {
+    width = Math.min(width, ancestor.contentWidth);
+    height = Math.min(height, ancestor.contentHeight);
+  }
+  return box.width >= width - CLIP_EPSILON && box.height >= height - CLIP_EPSILON;
 }
 

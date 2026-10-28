@@ -352,7 +352,7 @@ final class CombatController implements OverheadTools.Handler {
 
     @Override
     public int bottomInset() {
-        return CombatCards.HEIGHT;
+        return Minecraft.getInstance().getWindow().getGuiScaledHeight() - cards.visibleTop();
     }
 
     @Override
@@ -370,7 +370,7 @@ final class CombatController implements OverheadTools.Handler {
                 }
             }
         }
-        if (y >= cards.top()) {
+        if (y >= cards.visibleTop()) {
             if (button == InputConstants.MOUSE_BUTTON_LEFT) {
                 CombatCards.Action action = cards.clicked(x, y);
                 if (!ready()) {
@@ -520,7 +520,7 @@ final class CombatController implements OverheadTools.Handler {
             return false;
         }
         endX = x;
-        endY = y;
+        endY = Math.min(y, cards.visibleTop() - 1);
         return true;
     }
 
@@ -531,7 +531,7 @@ final class CombatController implements OverheadTools.Handler {
         }
         dragging = false;
         endX = x;
-        endY = y;
+        endY = Math.min(y, cards.visibleTop() - 1);
         if (!ready()) {
             return true;
         }
@@ -544,7 +544,7 @@ final class CombatController implements OverheadTools.Handler {
             UUID pointed = null;
             for (ResidentEntity resident : residents.values()) {
                 Optional<CombatProjection.Rect> bounds = projection.bounds(resident.getBoundingBox());
-                if (bounds.isPresent() && bounds.get().contains(x, y)) {
+                if (bounds.isPresent() && bounds.get().contains(endX, endY)) {
                     double distance = resident.distanceToSqr(minecraft.gameRenderer.getMainCamera().getPosition());
                     if (distance < nearest) {
                         nearest = distance;
@@ -742,7 +742,7 @@ final class CombatController implements OverheadTools.Handler {
     }
 
     private int nearWaypoint(double x, double y, List<WorldPos> points, boolean open) {
-        if (!open || points.size() < 2) {
+        if (y >= cards.visibleTop() || !open || points.size() < 2) {
             return -1;
         }
         Minecraft minecraft = Minecraft.getInstance();

@@ -5,7 +5,7 @@ import com.mojang.datafixers.util.Either;
 import io.github.izakyl.folkways.FolkwaysMod;
 import io.github.izakyl.folkways.front.api.ui.Cues;
 import io.github.izakyl.folkways.front.api.ui.Rows;
-import io.github.izakyl.folkways.front.ui.screen.Desk;
+import io.github.izakyl.folkways.front.ui.screen.DeskTextures;
 import java.util.List;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
@@ -54,7 +54,7 @@ public final class LedgerTooltips {
 
     @SubscribeEvent
     public static void onGather(RenderTooltipEvent.GatherComponents event) {
-        if (!event.getItemStack().isEmpty() || !Desk.on(ModularUI.of(Minecraft.getInstance().screen))) {
+        if (!event.getItemStack().isEmpty() || !DeskTextures.isDesk(ModularUI.of(Minecraft.getInstance().screen))) {
             return;
         }
         event.getTooltipElements().replaceAll(element -> element.map(

@@ -237,6 +237,20 @@ test("a row inside a viewport that is itself scrolled away is clipped by the out
   assert.match(clipReason(elements, row)!, /clipped by outer: viewport y 0\.\.100/);
 });
 
+test("a clipped row does not reduce the capacity needed to reveal its button", () => {
+  for (const axis of ["x", "y"] as const) {
+    for (const offset of [172, 160]) {
+      const position = axis === "x" ? { x: offset } : { y: offset };
+      const elements = tree(
+        { depth: 0, id: "port", width: 180, height: 180, overflowVisible: false },
+        { depth: 1, id: "row", ...position, width: 20, height: 20, overflowVisible: false },
+        { depth: 2, id: "button", ...position, width: 20, height: 20 },
+      );
+      assert.equal(isFullyRevealed(elements, elements[2]!), offset === 160, `${axis}: ${offset}`);
+    }
+  }
+});
+
 test("elementsAtPoint answers with what is painted at a pixel, clipping included", () => {
   const elements = tree(
     { depth: 0, id: "port", x: 0, y: 0, width: 100, height: 100, overflowVisible: false },

@@ -96,6 +96,7 @@ public final class Window implements Pane {
             .left(byDefault.x()).top(byDefault.y())
             .width(byDefault.width()).height(byDefault.height()));
         frame.addClass("panel_bg");
+        frame.style(style -> style.background(DeskTextures.panel()));
         frame.setOverflowVisible(false);
         frame.addChildren(titleBar, body);
         frame.setDisplay(false);
@@ -302,7 +303,8 @@ public final class Window implements Pane {
 
     // A control in the caption's place, at the left of the title bar; the rest of the bar still drags the window.
     public Window lead(UIElement control) {
-        UIElement rest = new UIElement().layout(layout -> layout.flexGrow(1).flexShrink(1).minWidth(0));
+        UIElement rest = new UIElement().layout(layout -> layout.heightPercent(100)
+            .flexGrow(1).flexShrink(1).minWidth(0));
         titleBar.clearAllChildren();
         titleBar.addChildren(control, rest, closeButton);
         return this;

@@ -148,7 +148,7 @@ public final class LoadoutPage implements Draw {
         Tokens.name(profiles, KEY + "profiles");
         name = new TextField();
         name.setText("");
-        name.textFieldStyle(style -> style.placeholder(text("name")));
+        name.textFieldStyle(style -> style.placeholder(Rows.placeholder(text("name"))));
         name.layout(layout -> layout.widthPercent(100).minWidth(0));
         Tokens.name(name, KEY + "name");
         UIElement actions = Rows.strip();

@@ -106,6 +106,9 @@ for (const locale of ["en_us", "zh_cn"]) test(`living UI: beds, mood, dining, el
     const founding = await foundColonyFast(server, client, who, { origin, residentCount: 1 });
     await screen.dismiss(client);
     const command = (value: string) => world.command(server, value);
+    // The bedroom walls can cover the random arrival position while the room survey advances.
+    await command(`tp @e[type=folkways:resident,limit=1] ${x - 10} ${y} ${z + 3}`);
+    await command(`data merge entity @e[type=folkways:resident,limit=1] {NoAI:1b}`);
     await command(`time set noon`);
     await command(`weather clear`);
     await server.run(defineTask<void, boolean>({
@@ -210,6 +213,19 @@ player.getAbilities().flying = true; player.onUpdateAbilities(); return true;
       await shot(`0${4 + index * 2}-${box.kind}-card`, `${box.kind} area world card and outlined furniture${box.kind === "dining" ? ": table and chair counts" : ""}`);
       if (box.kind === "dining") {
         await holdZoneAndOpen(server, client, who, box);
+        expect(await client.run(defineTask<void, boolean>({
+          name: "folkways.visual.dining-selection-from-inside", side: "client",
+          source: javaTask({ imports: ["net.minecraft.client.Minecraft", "net.minecraft.world.entity.player.Player",
+            "net.minecraft.world.phys.AABB", "io.github.izakyl.folkways.front.client.ZoneSelection",
+            "io.github.izakyl.folkways.front.engine.net.ZoneSnapshot"], body: `
+var player = Minecraft.getInstance().player;
+var aimed = ZoneSelection.class.getDeclaredMethod("aimedZone", Player.class);
+aimed.setAccessible(true);
+var selected = (Optional<ZoneSnapshot>) aimed.invoke(null, player);
+return selected.filter(zone -> zone.delegation().toString().equals("folkways:dining")
+    && AABB.encapsulatingFullBlocks(zone.min(), zone.max()).contains(player.getEyePosition())).isPresent();
+` }),
+        })), "right-click must select dining while the player's eyes are inside its box").toBe(true);
         for (const key of ["food", "drink", "servings"]) await waitForElement(client, { id: `folkways.zoneconfig.value.${key}` });
       } else {
         await player.aim(server, box.min, { player: who, face: "up", from: { x: box.min.x + 0.5, y, z: box.min.z + 0.5 } });

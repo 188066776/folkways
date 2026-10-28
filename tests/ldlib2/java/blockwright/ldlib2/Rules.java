@@ -178,15 +178,28 @@ public final class Rules {
         }
         Box shown = box(node).intersect(clip);
         node.complete();
-        return shown.width() >= Math.min(node.width, clip.width()) - CLIP_EPSILON
-            && shown.height() >= Math.min(node.height, clip.height()) - CLIP_EPSILON;
+        // A partly clipped ancestor still has room for its full content size after scrolling.
+        double width = node.width;
+        double height = node.height;
+        for (Node ancestor : clippingAncestors(tree, node)) {
+            width = Math.min(width, ancestor.contentWidth);
+            height = Math.min(height, ancestor.contentHeight);
+        }
+        return shown.width() >= width - CLIP_EPSILON && shown.height() >= height - CLIP_EPSILON;
     }
 
     /** Revealed on y, however it stands on x: a mouse wheel cannot help any further. */
     public static boolean revealedVertically(Tree tree, Node node) {
         Box clip = clipBox(tree, node);
         node.complete();
-        return clip == null || box(node).intersect(clip).height() >= Math.min(node.height, clip.height()) - CLIP_EPSILON;
+        if (clip == null) {
+            return true;
+        }
+        double height = node.height;
+        for (Node ancestor : clippingAncestors(tree, node)) {
+            height = Math.min(height, ancestor.contentHeight);
+        }
+        return box(node).intersect(clip).height() >= height - CLIP_EPSILON;
     }
 
     /** Its id, or its class inside the nearest id'd ancestor, or its class and index. */

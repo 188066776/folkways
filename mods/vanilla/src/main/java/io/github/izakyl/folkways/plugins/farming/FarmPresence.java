@@ -188,7 +188,7 @@ final class FarmPresence implements Facing {
                 .min(Comparator.comparingLong(BlockPos::asLong)).orElseThrow()));
             if (sight == null) {
                 rows.add(new Board.Row(new ItemStack(Items.WHEAT_SEEDS), nameOf(chosen),
-                    Component.translatable("folkways.page.farm.idle"), acts));
+                    Component.translatable("folkways.page.farm.idle"), acts).wide());
                 continue;
             }
             Field.Tally tally = sight.tally();
@@ -196,7 +196,7 @@ final class FarmPresence implements Facing {
             rows.add(new Board.Row(new ItemStack(sight.crop().seed()), nameOf(chosen),
                 Component.translatable("folkways.page.farm.head", zone.cells().size(), tally.ripe(), tally.till(),
                     tally.sow()),
-                acts));
+                acts).wide());
         }
         return Optional.of(new Board(
             List.of(new Board.Figure("folkways.page.farm.plots", Component.literal(Integer.toString(plots))),
