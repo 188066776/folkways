@@ -396,6 +396,7 @@ def earthworks(site, line, profile, width, shoulder = 1, headroom = 4, canopy = 
                 # Under a hill only the way itself is dug, as high as its headroom, and the hill is left standing.
                 if k <= shoulder:
                     columns[(x, z)] = (k, top)
+                if k == 0:
                     for y in range(top + 1, top + headroom + 1):
                         dig.append((x, y, z))
                 continue
@@ -403,17 +404,18 @@ def earthworks(site, line, profile, width, shoulder = 1, headroom = 4, canopy = 
             low = top - 1 if k == 0 else top - slope
             high = top if k == 0 else top + slope
             for y in range(ground + 1, low + 1):
-                fill.append((x, y, z))
-            cleared = high
-            if ground > high:
-                cleared = ground + 2
+                if k == 0 or site.matches(point(x, y, z), "air|replaceable"):
+                    fill.append((x, y, z))
             if k <= shoulder:
                 columns[(x, z)] = (k, top)
-                cleared = max(cleared, top + headroom)
+            if k == 0:
+                cleared = max(high, top + headroom)
+                if ground > high:
+                    cleared = max(cleared, ground + 2)
                 for y in range(cleared + 1, top + canopy + 1):
                     crown.append((x, y, z))
-            for y in range(high + 1, cleared + 1):
-                dig.append((x, y, z))
+                for y in range(high + 1, cleared + 1):
+                    dig.append((x, y, z))
     return {"columns": columns, "fill": fill, "dig": dig, "crown": crown}
 
 def band(site, reach, low, high, of):

@@ -312,6 +312,49 @@ public final class DraftRoadGameTests {
     }
 
     @GameTest(template = TEMPLATE, timeoutTicks = 200)
+    public static void buildingsBesideTheRoadAreNotTouched(GameTestHelper helper) {
+        Pattern pattern = road();
+        DraftKit.Ground ground = new DraftKit.Ground(64);
+        Set<BlockPos> building = new HashSet<>();
+        for (int x : new int[] {6, 12}) {
+            for (int z : new int[] {3, 5}) {
+                for (int y = 65; y <= 70; y++) {
+                    BlockPos at = new BlockPos(x, y, z);
+                    building.add(at);
+                    ground.place(x, y, z, (y == 70 ? Blocks.STONE_BRICKS : Blocks.OAK_PLANKS).defaultBlockState());
+                }
+            }
+        }
+        Drawn.Ready drawn = ready(helper, draw(pattern, ground, settings(pattern),
+            new BlockPos(0, 64, 0), new BlockPos(24, 64, 0)));
+        Map<BlockPos, String> roles = placed(drawn);
+        for (BlockPos at : building) {
+            helper.assertFalse(roles.containsKey(at), "the building is left at " + at.toShortString()
+                + ", got " + roles.get(at));
+        }
+        helper.assertTrue(roles.containsValue("lamp"), "unobstructed lights are still placed");
+        helper.succeed();
+    }
+
+    @GameTest(template = TEMPLATE, timeoutTicks = 200)
+    public static void clearingStaysWithinTheRoadAndFillLeavesLogs(GameTestHelper helper) {
+        Pattern pattern = road();
+        DraftKit.Ground ground = new DraftKit.Ground(64);
+        ground.place(12, 65, 0, Blocks.OAK_PLANKS.defaultBlockState());
+        ground.place(12, 70, 3, Blocks.OAK_LEAVES.defaultBlockState());
+        ground.column(12, 5, 60);
+        ground.place(12, 62, 5, Blocks.OAK_LOG.defaultBlockState());
+        Drawn.Ready drawn = ready(helper, draw(pattern, ground, settings(pattern).flag("lights", false),
+            new BlockPos(0, 64, 0), new BlockPos(24, 64, 0)));
+        Map<BlockPos, String> roles = placed(drawn);
+        helper.assertValueEqual(roles.get(new BlockPos(12, 65, 0)), "dig", "the road clears its own headroom");
+        helper.assertFalse(roles.containsKey(new BlockPos(12, 70, 3)), "leaves beside the road remain");
+        helper.assertFalse(roles.containsKey(new BlockPos(12, 62, 5)), "fill does not replace a log");
+        helper.assertValueEqual(roles.get(new BlockPos(12, 61, 5)), "fill", "empty ground beside the road is filled");
+        helper.succeed();
+    }
+
+    @GameTest(template = TEMPLATE, timeoutTicks = 200)
     public static void streetlightsCanBeLeftOut(GameTestHelper helper) {
         Pattern pattern = road();
         Drawn.Ready drawn = ready(helper, draw(pattern, new DraftKit.Ground(64), settings(pattern).flag("lights", false),

@@ -78,7 +78,7 @@ POST = 3
 def blend(listed):
     return mix({listed[i]: len(listed) - i for i in range(len(listed))})
 
-def lights(line, columns, width, spacing):
+def lights(site, line, columns, width, spacing):
     posts = []
     lamps = []
     half = width / 2.0
@@ -93,6 +93,9 @@ def lights(line, columns, width, spacing):
             found = columns.get(spot)
             if found != None and found[0] == 1:
                 top = found[1]
+                if not all([site.matches(point(spot[0], top + y, spot[1]), "air|replaceable")
+                            for y in range(1, POST + 2)]):
+                    continue
                 posts.extend([(spot[0], top + y, spot[1]) for y in range(1, POST + 1)])
                 lamps.append((spot[0], top + POST + 1, spot[1]))
                 break
@@ -125,7 +128,7 @@ def draw(site):
     parts.append(part("surface", inner, blend(site.items("surface")), fit = "layered"))
     parts.append(part("edge", subtract(whole, inner), site.items("edge"), fit = "layered"))
     if site.flag("lights"):
-        posts, lamps = lights(line, works["columns"], width, site.count("spacing"))
+        posts, lamps = lights(site, line, works["columns"], width, site.count("spacing"))
         if posts:
             parts.append(part("post", cells(posts), site.items("post")))
             parts.append(part("lamp", cells(lamps), site.items("lamp")))
