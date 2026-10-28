@@ -26,6 +26,7 @@ import io.github.izakyl.folkways.plugins.FolkwaysVanillaConfig;
 import io.github.izakyl.folkways.plugins.FolkwaysVanillaMod;
 import io.github.izakyl.folkways.plugins.combat.DefenseControl;
 import io.github.izakyl.folkways.plugins.combat.SpottedTargets;
+import io.github.izakyl.folkways.plugins.combat.weapon.InventoryObservations;
 import io.github.izakyl.folkways.plugins.combat.weapon.LoadoutRegistry;
 import io.github.izakyl.folkways.plugins.combat.weapon.PatrolSupplies;
 import io.github.izakyl.folkways.plugins.person.PersonBody;
@@ -201,6 +202,9 @@ public final class PatrolGameTests {
             patrol.watched(scout.id(), level.getGameTime());
             patrol.watched(peer.id(), level.getGameTime());
             ItemStack sword = new ItemStack(Items.IRON_SWORD);
+            scout.pack().insert(sword.copy());
+            peer.pack().insert(sword.copy());
+            InventoryObservations.publish(colony, level);
             helper.assertTrue(patrol.urges(worker(peer, sword), colony.view(level)).isEmpty(),
                 "ordinary patroller cannot independently discover a threat thirty-four blocks away");
             helper.assertFalse(patrol.urges(worker(scout, sword), colony.view(level)).isEmpty(),
@@ -359,8 +363,8 @@ public final class PatrolGameTests {
                 "a resident who has not stood watch is not on patrol");
 
             patrol.watched(guard.id(), level.getGameTime());
-            helper.assertTrue(patrol.urges(worker(guard, ItemStack.EMPTY), colony.view(level)).isEmpty(),
-                "a resident on patrol with no weapon does not go for a monster");
+            helper.assertFalse(patrol.urges(worker(guard, ItemStack.EMPTY), colony.view(level)).isEmpty(),
+                "an unprofiled patroller attempts combat without probing inventory");
             List<Urge> urges = patrol.urges(worker(guard, sword), colony.view(level));
             helper.assertTrue(
                 urges.size() == 1
@@ -434,8 +438,8 @@ public final class PatrolGameTests {
             "an off-duty resident does not seek out an unengaged monster");
         guard.mob().hurt(level.damageSources().mobAttack(zombie), 1);
         helper.assertTrue(
-            patrol.urges(worker(guard, ItemStack.EMPTY), colony.view(level)).isEmpty(),
-            "an unarmed resident leaves defence to fear");
+            !patrol.urges(worker(guard, ItemStack.EMPTY), colony.view(level)).isEmpty(),
+            "an unprofiled resident attempts defence without probing inventory");
         guard.pack().insert(sword);
         Worker actual = worker(guard, guard.pack());
         List<Urge> defence = patrol.urges(actual, colony.view(level));

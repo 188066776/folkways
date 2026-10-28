@@ -1,93 +1,61 @@
 package io.github.izakyl.folkways.front.engine.colony;
 
 import io.github.izakyl.folkways.core.api.colony.Colony;
-import io.github.izakyl.folkways.core.api.colony.ColonyView;
-import io.github.izakyl.folkways.core.api.resident.body.Body;
-import io.github.izakyl.folkways.core.api.terms.Containers;
+import io.github.izakyl.folkways.core.api.inventory.InventorySnapshot;
+import io.github.izakyl.folkways.core.api.inventory.ColonyInventory;
+import io.github.izakyl.folkways.core.api.inventory.SlotSnapshot;
 import io.github.izakyl.folkways.core.api.terms.Goods;
 import io.github.izakyl.folkways.core.api.terms.ItemSpec;
-import io.github.izakyl.folkways.core.api.terms.WorldPos;
-import io.github.izakyl.folkways.core.api.terms.WorldSpaces;
-import io.github.izakyl.folkways.front.api.Facing;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import net.minecraft.core.BlockPos;
+import java.util.WeakHashMap;
+import java.util.stream.Stream;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.Container;
-import net.minecraft.world.item.ItemStack;
 
 public final class ColonyStocks {
+
+    private static final Map<ColonyInventory, Counted> TOTALS = new WeakHashMap<>();
+
+    private record Counted(InventorySnapshot.Version version, Map<ItemSpec, Long> goods) {
+    }
 
     private ColonyStocks() {
     }
 
     public static Map<ItemSpec, Integer> tally(Colony colony, MinecraftServer server) {
         Map<ItemSpec, Integer> held = new LinkedHashMap<>();
-        for (ColonyView view : colony.views(server)) {
-            for (ItemStack stack : stacks(colony, view)) {
-                held.merge(Goods.specOf(stack), stack.getCount(), Integer::sum);
-            }
-        }
-        for (Body resident : Residents.of(colony, server)) {
-            Container pack = resident.pack();
-            for (int slot = 0; slot < pack.getContainerSize(); slot++) {
-                ItemStack stack = pack.getItem(slot);
-                if (!stack.isEmpty()) {
-                    held.merge(Goods.specOf(stack), stack.getCount(), Integer::sum);
-                }
-            }
-        }
+        counted(colony).forEach((spec, count) -> held.put(spec, count.intValue()));
         return held;
     }
 
     public static long available(Colony colony, MinecraftServer server, ItemSpec spec) {
-        long total = 0;
-        for (ColonyView view : colony.views(server)) {
-            for (ItemStack stack : stacks(colony, view)) {
-                if (Goods.matches(stack, spec)) {
-                    total += stack.getCount();
-                }
-            }
-        }
-        for (Body resident : Residents.of(colony, server)) {
-            total += Goods.countIn(resident.pack(), spec);
-        }
-        return total;
+        return counted(colony).entrySet().stream().filter(entry -> Goods.matches(Goods.display(entry.getKey()), spec))
+            .mapToLong(Map.Entry::getValue).sum();
     }
 
-    private static List<ItemStack> stacks(Colony colony, ColonyView view) {
-        ServerLevel level = view.level();
-        List<ItemStack> found = new ArrayList<>();
-        Set<BlockPos> counted = new LinkedHashSet<>();
-        for (WorldPos store : colony.storesIn(view.dimension())) {
-            WorldSpaces.storage(level, store).filter(level::isLoaded).ifPresent(cell -> {
-                BlockPos anchor = Containers.anchor(level, cell);
-                if (!counted.contains(anchor)) {
-                    Containers.at(level, cell).ifPresent(container -> {
-                        counted.add(anchor);
-                        for (int slot = 0; slot < container.getContainerSize(); slot++) {
-                            ItemStack stack = container.getItem(slot);
-                            if (!stack.isEmpty()) {
-                                found.add(stack);
-                            }
-                        }
-                    });
-                }
-            });
+    private static synchronized Map<ItemSpec, Long> counted(Colony colony) {
+        ColonyInventory inventory = colony.inventory();
+        InventorySnapshot snapshot = inventory.snapshot();
+        if (!snapshot.coverage().complete()) {
+            inventory.ensureObserved();
         }
-        for (Facing facing : Facing.all(colony)) {
-            facing.stock(view).forEach((at, stacks) -> WorldSpaces.storage(level, at).filter(level::isLoaded)
-                .ifPresent(cell -> {
-                    if (counted.add(Containers.anchor(level, cell))) {
-                        stacks.stream().filter(stack -> !stack.isEmpty()).forEach(found::add);
-                    }
-                }));
+        var version = snapshot.version();
+        Counted previous = TOTALS.get(inventory);
+        if (previous != null && previous.version().epoch().equals(version.epoch())
+            && previous.version().contents() == version.contents()
+            && previous.version().topology() == version.topology()) {
+            return previous.goods();
         }
-        return found;
+        Map<ItemSpec, Long> held = new LinkedHashMap<>();
+        slots(snapshot).map(SlotSnapshot::stackCopy).filter(stack -> !stack.isEmpty())
+            .forEach(stack -> held.merge(Goods.specOf(stack), (long) stack.getCount(), Long::sum));
+        Map<ItemSpec, Long> goods = Map.copyOf(held);
+        TOTALS.put(inventory, new Counted(version, goods));
+        return goods;
+    }
+
+    private static Stream<SlotSnapshot> slots(InventorySnapshot snapshot) {
+        return Stream.concat(snapshot.stores().values().stream().flatMap(store -> store.slots().stream()),
+            snapshot.residents().values().stream().flatMap(resident -> resident.pack().stream()));
     }
 }

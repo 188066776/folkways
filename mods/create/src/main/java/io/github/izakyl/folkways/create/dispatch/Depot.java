@@ -1,6 +1,8 @@
 package io.github.izakyl.folkways.create.dispatch;
 
 import io.github.izakyl.folkways.core.api.terms.Goods;
+import io.github.izakyl.folkways.core.api.inventory.InventoryFeedback;
+import io.github.izakyl.folkways.core.api.inventory.InventorySnapshot;
 import io.github.izakyl.folkways.core.api.terms.ItemSpec;
 import io.github.izakyl.folkways.core.api.terms.RefusalKind;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
@@ -38,7 +40,12 @@ record Depot(UUID key, WorkSite site, Tally tally, List<Dock> docks, List<Shelf>
     }
 
     // A container of the network, and what it held when last read.
-    record Shelf(WorldPos at, Stances stances, Map<ItemSpec, Long> held) {
+    record Shelf(WorldPos at, Stances stances, Map<ItemSpec, Long> held,
+                 InventoryFeedback feedback, Optional<InventorySnapshot.Version> version) {
+
+        Shelf(WorldPos at, Stances stances, Map<ItemSpec, Long> held) {
+            this(at, stances, held, InventoryFeedback.NONE, Optional.empty());
+        }
 
         Shelf {
             held = Map.copyOf(held);
@@ -95,7 +102,8 @@ record Depot(UUID key, WorkSite site, Tally tally, List<Dock> docks, List<Shelf>
             for (Shelf shelf : shelves) {
                 long count = Math.min(granted, shelf.heldOf(spec));
                 if (count > 0) {
-                    TakeNode node = new TakeNode(shelf.at(), shelf.stances(), spec, count, reachTicks, network());
+                    TakeNode node = new TakeNode(shelf.at(), shelf.stances(), spec, count, reachTicks, network(),
+                        shelf.feedback(), shelf.version());
                     found.add(Refinement.Change.of(Grown.of(node)).holding(new Taken(node)));
                 }
             }

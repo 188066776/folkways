@@ -249,6 +249,7 @@ public final class WarfareGameTests {
         Scene f = new Scene(helper, false);
         f.body.pack().insert(new ItemStack(ModItems.M_870.get()));
         f.body.pack().insert(new ItemStack(ModItems.SHOTGUN_AMMO.get(), 3));
+        f.profile(ItemSpec.of(ModItems.M_870.get()), ItemSpec.of(ModItems.SHOTGUN_AMMO.get()), 3, 3);
         Zombie target = f.enemy(10, 10);
         List<Long> times = new ArrayList<>();
         final WeaponSession[] current = {null};
@@ -448,7 +449,7 @@ public final class WarfareGameTests {
             () ->
                 helper.assertValueEqual(
                     f.shots.get(), 2, "the accepted loadout fires only the two"
-                    + " physical rounds"))
+                    + " physical rounds " + f.debug()))
             .thenSucceed();
     }
 
@@ -757,8 +758,8 @@ public final class WarfareGameTests {
         var profile = profiles.create("Forward observer");
         profiles.add(profile.id(), LoadoutProfile.Entry.supply(ItemSpec.of(Items.SPYGLASS), 1, 1));
         profiles.assign(List.of(scout.id()), Optional.of(profile.id()));
-        helper.assertFalse(SpottedTargets.of(f.colony).report(scout, target),
-            "a profile without its real spyglass cannot report this distant target");
+        helper.assertTrue(SpottedTargets.of(f.colony).report(scout, target),
+            "assigned optics allow the distant report before physical delivery");
         scout.pack().insert(new ItemStack(Items.SPYGLASS));
         helper.assertTrue(SpottedTargets.of(f.colony).observe(scout).contains(target),
             "the physical spyglass lets the forward observer discover the target forty blocks away");

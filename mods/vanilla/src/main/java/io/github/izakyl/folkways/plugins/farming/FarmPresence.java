@@ -80,6 +80,10 @@ final class FarmPresence implements Facing {
     }
 
     void refresh(MinecraftServer server) {
+        if (!colony.inventory().snapshot().coverage().complete()) {
+            colony.inventory().ensureObserved();
+            return;
+        }
         long stamp = ++sweeps;
         FrontView front = Fronts.of(colony);
         Set<Plot> chosen = new LinkedHashSet<>();

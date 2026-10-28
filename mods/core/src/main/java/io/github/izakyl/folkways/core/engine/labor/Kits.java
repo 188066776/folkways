@@ -1,11 +1,14 @@
 package io.github.izakyl.folkways.core.engine.labor;
 
 import io.github.izakyl.folkways.core.api.colony.Colony;
+import io.github.izakyl.folkways.core.api.inventory.InventorySnapshot;
+import io.github.izakyl.folkways.core.api.inventory.SlotSnapshot;
 import io.github.izakyl.folkways.core.api.resident.body.Body;
 import io.github.izakyl.folkways.core.api.resident.body.Equipment;
-import io.github.izakyl.folkways.core.api.vocation.KitRules;
+import io.github.izakyl.folkways.core.api.terms.Goods;
 import io.github.izakyl.folkways.core.api.terms.ItemSpec;
 import io.github.izakyl.folkways.core.api.terms.WorldSpaces;
+import io.github.izakyl.folkways.core.api.vocation.KitRules;
 import io.github.izakyl.folkways.core.api.work.Delivery;
 import io.github.izakyl.folkways.core.api.work.Grown;
 import io.github.izakyl.folkways.core.api.work.Stances;
@@ -21,6 +24,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
+import net.minecraft.world.item.ItemStack;
 
 final class Kits {
 
@@ -36,12 +40,18 @@ final class Kits {
             left(body.id(), to);
             return;
         }
+        InventorySnapshot.Resident observed = colony.inventory().snapshot().residents().get(body.id());
+        if (observed == null || observed.state() != InventorySnapshot.State.OBSERVED) {
+            colony.inventory().ensureObservedResident(body.id());
+            return;
+        }
+        List<ItemStack> contents = observed.pack().stream().map(SlotSnapshot::stackCopy).toList();
         Set<UUID> mine = asked.computeIfAbsent(body.id(), ignored -> new LinkedHashSet<>());
         WorkSite at = new WorkSite.AtEntity(body.id(), WorldSpaces.at(body.mob()));
         Set<UUID> still = new HashSet<>();
         for (ItemSpec tool : Kit.of(colony, body).specs()) {
             UUID id = idOf(body.id(), tool);
-            boolean carried = Kit.carried(body, tool) > 0;
+            boolean carried = contents.stream().anyMatch(stack -> Goods.matches(stack, tool));
             if (!carried) {
                 still.add(id);
             }
@@ -56,7 +66,9 @@ final class Kits {
             }
             UUID id = UUID.nameUUIDFromBytes((body.id() + "|clothing|" + clothing.slot().getName()
                 + "|" + clothing.items().describe()).getBytes(StandardCharsets.UTF_8));
-            if (Equipment.carried(body, clothing) <= 0) {
+            ItemStack worn = observed == null ? body.mob().getItemBySlot(clothing.slot())
+                : observed.equipment().get(clothing.slot()).stackCopy();
+            if (!clothing.matches(worn) && contents.stream().noneMatch(clothing::matches)) {
                 still.add(id);
                 if (mine.add(id)) {
                     to.accept(new Message.Submitted(Haul.DOMAIN, Grown.of(Delivery.to(id, Haul.DOMAIN, at,

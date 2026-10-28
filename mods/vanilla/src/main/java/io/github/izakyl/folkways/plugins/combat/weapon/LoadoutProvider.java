@@ -23,6 +23,7 @@ public interface LoadoutProvider {
             .orElse(true);
     }
 
+
     /** Component-bearing variants offered by the profile weapon picker. */
     default List<ItemStack> weaponChoices() {
         return List.of();

@@ -131,6 +131,7 @@ public final class GrowingGameTests {
                 return Effects.NONE;
             }
         };
+        var inventory = new io.github.izakyl.folkways.core.engine.inventory.InventoryIndex(UUID.randomUUID());
         Colony colony = (Colony) Proxy.newProxyInstance(GrowingGameTests.class.getClassLoader(),
             new Class<?>[] {Colony.class}, (proxy, method, args) -> switch (method.getName()) {
                 case "kept" -> saved.get();
@@ -138,6 +139,7 @@ public final class GrowingGameTests {
                     saved.set(((CompoundTag) args[1]).copy());
                     yield null;
                 }
+                case "inventory" -> inventory;
                 case "holdingAt" -> Optional.empty();
                 case "views" -> List.of(view);
                 case "view" -> view;

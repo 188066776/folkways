@@ -277,6 +277,7 @@ public final class CookeryRegistrationGameTests {
             helper.assertTrue(Enrollments.of(CompostContent.ID).pages().stream()
                 .anyMatch(entry -> entry.id().equals(CompostContent.PAGE.id())), "compost has its own independent page");
             rig.level.setBlockAndUpdate(cell, Blocks.COMPOSTER.defaultBlockState().setValue(ComposterBlock.LEVEL, 8));
+            InventoryObservations.publish(rig.colony, rig.level);
             helper.assertValueEqual(compost.goals(rig.colony.view(rig.level)).size(), 1, "the real marked point exposes its native ready-compost task");
             rig.mark(cell); compost.refresh(rig.level.getServer());
             helper.assertTrue(rig.colony.holdingAt(at).isEmpty() && compost.goals(rig.colony.view(rig.level)).isEmpty(), "a second real book click unmarks and withdraws the native point");
@@ -437,6 +438,7 @@ public final class CookeryRegistrationGameTests {
         }
 
         Node plan(String product, int count) {
+            InventoryObservations.publish(colony, level);
             presence.refresh(level.getServer());
             ItemStack stack = new ItemStack(BuiltInRegistries.ITEM.get(ResourceLocation.fromNamespaceAndPath("kaleidoscope_cookery", product)));
             Refinement.Change change = options(product, count).stream()
@@ -455,6 +457,7 @@ public final class CookeryRegistrationGameTests {
         void firstPiece(Node work) {
             // A published kitchen task can first borrow its shared tool. Continue to the actual food load.
             for (int step = 0; step < 8; step++) {
+                InventoryObservations.publish(colony, level);
                 Node piece = work;
                 Workload.Within within = work.spec().workload() instanceof Workload.Within nested ? nested : null;
                 if (within != null) {
@@ -466,7 +469,8 @@ public final class CookeryRegistrationGameTests {
                 piece.spec().stances().cells().stream().findFirst().ifPresent(at ->
                     body.moveTo(at.cell().getX() + 0.5, at.cell().getY(), at.cell().getZ() + 0.5));
                 Outcome outcome = Commit.run(level, piece, worker);
-                helper.assertTrue(outcome instanceof Outcome.Done, "the physical production piece commits: " + outcome);
+                helper.assertTrue(outcome instanceof Outcome.Done, "the physical production piece " +
+                    piece.getClass().getName() + " commits: " + outcome);
                 ((Outcome.Done) outcome).made().forEach(this::put);
                 piece.released(level, worker, Ending.DONE);
                 piece.ended(level, Ending.DONE);

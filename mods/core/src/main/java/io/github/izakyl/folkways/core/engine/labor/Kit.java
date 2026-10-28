@@ -96,8 +96,12 @@ final class Kit {
     }
 
     List<ItemStack> inPack(Body body) {
+        return inPack(body.pack().contents());
+    }
+
+    List<ItemStack> inPack(List<ItemStack> contents) {
         List<ItemStack> found = new ArrayList<>();
-        for (ItemStack stack : body.pack().contents()) {
+        for (ItemStack stack : contents) {
             if (holds(stack)) {
                 found.add(stack.copy());
             }
@@ -108,8 +112,12 @@ final class Kit {
     // What the pack holds beyond its tools and what the resident keeps there: the goods the plan may put away or
     // spend. What is kept is counted off the first stacks that match it.
     List<ItemStack> cargoIn(Body body) {
+        return cargoIn(body.pack().contents());
+    }
+
+    List<ItemStack> cargoIn(List<ItemStack> contents) {
         List<ItemStack> found = new ArrayList<>();
-        split(body, (stack, keeps) -> {
+        split(contents, (stack, keeps) -> {
             if (keeps < stack.getCount()) {
                 found.add(stack.copyWithCount(stack.getCount() - keeps));
             }
@@ -120,8 +128,12 @@ final class Kit {
     // The pack cells what the resident keeps takes up. They never empty, so the plan counts the pack without them:
     // a pack it thinks will empty when nothing in it can be put away leaves work waiting on room that never comes.
     int keptCells(Body body) {
+        return keptCells(body.pack().contents());
+    }
+
+    int keptCells(List<ItemStack> contents) {
         int[] cells = {0};
-        split(body, (stack, keeps) -> {
+        split(contents, (stack, keeps) -> {
             if (keeps > 0) {
                 cells[0]++;
             }
@@ -130,9 +142,9 @@ final class Kit {
     }
 
     // Each stack beyond the tools, with how much of it is kept.
-    private void split(Body body, ObjIntConsumer<ItemStack> each) {
+    private void split(List<ItemStack> contents, ObjIntConsumer<ItemStack> each) {
         long[] left = kept.stream().mapToLong(Amount::count).toArray();
-        for (ItemStack stack : body.pack().contents()) {
+        for (ItemStack stack : contents) {
             if (holds(stack)) {
                 continue;
             }

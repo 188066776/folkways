@@ -28,17 +28,16 @@ final class LoanClothing {
     }
 
     static Optional<EquipmentSlot> slot(TaskTools service, Mob body, KitchenTools.Lease lease) {
-        return slot(service.tool(lease).orElse(ItemStack.EMPTY), body, lease);
+        return slot(service.tool(lease).orElse(ItemStack.EMPTY), body, lease)
+            .filter(slot -> service.stock.owns(lease, body.getItemBySlot(slot)));
     }
 
     private static Optional<EquipmentSlot> slot(ItemStack expected, Mob body, KitchenTools.Lease lease) {
         CompoundTag worn = body.getPersistentData().getCompound(KEY);
         for (EquipmentSlot slot : EquipmentSlot.values()) {
-            if (!worn.hasUUID(slot.getName()) || !worn.getUUID(slot.getName()).equals(lease.id())) continue;
+            if (!worn.hasUUID(slot.getName()) || !worn.getUUID(slot.getName()).equals(lease.id())) { continue; }
             ItemStack actual = body.getItemBySlot(slot);
-            if (same(actual, expected)) return Optional.of(slot);
-            // A player replaced the item in this slot. Its stale ownership never claims the replacement.
-            unmark(body, slot);
+            if (same(actual, expected)) { return Optional.of(slot); }
         }
         return Optional.empty();
     }
@@ -55,53 +54,83 @@ final class LoanClothing {
         // Preflight the whole set before changing any slot. Reservation already covers every missing piece.
         for (var entry : clothes.entrySet()) {
             KitchenTools.Lease lease = entry.getValue();
-            if (slot(service, who.body(), lease).filter(entry.getKey()::equals).isPresent()) continue;
+            if (slot(service, who.body(), lease).filter(entry.getKey()::equals).isPresent()) { continue; }
             if (!who.body().getItemBySlot(entry.getKey()).isEmpty()
-                    || service.carriedSlot(who.pack(), lease, service.tool(lease).orElse(ItemStack.EMPTY)) < 0) return false;
+                    || service.carriedSlot(who.pack(), lease, service.tool(lease).orElse(ItemStack.EMPTY)) < 0) {
+                service.stock.staleResident(lease.resident());
+                return false;
+            }
         }
         CompoundTag worn = who.body().getPersistentData().getCompound(KEY);
         CompoundTag items = who.body().getPersistentData().getCompound(ITEMS);
         for (var entry : clothes.entrySet()) {
             KitchenTools.Lease lease = entry.getValue();
-            if (slot(service, who.body(), lease).filter(entry.getKey()::equals).isPresent()) continue;
+            if (slot(service, who.body(), lease).filter(entry.getKey()::equals).isPresent()) { continue; }
             int source = service.carriedSlot(who.pack(), lease, service.tool(lease).orElse(ItemStack.EMPTY));
             ItemStack actual = who.pack().removeItem(source, 1);
             who.body().setItemSlot(entry.getKey(), actual);
             who.body().setDropChance(entry.getKey(), 2.0F);
             worn.putUUID(entry.getKey().getName(), lease.id());
             items.put(entry.getKey().getName(), actual.save(who.body().registryAccess()));
+            service.stock.equipped(lease, entry.getKey(), actual);
         }
-        if (!worn.isEmpty()) who.body().getPersistentData().put(KEY, worn);
-        if (!items.isEmpty()) who.body().getPersistentData().put(ITEMS, items);
+        if (!worn.isEmpty()) { who.body().getPersistentData().put(KEY, worn); }
+        if (!items.isEmpty()) { who.body().getPersistentData().put(ITEMS, items); }
         who.pack().setChanged();
+        service.colony.inventoryFeedback().changedResident(who.resident().id());
+        service.persist();
         return true;
     }
 
     static boolean recover(TaskTools service, KitchenTools.Lease lease, Body body) {
+        if (service.stock.waitingForResident(lease)) { return false; }
+        if (service.stock.reloaded(lease)) {
+            slot(service.tool(lease).orElse(ItemStack.EMPTY), body.mob(), lease)
+                .filter(found -> service.stock.equipmentSlot(lease).filter(found::equals).isPresent())
+                .ifPresent(found -> service.stock.equipped(lease, found, body.mob().getItemBySlot(found)));
+        }
         var slot = slot(service, body.mob(), lease);
-        if (slot.isEmpty()) return true;
+        if (slot.isEmpty()) {
+            for (EquipmentSlot equipment : EquipmentSlot.values()) {
+                CompoundTag marked = body.mob().getPersistentData().getCompound(KEY);
+                if (marked.hasUUID(equipment.getName()) && marked.getUUID(equipment.getName()).equals(lease.id())) {
+                    unmark(body.mob(), equipment);
+                    service.stock.staleResident(lease.resident());
+                }
+            }
+            return true;
+        }
         ItemStack actual = body.mob().getItemBySlot(slot.get());
         // Do not drop or destroy clothing when cargo is temporarily full. Recovery waits for real room.
-        if (!ToolStock.room(body.pack(), actual)) return false;
+        if (!ToolStock.room(body.pack(), actual)) { return false; }
+        var before = ToolAction.snapshot(body.pack());
         body.mob().setItemSlot(slot.get(), ItemStack.EMPTY);
         ItemStack left = Containers.insert(body.pack(), actual);
         if (!left.isEmpty()) {
-            body.mob().setItemSlot(slot.get(), left);
+            ToolAction.restore(body.pack(), before);
+            body.mob().setItemSlot(slot.get(), actual);
+            return false;
+        }
+        int inserted = ToolAction.insertedSlot(body.pack(), before, actual);
+        if (inserted < 0) {
+            ToolAction.restore(body.pack(), before);
+            body.mob().setItemSlot(slot.get(), actual);
             return false;
         }
         unmark(body.mob(), slot.get());
-        service.record(lease, actual);
+        service.record(lease, body.pack().getItem(inserted), body.pack());
+        service.colony.inventoryFeedback().changedResident(lease.resident());
         return true;
     }
 
     static void release(TaskTools service, KitchenTools.Lease lease, Body body) {
-        if (recover(service, lease, body)) return;
+        if (recover(service, lease, body)) { return; }
         // A razed colony cannot wait for cargo space: preserve its exact loan before the body leaves.
         slot(service, body.mob(), lease).ifPresent(slot -> release(body, slot));
     }
 
     static void joined(EntityJoinLevelEvent event) {
-        if (!(event.getLevel() instanceof ServerLevel level)) return;
+        if (!(event.getLevel() instanceof ServerLevel level)) { return; }
         Bodies.of(event.getEntity()).filter(body -> body.colonyId()
             .filter(id -> Colonies.razed(level.getServer(), id)).isPresent()).ifPresent(body -> {
                 // The colony's service may have closed while this body was unloaded. Its saved identity
@@ -109,10 +138,11 @@ final class LoanClothing {
                 CompoundTag worn = body.mob().getPersistentData().getCompound(KEY);
                 CompoundTag items = body.mob().getPersistentData().getCompound(ITEMS);
                 for (EquipmentSlot slot : EquipmentSlot.values()) {
-                    if (!worn.hasUUID(slot.getName())) continue;
-                    ItemStack expected = ItemStack.parseOptional(body.mob().registryAccess(), items.getCompound(slot.getName()));
-                    if (same(body.mob().getItemBySlot(slot), expected)) release(body, slot);
-                    else unmark(body.mob(), slot);
+                    if (!worn.hasUUID(slot.getName())) { continue; }
+                    ItemStack expected = ItemStack.parseOptional(body.mob().registryAccess(),
+                        items.getCompound(slot.getName()));
+                    if (same(body.mob().getItemBySlot(slot), expected)) { release(body, slot); }
+                    else { unmark(body.mob(), slot); }
                 }
             });
     }
@@ -122,13 +152,15 @@ final class LoanClothing {
         body.mob().setItemSlot(slot, ItemStack.EMPTY);
         unmark(body.mob(), slot);
         ItemStack left = Containers.insert(body.pack(), actual);
-        if (!left.isEmpty()) body.mob().spawnAtLocation(left);
+        if (!left.isEmpty()) { body.mob().spawnAtLocation(left); }
     }
 
-    private static boolean same(ItemStack actual, ItemStack expected) {
+    static boolean same(ItemStack actual, ItemStack expected) {
         ItemStack compared = actual.copy();
         // Armor's native durability can change between actions. Other components identify the loan.
-        if (expected.isDamageableItem() && compared.isDamageableItem()) compared.setDamageValue(expected.getDamageValue());
+        if (expected.isDamageableItem() && compared.isDamageableItem()) {
+            compared.setDamageValue(expected.getDamageValue());
+        }
         return !expected.isEmpty() && ItemStack.isSameItemSameComponents(compared, expected);
     }
 
@@ -136,8 +168,8 @@ final class LoanClothing {
         for (String key : java.util.List.of(KEY, ITEMS)) {
             CompoundTag held = body.getPersistentData().getCompound(key);
             held.remove(slot.getName());
-            if (held.isEmpty()) body.getPersistentData().remove(key);
-            else body.getPersistentData().put(key, held);
+            if (held.isEmpty()) { body.getPersistentData().remove(key); }
+            else { body.getPersistentData().put(key, held); }
         }
     }
 }

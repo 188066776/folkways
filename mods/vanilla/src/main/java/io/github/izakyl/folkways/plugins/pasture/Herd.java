@@ -21,6 +21,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.TreeSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
@@ -68,12 +69,17 @@ final class Herd {
     private record Seen(WorldPos at, Pen pen, Enclosure enclosure, Stances footings) {
     }
 
+    private record Dropped(WorldPos at, Pen pen, Enclosure enclosure, Optional<Stances> footings) {
+    }
+
     private final Runnable changed;
 
     private final PastDay made;
 
     private final Map<UUID, Long> milked = new LinkedHashMap<>();
     private final Map<UUID, Seen> seen = new LinkedHashMap<>();
+    private final Set<UUID> gleanOrder = new TreeSet<>();
+    private final Map<UUID, Dropped> dropsSeen = new LinkedHashMap<>();
 
     private final Set<UUID> claimed = new LinkedHashSet<>();
     private final Map<UUID, Enclosure> surveyed = new LinkedHashMap<>();
@@ -151,6 +157,8 @@ final class Herd {
     void settle(long now) {
         enclosures = Map.copyOf(surveyed);
         seen.keySet().retainAll(claimed);
+        gleanOrder.retainAll(claimed);
+        dropsSeen.keySet().retainAll(claimed);
         boolean expired = false;
         for (Iterator<Map.Entry<UUID, Long>> records = milked.entrySet().iterator();
              records.hasNext(); ) {
@@ -237,12 +245,22 @@ final class Herd {
         List<ItemEntity> lying = level.getEntitiesOfClass(ItemEntity.class, pen.reach(level),
             drop -> drop.isAlive() && !drop.isRemoved() && drop.getItem().is(produce)
                 && pen.holds(drop));
-        lying.sort(Comparator.comparing(ItemEntity::getUUID));
+        Map<UUID, ItemEntity> drops = new LinkedHashMap<>();
+        lying.forEach(drop -> drops.put(drop.getUUID(), drop));
+        gleanOrder.addAll(drops.keySet());
         List<Quarry> found = new ArrayList<>();
-        for (ItemEntity drop : lying) {
-            if (claimed.add(drop.getUUID()) && project(level, pen, enclosure, drop)) {
-                found.add(quarry(level, drop));
+        for (UUID id : gleanOrder) {
+            ItemEntity drop = drops.get(id);
+            if (drop == null || !claimed.add(id)) {
+                continue;
             }
+            WorldPos at = WorldSpaces.at(drop);
+            Dropped held = dropsSeen.get(id);
+            if (held == null || !held.at().equals(at) || !held.pen().equals(pen) || held.enclosure() != enclosure) {
+                held = new Dropped(at, pen, enclosure, pen.workplaces(level, drop, enclosure));
+                dropsSeen.put(id, held);
+            }
+            held.footings().ifPresent(where -> found.add(new Quarry(id, new WorkSite.AtEntity(id, at), where)));
         }
         return List.copyOf(found);
     }

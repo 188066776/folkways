@@ -14,6 +14,7 @@ import io.github.izakyl.folkways.core.api.work.Tools;
 import io.github.izakyl.folkways.core.api.work.Worker;
 import io.github.izakyl.folkways.effect.Effects;
 import io.github.izakyl.folkways.plugins.combat.weapon.LoadoutProfiles;
+import io.github.izakyl.folkways.plugins.combat.weapon.RtsInventoryObservations;
 import io.github.izakyl.folkways.plugins.combat.weapon.LoadoutRegistry;
 import io.github.izakyl.folkways.plugins.combat.weapon.PatrolSupplies;
 import io.github.izakyl.folkways.plugins.person.PersonBody;
@@ -87,7 +88,9 @@ public final class RtsPatrolGameTests {
                     helper.setBlock(new BlockPos(x, 0, z), Blocks.STONE);
                 }
             }
-            Worker armed = worker(guard, new ItemStack(Items.IRON_SWORD));
+            guard.pack().insert(new ItemStack(Items.IRON_SWORD));
+            RtsInventoryObservations.publish(colony, level);
+            Worker armed = worker(guard, guard.pack());
             helper.assertTrue(
                 patrol.urges(armed, colony.view(level)).isEmpty(),
                 "an old on-duty ward cannot restart proactive hunting while the squad waits for"
@@ -131,7 +134,9 @@ public final class RtsPatrolGameTests {
                 java.util.Set.of(LoadoutProfiles.of(colony).assigned(guard.id()).orElseThrow().id()), 1);
             var order = ResidentCommands.of(colony).guard(guard,
                 WorldPos.of(level, helper.absolutePos(new BlockPos(5, 1, 5))), new Vec3(1, 0, 0));
-            Worker armed = worker(guard, new ItemStack(Items.IRON_SWORD));
+            guard.pack().insert(new ItemStack(Items.IRON_SWORD));
+            RtsInventoryObservations.publish(colony, level);
+            Worker armed = worker(guard, guard.pack());
             helper.assertTrue(posts.urges(armed, colony.view(level)).isEmpty(), "direct control suspends post duty");
             helper.assertFalse(colony.service(PatrolContent.ID, PatrolPresence.class).orElseThrow()
                 .urges(armed, colony.view(level)).isEmpty(),

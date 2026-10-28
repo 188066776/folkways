@@ -4,6 +4,7 @@ import com.mikoalopex.createfirefightingadd.CreateFireFightingAdd;
 import com.mikoalopex.createfirefightingadd.content.equipment.extinguisher.FireExtinguisherItem;
 import com.mikoalopex.createfirefightingadd.content.fluids.nozzle.FireExtinguisherSprayEffects;
 import io.github.izakyl.folkways.core.api.colony.Colony;
+import io.github.izakyl.folkways.core.api.resident.body.Bodies;
 import io.github.izakyl.folkways.core.api.terms.Reach;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
 import io.github.izakyl.folkways.core.api.work.Outcome;
@@ -19,6 +20,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
@@ -29,7 +31,21 @@ import net.minecraft.world.level.material.Fluids;
 import net.minecraft.world.phys.Vec3;
 
 final class ExtinguisherAdapter implements SuppressionMethod {
+    private final Function<UUID, Optional<ItemStack>> unbound;
+    private final Map<UUID, FireStock> stocks = new LinkedHashMap<>();
     private final Map<UUID, Set<WorldPos>> sources = new LinkedHashMap<>();
+
+    ExtinguisherAdapter() {
+        this(id -> Optional.empty());
+    }
+
+    ExtinguisherAdapter(Function<UUID, Optional<ItemStack>> unbound) {
+        this.unbound = unbound;
+    }
+
+    void bind(Colony colony, FireStock stock) {
+        stocks.put(colony.id(), stock);
+    }
 
     @Override
     public void inspect(Colony colony, ZoneView zone, ServerLevel level, BlockPos pos, BlockState state) {
@@ -57,6 +73,7 @@ final class ExtinguisherAdapter implements SuppressionMethod {
 
     void forget(UUID colony) {
         sources.remove(colony);
+        stocks.remove(colony);
     }
 
     static ItemStack find(Container pack) {
@@ -69,14 +86,23 @@ final class ExtinguisherAdapter implements SuppressionMethod {
         return ItemStack.EMPTY;
     }
 
+    private Optional<ItemStack> observed(Worker who) {
+        Optional<UUID> colony = Bodies.of(who.body()).flatMap(body -> body.colonyId());
+        FireStock stock = colony.map(stocks::get).orElse(null);
+        return stock == null ? unbound.apply(who.resident().id()) : stock.resident(who.resident().id());
+    }
+
     @Override
     public boolean available(Worker who) {
-        var fluid = FireExtinguisherItem.getFluid(find(who.pack()));
+        var fluid = FireExtinguisherItem.getFluid(observed(who).orElse(ItemStack.EMPTY));
         return fluid.is(Fluids.WATER) && !fluid.isEmpty();
     }
 
     @Override
     public DamageControlRefusal openingRefusal(Worker who) {
+        if (observed(who).isEmpty()) {
+            return DamageControlRefusal.BUSY;
+        }
         return available(who) ? DamageControlRefusal.NO_REACH : DamageControlRefusal.NO_WATER;
     }
 
@@ -115,6 +141,8 @@ final class ExtinguisherAdapter implements SuppressionMethod {
         ItemStack stack = find(who.pack());
         var water = FireExtinguisherItem.getFluid(stack);
         if (stack.isEmpty() || !water.is(Fluids.WATER) || water.isEmpty()) {
+            Bodies.of(who.body()).flatMap(body -> body.colonyId()).map(stocks::get)
+                .ifPresent(stock -> stock.staleResident(who.resident().id()));
             return Optional.empty();
         }
         return Optional.of(new SuppressionSession() {
@@ -125,6 +153,8 @@ final class ExtinguisherAdapter implements SuppressionMethod {
             public Outcome suppress(ServerLevel world, BlockPos at) {
                 performed = false;
                 if (closed || !who.body().isAlive() || who.body().isRemoved() || find(who.pack()) != stack) {
+                    Bodies.of(who.body()).flatMap(body -> body.colonyId()).map(stocks::get)
+                        .ifPresent(stock -> stock.staleResident(who.resident().id()));
                     return Outcome.failed(DamageControlRefusal.NO_WATER);
                 }
                 Vec3 origin = who.body().getEyePosition();

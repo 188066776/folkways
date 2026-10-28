@@ -1,5 +1,6 @@
 package io.github.izakyl.folkways.plugins.person.living;
 
+import io.github.izakyl.folkways.core.api.inventory.InventorySnapshot;
 import io.github.izakyl.folkways.core.api.terms.Containers;
 import io.github.izakyl.folkways.core.api.terms.ItemDrops;
 import io.github.izakyl.folkways.core.api.work.Node;
@@ -30,9 +31,15 @@ final class EatAction implements Node {
 
     private final LivingPresence works;
     private final NodeSpec spec;
+    private final InventorySnapshot.Version observed;
 
     EatAction(ServerLevel level, LivingPresence works, UUID eater, BlockPos at) {
+        this(level, works, eater, at, null);
+    }
+
+    EatAction(ServerLevel level, LivingPresence works, UUID eater, BlockPos at, InventorySnapshot.Version observed) {
         this.works = works;
+        this.observed = observed;
         this.spec = NodeSpec.of(UUID.randomUUID(), LivingContent.ID,
                 WorkSite.on(level, eater, at), Stances.WHEREVER, Workload.Once.of(CHEW_TICKS))
             .effort(WorkEffort.NONE)
@@ -56,6 +63,7 @@ final class EatAction implements Node {
             }
             return consume(level, who, works, pack, slot);
         }
+        if (observed != null) { works.staleMeal(who.resident().id(), observed); }
         return Outcome.failed(LivingRefusal.NOTHING_TO_EAT);
     }
 

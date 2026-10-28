@@ -924,6 +924,7 @@ public final class BuildPlanningGameTests {
 
     private static Colony colony(GameTestHelper helper, Asked asked) {
         ColonyView view = view(helper.getLevel());
+        var inventory = new io.github.izakyl.folkways.core.engine.inventory.InventoryIndex(UUID.randomUUID());
         return (Colony) Proxy.newProxyInstance(BuildPlanningGameTests.class.getClassLoader(),
             new Class<?>[] {Colony.class}, (proxy, method, args) -> switch (method.getName()) {
                 case "kept" -> asked.saved.get();
@@ -939,6 +940,7 @@ public final class BuildPlanningGameTests {
                     asked.withdrawn.add((UUID) args[1]);
                     yield null;
                 }
+                case "inventory" -> inventory;
                 case "holdingAt" -> Optional.empty();
                 case "views" -> List.of(view);
                 case "view" -> view;

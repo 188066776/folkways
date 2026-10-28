@@ -8,7 +8,9 @@ import io.github.izakyl.folkways.core.api.resident.body.WorkPriorities;
 import io.github.izakyl.folkways.core.api.vocation.Vocations;
 import io.github.izakyl.folkways.core.engine.colony.WorkDefaults;
 import io.github.izakyl.folkways.front.api.Facing;
+import io.github.izakyl.folkways.front.api.Endorsement;
 import io.github.izakyl.folkways.front.api.panel.Board;
+import io.github.izakyl.folkways.front.engine.colony.Endorsements;
 import io.github.izakyl.folkways.plugins.person.look.LookPool;
 import io.github.izakyl.folkways.plugins.person.look.ResidentLooks;
 import io.github.izakyl.folkways.plugins.person.name.ColonyNames;
@@ -20,6 +22,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
@@ -34,6 +37,7 @@ final class PersonPresence implements Facing {
     // When the settlers are counted within each period, spread against every other cron; see Cadence.
     private final Cadence.Cron cron;
     private boolean swept;
+    private Endorsement.Called pendingAdmission;
 
     PersonPresence(Colony colony) {
         this.colony = colony;
@@ -42,10 +46,25 @@ final class PersonPresence implements Facing {
     }
 
     public void tick(MinecraftServer server) {
+        if (pendingAdmission != null) {
+            colony.inventory().ensureObserved();
+            if (colony.inventory().snapshot().coverage().complete()) {
+                Endorsement.Called retry = pendingAdmission;
+                pendingAdmission = null;
+                var result = Endorsements.called(retry.view().level(), colony, retry.by(), retry.kind());
+                if (retry.by() instanceof ServerPlayer player) {
+                    result.refusal().ifPresent(why -> player.displayClientMessage(why.component(), true));
+                }
+            }
+        }
         if (!swept || cron.due(server)) {
             swept = true;
             refresh(server);
         }
+    }
+
+    void retry(Endorsement.Called called) {
+        pendingAdmission = called;
     }
 
     private void refresh(MinecraftServer server) {

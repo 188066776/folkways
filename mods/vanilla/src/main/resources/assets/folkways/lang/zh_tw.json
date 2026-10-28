@@ -45,6 +45,7 @@
   "folkways.loadouts.summary": "%s · 已分配 %s 人 · 尚缺 %s 套 · 未載入 %s 人",
   "folkways.loadouts.missing": "已分配居民尚缺 %s 件 · 倉庫不足 %s 件",
   "folkways.loadouts.unloaded": "未載入：裝備情況未知",
+  "folkways.loadouts.inventory_pending": "庫存觀察待完成",
   "folkways.loadouts.unavailable": "舊裝備擴充不可用：%s。識別碼與選項已保留。",
   "folkways.loadouts.manage": "在聚落書的「配裝」頁管理分配。",
   "folkways.loadouts.no_profile": "未分配配裝的居民",

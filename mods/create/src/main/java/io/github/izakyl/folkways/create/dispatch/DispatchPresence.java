@@ -2,6 +2,9 @@ package io.github.izakyl.folkways.create.dispatch;
 
 import io.github.izakyl.folkways.core.api.colony.Closing;
 import io.github.izakyl.folkways.core.api.colony.Colony;
+import io.github.izakyl.folkways.core.api.inventory.InventoryProviders;
+import io.github.izakyl.folkways.core.api.inventory.InventorySnapshot;
+import io.github.izakyl.folkways.core.api.inventory.SlotSnapshot;
 import io.github.izakyl.folkways.core.api.colony.ColonyView;
 import io.github.izakyl.folkways.core.api.colony.Held;
 import io.github.izakyl.folkways.core.api.colony.Holding;
@@ -10,6 +13,8 @@ import io.github.izakyl.folkways.base.persist.Reader;
 import io.github.izakyl.folkways.base.persist.Writer;
 import io.github.izakyl.folkways.core.api.resident.Resident;
 import io.github.izakyl.folkways.core.api.terms.Reach;
+import io.github.izakyl.folkways.core.api.terms.Stand;
+import io.github.izakyl.folkways.core.api.terms.Stash;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
 import io.github.izakyl.folkways.core.api.work.Grown;
 import io.github.izakyl.folkways.core.api.work.Workshop;
@@ -82,6 +87,16 @@ public final class DispatchPresence implements Facing {
 
     private final Set<ResourceKey<Level>> withholding = new LinkedHashSet<>();
 
+    private Map<ResourceKey<Level>, List<InventoryProviders.Endpoint>> endpoints = Map.of();
+    private Map<ResourceKey<Level>, Set<UUID>> incompleteNetworks = Map.of();
+    private long inventoryRevision;
+    private Map<WorldPos, List<PackageNetwork.Parcel>> parcels;
+    private InventorySnapshot inventory;
+    private InventorySnapshot inventoryReadSnapshot;
+    private Map<WorldPos, InventorySnapshot.Store> observations = Map.of();
+    private Map<WorldPos, InventorySnapshot.Version> inventoryRead = Map.of();
+    private boolean networksChanged;
+
     private volatile NetworkSnapshot seen = NetworkSnapshot.empty();
 
     // A chain net given to the colony, by one of its chains, as the page lists it.
@@ -116,6 +131,7 @@ public final class DispatchPresence implements Facing {
             return false;
         }
         remember();
+        networksChanged = true;
         return true;
     }
 
@@ -124,6 +140,7 @@ public final class DispatchPresence implements Facing {
             return false;
         }
         remember();
+        networksChanged = true;
         return true;
     }
 
@@ -160,9 +177,43 @@ public final class DispatchPresence implements Facing {
 
     public void tick(MinecraftServer server) {
         sweep.tick(server, this::refresh, this::goals);
+        InventorySnapshot snapshot = colony.inventory().snapshot();
+        if (networksChanged || (snapshot != inventoryReadSnapshot && !inventoryRead.equals(inventoryVersions()))) {
+            refresh(server);
+            sweep.nudge();
+        } else {
+            inventoryReadSnapshot = snapshot;
+        }
+    }
+
+    private Map<WorldPos, InventorySnapshot.Version> inventoryVersions() {
+        Map<WorldPos, InventorySnapshot.Version> versions = new LinkedHashMap<>();
+        endpoints.values().forEach(endpoints -> endpoints.forEach(endpoint -> {
+            var store = observation(endpoint.anchor());
+            if (store != null) {
+                versions.put(store.stash().pos(), store.version());
+            }
+        }));
+        return Map.copyOf(versions);
     }
 
     void refresh(MinecraftServer server) {
+        parcels = new LinkedHashMap<>();
+        try {
+            read(server);
+            inventoryRead = inventoryVersions();
+            inventoryReadSnapshot = colony.inventory().snapshot();
+            networksChanged = false;
+        } finally {
+            parcels = null;
+        }
+    }
+
+    private List<PackageNetwork.Parcel> parcelsAt(ServerLevel level, PackageNetwork network, BlockPos at) {
+        return parcels.computeIfAbsent(WorldPos.of(level, at), ignored -> network.parcelsAt(level, at));
+    }
+
+    private void read(MinecraftServer server) {
         PackageNetwork network = PackageNetworks.get();
         long now = server.overworld().getGameTime();
 
@@ -201,7 +252,17 @@ public final class DispatchPresence implements Facing {
         Map<WorldPos, NetworkSnapshot.Port> read = new LinkedHashMap<>();
         Map<ServerLevel, Map<WorldPos, Set<UUID>>> byLevel = new LinkedHashMap<>();
         Map<ServerLevel, Map<UUID, List<WorldPos>>> stocked = new LinkedHashMap<>();
+        Map<ResourceKey<Level>, Set<UUID>> incomplete = new LinkedHashMap<>();
         for (ColonyView view : views) {
+            Set<UUID> unresolved = new LinkedHashSet<>();
+            for (UUID id : networks.all()) {
+                if (!network.containersComplete(view.level(), id)) {
+                    unresolved.add(id);
+                }
+            }
+            if (!unresolved.isEmpty()) {
+                incomplete.put(view.dimension(), Set.copyOf(unresolved));
+            }
             Map<WorldPos, Set<UUID>> found = portsIn(view, network);
             byLevel.put(view.level(), found);
             for (Map.Entry<WorldPos, Set<UUID>> port : found.entrySet()) {
@@ -218,6 +279,31 @@ public final class DispatchPresence implements Facing {
             }
         }
 
+        Map<ResourceKey<Level>, List<InventoryProviders.Endpoint>> endpoints = new LinkedHashMap<>();
+        for (var entry : stocked.entrySet()) {
+            Set<WorldPos> physical = new LinkedHashSet<>();
+            entry.getValue().values().forEach(physical::addAll);
+            physical.addAll(byLevel.getOrDefault(entry.getKey(), Map.of()).keySet());
+            physical.addAll(given(entry.getKey(), network));
+            for (Holding holding : colony.holdings(DispatchContent.PORT)) {
+                if (holding.what() instanceof Held.Block block && (block.cell().in(entry.getKey())
+                    || endpoints(entry.getKey().dimension()).stream()
+                        .anyMatch(endpoint -> endpoint.anchor().equals(block.cell())))) {
+                    physical.add(block.cell());
+                }
+            }
+            if (incomplete.containsKey(entry.getKey().dimension())) {
+                endpoints(entry.getKey().dimension()).forEach(endpoint -> physical.add(endpoint.anchor()));
+            }
+            endpoints.put(entry.getKey().dimension(), physical.stream()
+                .map(at -> new InventoryProviders.Endpoint(DispatchContent.ID, at)).toList());
+        }
+        if (!this.endpoints.equals(endpoints) || !incompleteNetworks.equals(incomplete)) {
+            this.endpoints = Map.copyOf(endpoints);
+            incompleteNetworks = Map.copyOf(incomplete);
+            inventoryRevision++;
+            colony.inventoryFeedback().providersChanged(DispatchContent.ID);
+        }
         NetworkSnapshot taken = new NetworkSnapshot(reach, read);
         seen = taken;
         standings.keySet().retainAll(present);
@@ -270,7 +356,7 @@ public final class DispatchPresence implements Facing {
                     }
                 }
                 rows.add(new PostRow(at, network.addressOf(level, post), network.stationOf(level, post),
-                    network.parcelsAt(level, post).size(), waiting));
+                    parcelsAt(level, network, post).size(), waiting));
             }
         }
         postRows = List.copyOf(rows);
@@ -330,8 +416,9 @@ public final class DispatchPresence implements Facing {
             for (UUID id : networks.all()) {
                 network.post(level, id, order -> orderOf(id, order).isPresent());
                 for (BlockPos postbox : network.postsOf(level, id)) {
+                    parcels.remove(WorldPos.of(level, postbox));
                     WorldPos from = WorldPos.of(level, postbox);
-                    for (PackageNetwork.Parcel parcel : network.parcelsAt(level, postbox)) {
+                    for (PackageNetwork.Parcel parcel : parcelsAt(level, network, postbox)) {
                         if (parcel.order().isEmpty() || mail.holds(from, parcel.order().getAsInt())) {
                             continue;
                         }
@@ -349,7 +436,7 @@ public final class DispatchPresence implements Facing {
                 if (!level.isLoaded(from)) {
                     continue;
                 }
-                if (network.parcelsAt(level, from).stream()
+                if (parcelsAt(level, network, from).stream()
                         .noneMatch(parcel -> parcel.order().equals(OptionalInt.of(held.order())))) {
                     moved |= mail.drop(held);
                     continue;
@@ -358,7 +445,11 @@ public final class DispatchPresence implements Facing {
                     : network.route(level, from, held.to().block(level), this::drives);
                 moved |= mail.replace(held, held.booked(route));
                 if (route.isEmpty() && orderOf(held.network(), held.order()).isEmpty()) {
-                    moved |= network.giveBack(level, held.network(), from, held.order());
+                    boolean returned = network.giveBack(level, held.network(), from, held.order());
+                    if (returned) {
+                        parcels.remove(held.from());
+                    }
+                    moved |= returned;
                 }
             }
         }
@@ -418,14 +509,25 @@ public final class DispatchPresence implements Facing {
             List<Workshop> workshops = new ArrayList<>();
             for (UUID id : networks.all()) {
                 NetworkSnapshot.Reach reach = taken.networks().get(id);
-                if (reach == null) {
+                held.addAll(bins.getOrDefault(id, List.of()));
+                if (reach == null || incompleteNetworks.getOrDefault(level.dimension(), Set.of()).contains(id)
+                    || bins.getOrDefault(id, List.of()).stream()
+                    .anyMatch(at -> observation(at) == null
+                        || observation(at).state() != InventorySnapshot.State.OBSERVED)) {
+                    colony.inventory().ensureObservedProvider(DispatchContent.ID);
+                    for (WorldPos at : bins.getOrDefault(id, List.of())) {
+                        var observed = observation(at);
+                        if (observed == null || observed.state() != InventorySnapshot.State.OBSERVED) {
+                            colony.inventory().ensureObserved(Stash.at(at));
+                        }
+                    }
                     continue;
                 }
                 List<Depot.Shelf> shelves = new ArrayList<>();
                 for (WorldPos at : bins.getOrDefault(id, List.of())) {
-                    held.add(at);
                     stancesAt(level, at).ifPresent(stances -> shelves.add(
-                        new Depot.Shelf(at, stances, counted(network.heldIn(level, at.block(level))))));
+                        new Depot.Shelf(at, stances, counted(observed(at)), colony.inventoryFeedback(),
+                            Optional.of(observation(at).version()))));
                 }
                 List<Depot.Dock> ours = docks.getOrDefault(id, List.of());
                 Optional<WorldPos> site = shelves.stream().map(Depot.Shelf::at).findFirst()
@@ -483,7 +585,7 @@ public final class DispatchPresence implements Facing {
         List<Counter.Desk> desks = new ArrayList<>();
         for (WorldPos port : given) {
             Optional<Stances> standing = stancesAt(level, port);
-            if (standing.isPresent() && network.parcelsAt(level, port.block(level)).stream()
+            if (standing.isPresent() && parcelsAt(level, network, port.block(level)).stream()
                     .anyMatch(parcel -> StrayNode.stray(collecting, port, parcel))) {
                 strays.putIfAbsent(port, standing.get());
             }
@@ -501,7 +603,7 @@ public final class DispatchPresence implements Facing {
                     continue;
                 }
                 NetworkSnapshot.Port view = new NetworkSnapshot.Port(network.addressOf(level, to),
-                    network.routeOf(level, to), network.portOpen(level, to), network.parcelsAt(level, to),
+                    network.routeOf(level, to), network.portOpen(level, to), parcelsAt(level, network, to),
                     Optional.empty(), 0);
                 int guess = eta.estimate(at, desk.route(),
                     network.handTicks(level, port.block(level), to, this::drives));
@@ -543,6 +645,11 @@ public final class DispatchPresence implements Facing {
     }
 
     private Optional<Stances> stancesAt(ServerLevel level, WorldPos at) {
+        var observed = observation(at);
+        if (observed != null) {
+            return observed.approach().state() == InventorySnapshot.State.OBSERVED
+                ? Stances.of(observed.approach().stands().stream().map(Stand::cell).toList()) : Optional.empty();
+        }
         Stances known = standings.get(at);
         if (known != null) {
             return Optional.of(known);
@@ -620,14 +727,43 @@ public final class DispatchPresence implements Facing {
 
     @Override
     public Map<WorldPos, List<ItemStack>> stock(ColonyView view) {
-        PackageNetwork network = PackageNetworks.get();
         Map<WorldPos, List<ItemStack>> found = new LinkedHashMap<>();
-        for (List<WorldPos> containers : containersIn(view, network).values()) {
-            for (WorldPos at : containers) {
-                found.putIfAbsent(at, network.heldIn(view.level(), at.block(view.level())));
+        for (var endpoint : endpoints(view.dimension())) {
+            var store = observation(endpoint.anchor());
+            if (store != null) {
+                found.putIfAbsent(store.stash().pos(), observed(endpoint.anchor()));
             }
         }
         return found;
+    }
+
+    long inventoryRevision() {
+        return inventoryRevision;
+    }
+
+    List<InventoryProviders.Endpoint> endpoints(ResourceKey<Level> dimension) {
+        return endpoints.getOrDefault(dimension, List.of());
+    }
+
+    boolean inventoryComplete(ResourceKey<Level> dimension) {
+        return incompleteNetworks.getOrDefault(dimension, Set.of()).isEmpty();
+    }
+
+    private InventorySnapshot.Store observation(WorldPos at) {
+        InventorySnapshot snapshot = colony.inventory().snapshot();
+        if (inventory != snapshot) {
+            Map<WorldPos, InventorySnapshot.Store> aliases = new LinkedHashMap<>();
+            snapshot.stores().values().forEach(store -> store.aliases().forEach(alias -> aliases.put(alias, store)));
+            observations = Map.copyOf(aliases);
+            inventory = snapshot;
+        }
+        return observations.get(at);
+    }
+
+    private List<ItemStack> observed(WorldPos at) {
+        var store = observation(at);
+        return store == null ? List.of() : store.slots().stream().map(SlotSnapshot::stackCopy)
+            .filter(stack -> !stack.isEmpty()).toList();
     }
 
     // The containers of every network taken on, by network.
@@ -683,7 +819,7 @@ public final class DispatchPresence implements Facing {
     // after an order of its went missing.
     private NetworkSnapshot.Port portView(ServerLevel level, PackageNetwork network, WorldPos at, Set<UUID> reaching,
                                           Map<UUID, NetworkSnapshot.Reach> reach, long now) {
-        List<PackageNetwork.Parcel> parcels = network.parcelsAt(level, at.block(level));
+        List<PackageNetwork.Parcel> parcels = parcelsAt(level, network, at.block(level));
         Optional<UUID> from = Optional.empty();
         int best = Integer.MAX_VALUE;
         for (Map.Entry<UUID, NetworkSnapshot.Reach> entry : reach.entrySet()) {
@@ -750,6 +886,13 @@ public final class DispatchPresence implements Facing {
         standings.clear();
         strays = Map.of();
         seen = NetworkSnapshot.empty();
+        endpoints = Map.of();
+        incompleteNetworks = Map.of();
+        inventoryRevision++;
+        inventory = null;
+        inventoryReadSnapshot = null;
+        observations = Map.of();
+        inventoryRead = Map.of();
         if (why == Closing.RAZED) {
             networks.clear();
             collecting.clear();

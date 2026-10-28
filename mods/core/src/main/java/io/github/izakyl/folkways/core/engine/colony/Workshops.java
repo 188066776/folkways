@@ -18,17 +18,27 @@ final class Workshops {
     private final Map<ResourceKey<Level>, Map<ResourceLocation, List<Workshop>>> published =
         new LinkedHashMap<>();
 
+    private final Map<ResourceKey<Level>, List<Workshop>> combined = new LinkedHashMap<>();
+
     boolean publish(ResourceLocation owner, ResourceKey<Level> dimension, List<Workshop> workshops) {
         Map<ResourceLocation, List<Workshop>> here =
             published.computeIfAbsent(dimension, key -> new LinkedHashMap<>());
         List<Workshop> had = workshops.isEmpty() ? here.remove(owner) : here.put(owner, workshops);
-        return !(had == null ? workshops.isEmpty() : had.equals(workshops));
+        boolean changed = !(had == null ? workshops.isEmpty() : had.equals(workshops));
+        if (changed) {
+            combine(dimension);
+        }
+        return changed;
     }
 
     List<Workshop> in(ResourceKey<Level> dimension) {
+        return combined.getOrDefault(dimension, List.of());
+    }
+
+    private void combine(ResourceKey<Level> dimension) {
         List<Workshop> found = new ArrayList<>();
         published.getOrDefault(dimension, Map.of()).values().forEach(found::addAll);
-        return List.copyOf(found);
+        combined.put(dimension, List.copyOf(found));
     }
 
     Set<BlockPos> sitesIn(ServerLevel level) {
@@ -42,10 +52,15 @@ final class Workshops {
     }
 
     void forget(ResourceLocation owner) {
-        published.values().forEach(here -> here.remove(owner));
+        published.forEach((dimension, here) -> {
+            if (here.remove(owner) != null) {
+                combine(dimension);
+            }
+        });
     }
 
     void clear() {
         published.clear();
+        combined.clear();
     }
 }

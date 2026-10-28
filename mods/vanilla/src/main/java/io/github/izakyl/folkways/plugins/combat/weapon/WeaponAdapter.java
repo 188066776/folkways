@@ -27,5 +27,6 @@ public interface WeaponAdapter {
         return accepts(stack);
     }
 
+
     Optional<WeaponSession> open(Worker worker);
 }

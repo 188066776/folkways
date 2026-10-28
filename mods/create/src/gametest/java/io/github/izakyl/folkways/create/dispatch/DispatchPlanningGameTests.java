@@ -6,6 +6,10 @@ import com.simibubi.create.content.logistics.packagePort.PackagePortBlockEntity;
 import com.simibubi.create.content.logistics.stockTicker.PackageOrderWithCrafts;
 import io.github.izakyl.folkways.FolkwaysMod;
 import io.github.izakyl.folkways.core.api.colony.Colony;
+import io.github.izakyl.folkways.core.api.colony.Colonies;
+import io.github.izakyl.folkways.core.api.colony.Held;
+import io.github.izakyl.folkways.core.api.terms.WorldPos;
+import io.github.izakyl.folkways.core.api.inventory.InventorySnapshot;
 import io.github.izakyl.folkways.core.api.terms.Containers;
 import io.github.izakyl.folkways.core.api.terms.Goods;
 import io.github.izakyl.folkways.core.api.terms.ItemSpec;
@@ -18,7 +22,6 @@ import io.github.izakyl.folkways.core.api.work.Refinement;
 import io.github.izakyl.folkways.core.api.work.Stances;
 import io.github.izakyl.folkways.core.api.work.WorkSite;
 import io.github.izakyl.folkways.core.engine.colony.ColonyData;
-import io.github.izakyl.folkways.core.engine.colony.ColonySnapshot;
 import io.github.izakyl.folkways.front.engine.colony.ColonyStocks;
 import io.github.izakyl.folkways.core.engine.labor.ColonyLabor;
 import io.github.izakyl.folkways.core.engine.labor.Commit;
@@ -37,11 +40,9 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.UUID;
 import java.util.function.Predicate;
-import java.util.concurrent.atomic.AtomicReference;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.gametest.framework.GameTest;
-import net.minecraft.nbt.CompoundTag;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -66,6 +67,48 @@ public final class DispatchPlanningGameTests {
     }
 
     @GameTest(template = "empty", timeoutTicks = 100)
+    public static void nativePortArrivalsAndRemovalsReviseTheSharedObservation(GameTestHelper helper) {
+        var level = helper.getLevel();
+        BlockPos at = helper.absolutePos(new BlockPos(1, 1, 1));
+        level.setBlockAndUpdate(at, BuiltInRegistries.BLOCK.get(
+            ResourceLocation.fromNamespaceAndPath("create", "white_postbox")).defaultBlockState());
+        var port = (PackagePortBlockEntity) level.getBlockEntity(at);
+        Colony colony = Colonies.mint(level.getServer());
+        colony.hold(DispatchContent.PORT,
+            new Held.Block(WorldPos.of(level, at))).orElseThrow();
+        colony.service(DispatchContent.ID, DispatchPresence.class).orElseThrow().refresh(level.getServer());
+        ItemStack parcel = PackageItem.containing(List.of(new ItemStack(Items.BREAD, 5)));
+        ItemSpec goods = Goods.specOf(parcel);
+        int[] phase = {0};
+        long[] contents = {0};
+        helper.succeedWhen(() -> {
+            var store = colony.inventory().snapshot().stores().get(Stash.at(WorldPos.of(level, at)));
+            helper.assertTrue(store != null && store.state() == InventorySnapshot.State.OBSERVED,
+                "a given port receives its own core observation");
+            helper.assertFalse(store.labor(), "port parcels remain outside ordinary labor stock");
+            if (phase[0] == 0) {
+                contents[0] = store.version().contents();
+                port.inventory.setStackInSlot(0, parcel.copy());
+                phase[0] = 1;
+                helper.assertTrue(false, "wait for the native arrival notification");
+            }
+            if (phase[0] == 1) {
+                helper.assertTrue(store.version().contents() > contents[0]
+                    && ColonyStocks.available(colony, level.getServer(), goods) == 1,
+                    "native arrivals revise the physical parcel observation without counting its payload twice");
+                contents[0] = store.version().contents();
+                port.inventory.setStackInSlot(0, ItemStack.EMPTY);
+                phase[0] = 2;
+                helper.assertTrue(false, "wait for the native removal notification");
+            }
+            helper.assertTrue(store.version().contents() > contents[0]
+                && ColonyStocks.available(colony, level.getServer(), goods) == 0,
+                "native removals revise the same observation");
+            colony.raze();
+        });
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 100)
     public static void networkContainersAppearInColonyStockOnce(GameTestHelper helper) {
         var level = helper.getLevel();
         BlockPos chest = helper.absolutePos(new BlockPos(1, 1, 1));
@@ -76,42 +119,44 @@ public final class DispatchPlanningGameTests {
         PackageNetworks.install((PackageNetwork) Proxy.newProxyInstance(PackageNetwork.class.getClassLoader(),
             new Class<?>[] {PackageNetwork.class}, (proxy, method, args) -> switch (method.getName()) {
                 case "containersOf" -> List.of(chest);
-                case "heldIn" -> List.of(new ItemStack(Items.IRON_INGOT, 12));
-                default -> throw new AssertionError(method.getName());
+                case "summaryOf" -> List.of(new PackageNetwork.Supply(new ItemStack(Items.IRON_INGOT), 12));
+                default -> method.invoke(PackageNetwork.absent(), args);
             }));
+        Colony colony = Colonies.mint(level.getServer());
         try {
-            AtomicReference<DispatchPresence> dispatch = new AtomicReference<>();
-            AtomicReference<List<io.github.izakyl.folkways.core.api.terms.WorldPos>> stores =
-                new AtomicReference<>(List.of());
-            var view = ColonySnapshot.of(new ColonyData(), level);
-            Colony colony = (Colony) Proxy.newProxyInstance(Colony.class.getClassLoader(),
-                new Class<?>[] {Colony.class}, (proxy, method, args) -> switch (method.getName()) {
-                    case "kept" -> new CompoundTag();
-                    case "keep" -> null;
-                    case "id" -> UUID.randomUUID();
-                    case "views" -> List.of(view);
-                    case "storesIn" -> stores.get();
-                    case "residents" -> List.of();
-                    case "service" -> args[0].equals(DispatchContent.ID) ? Optional.of(dispatch.get())
-                        : Optional.empty();
-                    default -> throw new AssertionError(method.getName());
-                });
-            dispatch.set(new DispatchPresence(colony));
-            dispatch.get().take(id);
+            colony.hold(DispatchContent.ID,
+                new Held.Block(WorldPos.of(level, chest))).orElseThrow();
+            DispatchPresence dispatch = colony.service(DispatchContent.ID, DispatchPresence.class).orElseThrow();
+            dispatch.take(id);
+            dispatch.refresh(level.getServer());
+            ColonyData data = ColonyData.find(level.getServer(), colony.id()).orElseThrow();
+            data.inventory().advance(level, data, Map.of());
             ItemSpec iron = ItemSpec.of(Items.IRON_INGOT);
             helper.assertTrue(ColonyStocks.available(colony, level.getServer(), iron) == 12,
                 "a network container is counted without being registered as a store");
-            stores.set(List.of(io.github.izakyl.folkways.core.api.terms.WorldPos.of(level, chest)));
+            colony.stores(DispatchContent.ID, level.dimension(), List.of(WorldPos.of(level, chest)));
+            data.inventory().advance(level, data, Map.of());
             ItemSpec concreteIron = Goods.specOf(new ItemStack(Items.IRON_INGOT));
             helper.assertTrue(ColonyStocks.available(colony, level.getServer(), iron) == 12
                     && ColonyStocks.tally(colony, level.getServer()).get(concreteIron) == 12,
                 "a container offered both ways is counted once in both stock views");
-            dispatch.get().release(id);
-            stores.set(List.of());
+            dispatch.release(id);
+            dispatch.refresh(level.getServer());
+            colony.stores(DispatchContent.ID, level.dimension(), List.of());
+            data.inventory().advance(level, data, Map.of());
+            try {
+                var work = data.inventory().getClass().getDeclaredMethod("work",
+                    net.minecraft.server.MinecraftServer.class, int.class);
+                work.setAccessible(true);
+                work.invoke(data.inventory(), level.getServer(), 1_000);
+            } catch (ReflectiveOperationException broken) {
+                throw new AssertionError(broken);
+            }
             helper.assertTrue(ColonyStocks.available(colony, level.getServer(), iron) == 0,
                 "a returned network no longer contributes its containers");
             helper.succeed();
         } finally {
+            colony.raze();
             PackageNetworks.install(original);
         }
     }

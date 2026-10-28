@@ -24,7 +24,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.world.Container;
-import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Item;
@@ -33,7 +32,7 @@ final class EatingFixture implements AutoCloseable {
     final GameTestHelper helper;
     final Colony colony;
     final Body body;
-    final SimpleContainer pack;
+    final Container pack;
     final LivingPresence living;
     final Worker worker;
 
@@ -46,7 +45,13 @@ final class EatingFixture implements AutoCloseable {
         colony = Colonies.mint(helper.getLevel().getServer());
         body = PersonBody.RESIDENT.get().create(helper.getLevel());
         body.mob().setPos(helper.absolutePos(new BlockPos(2, 1, 2)).getCenter());
-        pack = new SimpleContainer(food);
+        pack = body.pack();
+        for (int slot = 0; slot < food.length; slot++) {
+            // Preserve the deliberately oversized stacks accepted by the original SimpleContainer fixture.
+            int count = food[slot].getCount();
+            pack.setItem(slot, food[slot]);
+            pack.getItem(slot).setCount(count);
+        }
         menu(Arrays.stream(food).map(ItemStack::getItem).toArray(Item[]::new));
         colony.keep(LivingContent.ID, Writer.of().children("hunger", List.of(body.id()),
             id -> Writer.of().uuid("resident", id).integer("FoodLevel", fullness).tag()).tag());
@@ -62,6 +67,17 @@ final class EatingFixture implements AutoCloseable {
             public List<Node> route() { return List.of(); }
             public Placement placement() { return Placement.NOWHERE; }
         };
+        var data = io.github.izakyl.folkways.core.engine.colony.ColonyData
+            .find(helper.getLevel().getServer(), colony.id()).orElseThrow();
+        data.inventory().advance(helper.getLevel(), data, java.util.Map.of(body.id(), body));
+        try {
+            var work = io.github.izakyl.folkways.core.engine.inventory.InventoryIndex.class
+                .getDeclaredMethod("work", net.minecraft.server.MinecraftServer.class, int.class);
+            work.setAccessible(true);
+            work.invoke(data.inventory(), helper.getLevel().getServer(), 1000);
+        } catch (ReflectiveOperationException broken) {
+            throw new AssertionError(broken);
+        }
     }
 
     EatAction action() {

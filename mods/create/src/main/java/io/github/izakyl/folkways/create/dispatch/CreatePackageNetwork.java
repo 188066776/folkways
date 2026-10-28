@@ -21,6 +21,8 @@ import com.simibubi.create.content.logistics.stockTicker.PackageOrderWithCrafts;
 import com.simibubi.create.content.logistics.stockTicker.StockTickerBlockEntity;
 import com.simibubi.create.content.trains.station.GlobalStation;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
+import io.github.izakyl.folkways.core.api.terms.WorldPos;
+import io.github.izakyl.folkways.core.engine.inventory.InventoryChanges;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -38,6 +40,7 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.Container;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
@@ -176,19 +179,15 @@ final class CreatePackageNetwork implements PackageNetwork {
     }
 
     @Override
-    public List<ItemStack> heldIn(ServerLevel level, BlockPos container) {
-        IItemHandler held = handlerAt(level, container);
-        if (held == null) {
-            return List.of();
-        }
-        List<ItemStack> found = new ArrayList<>();
-        for (int slot = 0; slot < held.getSlots(); slot++) {
-            ItemStack stack = held.getStackInSlot(slot);
-            if (!stack.isEmpty()) {
-                found.add(stack.copy());
-            }
-        }
-        return List.copyOf(found);
+    public boolean containersComplete(ServerLevel level, UUID network) {
+        return CreateLayout.containersComplete(level, network);
+    }
+
+    @Override
+    public Container inventoryAt(ServerLevel level, BlockPos container) {
+        IItemHandler held = portAt(level, container).map(port -> (IItemHandler) port.inventory)
+            .orElseGet(() -> handlerAt(level, container));
+        return held == null ? null : new ShelfInventory(held);
     }
 
     @Override
@@ -240,6 +239,7 @@ final class CreatePackageNetwork implements PackageNetwork {
                 packager.heldBox = ItemStack.EMPTY;
                 packager.notifyUpdate();
                 port.get().notifyUpdate();
+                InventoryChanges.store(level, WorldPos.of(level, post.getValue()));
             }
         }
     }
@@ -279,6 +279,7 @@ final class CreatePackageNetwork implements PackageNetwork {
                     packager.inventory.insertItem(0, parcel.copy(), false);
                     port.get().inventory.setStackInSlot(slot, ItemStack.EMPTY);
                     port.get().notifyUpdate();
+                    InventoryChanges.store(level, WorldPos.of(level, postbox));
                     return true;
                 }
             }
@@ -347,6 +348,7 @@ final class CreatePackageNetwork implements PackageNetwork {
             if (found.get().inventory.getStackInSlot(slot).isEmpty()) {
                 found.get().inventory.setStackInSlot(slot, parcel.copy());
                 found.get().notifyUpdate();
+                InventoryChanges.store(level, WorldPos.of(level, port));
                 return true;
             }
         }
@@ -450,6 +452,7 @@ final class CreatePackageNetwork implements PackageNetwork {
         }
         if (!taken.isEmpty()) {
             port.get().notifyUpdate();
+            InventoryChanges.store(level, WorldPos.of(level, at));
         }
         return List.copyOf(taken);
     }
@@ -465,6 +468,7 @@ final class CreatePackageNetwork implements PackageNetwork {
             if (PackageItem.isPackage(stack) && stray.test(parcelOf(stack))) {
                 port.get().inventory.setStackInSlot(slot, ItemStack.EMPTY);
                 port.get().notifyUpdate();
+                InventoryChanges.store(level, WorldPos.of(level, at));
                 return Optional.of(contentsOf(stack));
             }
         }

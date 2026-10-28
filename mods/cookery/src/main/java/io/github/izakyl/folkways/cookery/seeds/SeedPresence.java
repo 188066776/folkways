@@ -3,15 +3,19 @@ package io.github.izakyl.folkways.cookery.seeds;
 import com.github.ysbbbbbb.kaleidoscopecookery.init.ModItems;
 import com.github.ysbbbbbb.kaleidoscopecookery.init.tag.TagMod;
 import io.github.izakyl.folkways.cookery.KitchenBookings;
+import io.github.izakyl.folkways.cookery.gear.CookeryGear;
 import io.github.izakyl.folkways.core.api.colony.Closing;
 import io.github.izakyl.folkways.core.api.colony.Colony;
 import io.github.izakyl.folkways.core.api.colony.ColonyView;
 import io.github.izakyl.folkways.core.api.colony.Sweep;
+import io.github.izakyl.folkways.core.api.inventory.InventorySnapshot;
 import io.github.izakyl.folkways.core.api.resident.body.Bodies;
 import io.github.izakyl.folkways.core.api.resident.body.Body;
 import io.github.izakyl.folkways.core.api.terms.ItemSpec;
 import io.github.izakyl.folkways.core.api.terms.Reach;
 import io.github.izakyl.folkways.core.api.terms.RefusalKind;
+import io.github.izakyl.folkways.core.api.terms.Stand;
+import io.github.izakyl.folkways.core.api.terms.Stash;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
 import io.github.izakyl.folkways.core.api.terms.WorldSpaces;
 import io.github.izakyl.folkways.core.api.work.Amount;
@@ -81,6 +85,7 @@ public final class SeedPresence implements Facing {
     }
 
     public SeedBudget budget(ServerLevel level) { return budgets.apply(level); }
+
     public boolean enabled() { return enabled.getAsBoolean(); }
 
     public void tick(MinecraftServer server) { sweep.tick(server, this::refresh, this::goals); }
@@ -95,7 +100,7 @@ public final class SeedPresence implements Facing {
                 }
             }
         }
-        areas.forEach((zone, at) -> { if (!at.equals(current.get(zone))) bookings.withdraw(at); });
+        areas.forEach((zone, at) -> { if (!at.equals(current.get(zone))) { bookings.withdraw(at); } });
         current.values().forEach(bookings::admit);
         areas.clear();
         areas.putAll(current);
@@ -105,35 +110,43 @@ public final class SeedPresence implements Facing {
     public void closed(Closing why) { bookings.clear(); areas.clear(); active.clear(); }
 
     private List<Body> farmers(ColonyView view) {
-        return view.residents().stream().map(resident -> view.level().getEntity(resident.id())).filter(java.util.Objects::nonNull)
+        return view.residents().stream().map(resident -> view.level().getEntity(resident.id()))
+            .filter(java.util.Objects::nonNull)
             .flatMap(entity -> Bodies.of(entity).stream()).filter(body ->
-                io.github.izakyl.folkways.cookery.gear.CookeryGear.permitsSeeds(colony, body)
+                CookeryGear.permitsSeeds(colony, body)
                 && (body.mob().getItemBySlot(EquipmentSlot.HEAD).isEmpty()
                     || body.mob().getItemBySlot(EquipmentSlot.HEAD).is(TagMod.STRAW_HAT)
-                        && io.github.izakyl.folkways.cookery.gear.CookeryGear.allowed(colony,
+                        && CookeryGear.allowed(colony,
                             body.mob().getItemBySlot(EquipmentSlot.HEAD)))).toList();
     }
 
     public List<Grown> goals(ColonyView view) {
-        if (!enabled.getAsBoolean()) return List.of();
+        if (!enabled.getAsBoolean()) { return List.of(); }
         List<Body> farmers = farmers(view);
-        if (farmers.isEmpty()) return List.of();
+        if (farmers.isEmpty()) { return List.of(); }
         ServerLevel level = view.level();
         List<SeedBudget.Reserve> reserves = budgets.apply(level).reserves();
         List<Grown> goals = new ArrayList<>();
         List<WorldPos> stores = colony.storesIn(level.dimension());
         if (!stores.isEmpty()) {
             WorldPos at = stores.getFirst();
-            if (at.in(level)) Stances.of(level, Reach.workableCells(level, at.block(level))).ifPresent(stances -> {
-                for (SeedBudget.Reserve reserve : reserves) {
-                    if (reserve.missing() > 0) goals.add(Grown.of(new Keep(at, stances, reserve)));
-                }
-            });
+            var observed = colony.inventory().snapshot().store(at);
+            if (observed.isEmpty() || observed.get().approach().state() != InventorySnapshot.State.OBSERVED) {
+                colony.inventory().ensureObserved(Stash.at(at));
+            }
+            colony.inventory().snapshot().store(at)
+                .filter(store -> store.approach().state() == InventorySnapshot.State.OBSERVED)
+                .flatMap(store -> Stances.of(store.approach().stands().stream().map(Stand::cell).toList()))
+                .ifPresent(stances -> {
+                    for (SeedBudget.Reserve reserve : reserves) {
+                        if (reserve.missing() > 0) { goals.add(Grown.of(new Keep(at, stances, reserve))); }
+                    }
+                });
         }
         if (reserves.stream().noneMatch(reserve -> reserve.missing() > 0
-                && reserve.alternatives().stream().anyMatch(grassSeeds()::contains))) return goals;
+                && reserve.alternatives().stream().anyMatch(grassSeeds()::contains))) { return goals; }
         for (ZoneView zone : Fronts.of(colony).zonesIn(level)) {
-            if (!zone.delegation().equals(GRASS) || !areas.containsKey(zone.id())) continue;
+            if (!zone.delegation().equals(GRASS) || !areas.containsKey(zone.id())) { continue; }
             Source running = active.get(zone.id());
             if (running != null && running.ground.in(level) && running.refusal(level).isEmpty()
                     && farmers.stream().anyMatch(farmer -> farmer.id().equals(running.worker))) {
@@ -142,14 +155,15 @@ public final class SeedPresence implements Facing {
                 goals.add(Grown.of(running));
                 continue;
             }
-            if (!bookings.free(areas.get(zone.id()))) continue;
+            if (!bookings.free(areas.get(zone.id()))) { continue; }
             Optional<BlockPos> grass = zone.cells().stream().filter(level::isLoaded)
                 .filter(ground -> level.getBlockState(ground.above()).is(Blocks.SHORT_GRASS))
                 .sorted(BlockPos::compareTo).findFirst();
             if (grass.isPresent()) {
                 offer(goals, level, zone, grass.get(), farmers.getFirst(), false);
             } else if (zone.settings().flag(RESTORE_GRASS)) {
-                zone.cells().stream().filter(ground -> level.isLoaded(ground.above()) && level.getBlockState(ground.above()).isAir())
+                zone.cells().stream().filter(ground -> level.isLoaded(ground.above())
+                        && level.getBlockState(ground.above()).isAir())
                     .sorted(Comparator.comparingDouble(ground -> ground.distSqr(zone.cells().iterator().next())))
                     .filter(ground -> GrassSources.safeRestore(level, ground, zone.cells())).findFirst()
                     .ifPresent(ground -> offer(goals, level, zone, ground, farmers.getFirst(), true));
@@ -158,27 +172,33 @@ public final class SeedPresence implements Facing {
         return goals;
     }
 
-    private void offer(List<Grown> goals, ServerLevel level, ZoneView zone, BlockPos ground, Body farmer, boolean restore) {
+    private void offer(List<Grown> goals, ServerLevel level, ZoneView zone, BlockPos ground, Body farmer,
+            boolean restore) {
         Stances.of(level, Reach.workableCells(level, ground.above())).ifPresent(stances ->
             goals.add(Grown.of(new Source(zone.id(), zone.at(ground), stances, farmer.id(), restore))));
     }
 
     private Optional<ZoneView> zone(ServerLevel level, UUID id) {
-        return Fronts.of(colony).zonesIn(level).stream().filter(zone -> zone.id().equals(id) && zone.delegation().equals(GRASS)).map(ZoneView.class::cast).findFirst();
+        return Fronts.of(colony).zonesIn(level).stream()
+            .filter(zone -> zone.id().equals(id) && zone.delegation().equals(GRASS))
+            .map(ZoneView.class::cast).findFirst();
     }
 
     @Override
     public List<Line> zoneLines(ZoneView zone, ColonyView view) {
-        if (!zone.delegation().equals(GRASS)) return List.of();
+        if (!zone.delegation().equals(GRASS)) { return List.of(); }
         String status = "ready";
-        if (!budgets.apply(view.level()).complete()) status = "unknown_inventory";
-        else if (farmers(view).isEmpty()) status = "need_hat";
-        else if (budgets.apply(view.level()).reserves().stream().anyMatch(reserve -> reserve.missing() > 0
+        if (!budgets.apply(view.level()).complete()) {
+            status = "unknown_inventory";
+        } else if (farmers(view).isEmpty()) {
+            status = "need_hat";
+        } else if (budgets.apply(view.level()).reserves().stream().anyMatch(reserve -> reserve.missing() > 0
                 && reserve.alternatives().stream().anyMatch(grassSeeds()::contains))) {
             if (zone.cells().stream().noneMatch(ground -> view.level().isLoaded(ground.above())
                     && view.level().getBlockState(ground.above()).is(Blocks.SHORT_GRASS))) {
-                if (!zone.settings().flag(RESTORE_GRASS)) status = "need_grass";
-                    else if (zone.cells().stream()
+                if (!zone.settings().flag(RESTORE_GRASS)) {
+                    status = "need_grass";
+                } else if (zone.cells().stream()
                     .noneMatch(ground -> GrassSources.safeRestore(view.level(), ground, zone.cells()))) {
                     status = "need_growth_space";
                 } else {
@@ -194,6 +214,7 @@ public final class SeedPresence implements Facing {
 
     private final class Keep implements Node {
         private final NodeSpec spec;
+
         Keep(WorldPos at, Stances stances, SeedBudget.Reserve reserve) {
             spec = NodeSpec.of(named("keep/" + colony.id() + "/" + at.realm() + "/"
                 + BuiltInRegistries.ITEM.getKey(reserve.alternatives().getFirst())), ID,
@@ -201,13 +222,15 @@ public final class SeedPresence implements Facing {
                 .vocation(FarmingContent.trade()).needs(new Need(reserve.goods(), reserve.count(), true))
                 .leaves(List.of(new Amount(reserve.goods(), reserve.count()))).doing(KEEPING).done();
         }
+
         public NodeSpec spec() { return spec; }
+
         public Outcome commit(ServerLevel level, Worker who) {
             return new Outcome.Done(List.of(), List.of(), Optional.empty(), who.supplied());
         }
     }
 
-    private final class Source implements io.github.izakyl.folkways.cookery.gear.CookeryGear.SeedGathering {
+    private final class Source implements CookeryGear.SeedGathering {
         private final UUID zone;
         private final WorldPos ground;
         private final UUID worker;
@@ -235,27 +258,39 @@ public final class SeedPresence implements Facing {
                 .doing(restore ? RESTORING : GATHERING)
                 .done();
         }
+
         public NodeSpec spec() { return spec; }
+
         public boolean gathersGrass() { return !restore; }
+
         public Optional<UUID> worker() { return Optional.of(worker); }
+
         public Optional<RefusalKind> planned(ServerLevel level) {
             Optional<RefusalKind> refused = hold.take();
-            if (refused.isEmpty()) active.put(zone, this);
+            if (refused.isEmpty()) { active.put(zone, this); }
             return refused;
         }
+
         public boolean ready(ServerLevel level) { return ground.in(level) && bookings.first(anchor, id()); }
+
         public Optional<RefusalKind> refusal(ServerLevel level) {
             return bookings.cancelled(anchor, id(), generation) || zone(level, zone)
                     .filter(marked -> !restore || marked.settings().flag(RESTORE_GRASS)).isEmpty()
                 ? Optional.of(SeedRefusal.AREA_CHANGED) : Optional.empty();
         }
-        public void ended(ServerLevel level, Ending how) { active.remove(zone, this); hold.release(how); sweep.nudge(); }
+
+        public void ended(ServerLevel level, Ending how) {
+            active.remove(zone, this); hold.release(how); sweep.nudge();
+        }
+
         public Outcome commit(ServerLevel level, Worker who) {
             Optional<ZoneView> marked = zone(level, zone);
-            if (!enabled.getAsBoolean() || marked.isEmpty() || restore && !marked.get().settings().flag(RESTORE_GRASS) || !ground.in(level)
+            if (!enabled.getAsBoolean() || marked.isEmpty() || !ground.in(level)
+                    || restore && !marked.get().settings().flag(RESTORE_GRASS)
                     || bookings.cancelled(anchor, id(), generation) || !bookings.first(anchor, id())
                     || !who.body().getUUID().equals(worker)
-                    || Bodies.of(who.body()).filter(body -> io.github.izakyl.folkways.cookery.gear.CookeryGear.permitsSeeds(colony, body)).isEmpty()) {
+                    || Bodies.of(who.body())
+                        .filter(body -> CookeryGear.permitsSeeds(colony, body)).isEmpty()) {
                 return Outcome.failed(SeedRefusal.AREA_CHANGED);
             }
             if (budgets.apply(level).reserves().stream().noneMatch(reserve -> reserve.missing() > 0
@@ -265,10 +300,13 @@ public final class SeedPresence implements Facing {
             BlockPos cell = ground.block(level);
             if (!marked.get().cells().contains(cell) || !Reach.stanceHolding(who.body(), spec.stances())
                     .flatMap(feet -> WorldSpaces.storage(level, new WorldPos(ground.realm(), feet)))
-                    .filter(feet -> Reach.withinReach(feet, cell.above()) && Reach.inSight(level, feet, cell.above())).isPresent()) {
+                    .filter(feet -> Reach.withinReach(feet, cell.above())
+                        && Reach.inSight(level, feet, cell.above())).isPresent()) {
                 return Outcome.failed(SeedRefusal.AREA_CHANGED);
             }
-            if (!restore && !who.body().getItemBySlot(EquipmentSlot.HEAD).is(TagMod.STRAW_HAT)) return Outcome.failed(SeedRefusal.NO_STRAW_HAT);
+            if (!restore && !who.body().getItemBySlot(EquipmentSlot.HEAD).is(TagMod.STRAW_HAT)) {
+                return Outcome.failed(SeedRefusal.NO_STRAW_HAT);
+            }
             return restore ? GrassSources.restore(level, who, cell, marked.get().cells())
                 : GrassSources.gather(level, who, cell.above(), marked.get().cells());
         }
@@ -281,5 +319,8 @@ public final class SeedPresence implements Facing {
     }
 
     private static ResourceLocation id(String path) { return ResourceLocation.fromNamespaceAndPath("folkways", path); }
-    private static UUID named(String text) { return UUID.nameUUIDFromBytes(("folkways:seeds/" + text).getBytes(StandardCharsets.UTF_8)); }
+
+    private static UUID named(String text) {
+        return UUID.nameUUIDFromBytes(("folkways:seeds/" + text).getBytes(StandardCharsets.UTF_8));
+    }
 }

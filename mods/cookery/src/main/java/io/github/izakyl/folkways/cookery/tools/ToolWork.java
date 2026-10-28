@@ -52,7 +52,8 @@ final class ToolWork implements Node, Workload.Within {
         families = declared;
         List<Amount> leaves = new ArrayList<>(original.spec().leaves());
         leaves.addAll(Leaves.room(declared.size()));
-        List<ToolUse> remaining = original.spec().tools().stream().filter(use -> Tools.shared(use.need()).isEmpty()).toList();
+        List<ToolUse> remaining = original.spec().tools().stream().filter(use ->
+            Tools.shared(use.need()).isEmpty()).toList();
         spec = copy(original.spec(), original.id(), this, remaining, leaves, WorkEffort.NONE);
     }
 
@@ -70,6 +71,7 @@ final class ToolWork implements Node, Workload.Within {
     ServerLevel level() { return level; }
     // Replenishment follows the current list while a task waits to borrow.
     List<ItemSpec> families() { return allowed(); }
+
     boolean needsTools() { return !workDone; }
 
     private List<ItemSpec> allowed() {
@@ -106,7 +108,7 @@ final class ToolWork implements Node, Workload.Within {
     @Override
     public boolean ready(ServerLevel level) {
         // Completed native work only has its physical returns and settlement left.
-        if (workDone) return true;
+        if (workDone) { return true; }
         if (!original.ready(level)) {
             return false;
         }
@@ -118,7 +120,8 @@ final class ToolWork implements Node, Workload.Within {
             families = allowed;
         }
         for (ItemSpec family : families) {
-            var state = service.pool.request(service.colony.id(), id(), family, service.stock.read(level, family).inventory()).status();
+            var state = service.pool.request(service.colony.id(), id(), family, service.stock.read(level,
+                family).inventory()).status();
             if (state != KitchenTools.Status.AVAILABLE && state != KitchenTools.Status.BORROWED) {
                 return false;
             }
@@ -127,7 +130,8 @@ final class ToolWork implements Node, Workload.Within {
     }
 
     @Override
-    public Optional<RefusalKind> refusal(ServerLevel level) { return workDone ? Optional.empty() : original.refusal(level); }
+    public Optional<RefusalKind> refusal(ServerLevel level) { return workDone ? Optional.empty() :
+        original.refusal(level); }
 
     @Override
     public boolean acceptsInput(Stash from) { return original.acceptsInput(from); }
@@ -203,7 +207,8 @@ final class ToolWork implements Node, Workload.Within {
                 } else {
                     workDone = true;
                 }
-            } else if (original.spec().workload() instanceof Workload.Once || original.spec().workload() instanceof Workload.Continuous) {
+            } else if (original.spec().workload() instanceof Workload.Once || original.spec().workload() instanceof
+                Workload.Continuous) {
                 if (!equipped(original, who)) {
                     failure = CookeryRefusal.NOTHING_TO_WORK_WITH;
                     workDone = true;
@@ -216,10 +221,13 @@ final class ToolWork implements Node, Workload.Within {
             }
         }
         for (KitchenTools.Lease lease : List.copyOf(loans.values())) {
+            if (service.stock.waitingForResident(lease)) {
+                return WAIT;
+            }
             ItemStack expected = service.tool(lease).orElse(ItemStack.EMPTY);
             int slot = service.carriedSlot(who.pack(), lease, expected);
             if (slot < 0) {
-                service.lost(lease);
+                service.missing(lease);
                 loans.remove(lease.request().tools());
                 continue;
             }
@@ -300,7 +308,8 @@ final class ToolWork implements Node, Workload.Within {
 
     private boolean equipped(Node action, Worker who) {
         Worker actual = new LoanWorker(who, service, loans);
-        return action.spec().tools().stream().allMatch(use -> use.need() instanceof io.github.izakyl.folkways.core.api.work.ToolNeed.None
+        return action.spec().tools().stream().allMatch(use -> use.need() instanceof
+            io.github.izakyl.folkways.core.api.work.ToolNeed.None
             || !actual.held(use.need()).isEmpty());
     }
 
@@ -325,21 +334,29 @@ final class ToolWork implements Node, Workload.Within {
         }
 
         public NodeSpec spec() { return action; }
+
         public Optional<RefusalKind> planned(ServerLevel level) {
             return delegate == original ? Optional.empty() : delegate.planned(level);
         }
+
         public boolean acceptsInput(Stash from) { return delegate.acceptsInput(from); }
+
         public boolean ready(ServerLevel level) { return delegate.ready(level); }
+
         public boolean settled(ServerLevel level) { return delegate.settled(level); }
+
         public Optional<RefusalKind> refusal(ServerLevel level) { return delegate.refusal(level); }
+
         public void released(ServerLevel level, Worker who, Ending how) {
             delegate.released(level, new LoanWorker(who, service, loans), how);
         }
+
         public void ended(ServerLevel level, Ending how) {
             if (delegate != original) {
                 delegate.ended(level, how);
             }
         }
+
         public void changed(ServerLevel level, NodeState state) { delegate.changed(level, state); }
 
         public Outcome commit(ServerLevel level, Worker who) {
@@ -361,7 +378,7 @@ final class ToolWork implements Node, Workload.Within {
                         service.lost(lease);
                         loans.remove(lease.request().tools());
                     } else {
-                        service.record(lease, tool);
+                        service.record(lease, tool, who.pack());
                     }
                 });
             }
@@ -374,6 +391,7 @@ final class ToolWork implements Node, Workload.Within {
         public Drawn draw(ServerLevel level, Worker who) {
             return ((Staged) delegate).draw(level, new LoanWorker(who, service, loans));
         }
+
         public void restore(ServerLevel level, Worker who, List<ItemStack> goods) {
             ((Staged) delegate).restore(level, new LoanWorker(who, service, loans), goods);
         }

@@ -232,11 +232,8 @@ public final class TaczWeaponGameTests {
                     Weapons.open(worker(scene.body)).isEmpty(),
                     "empty gun without" + " ammo is" + " unusable");
                 scene.body.pack().insert(new ItemStack(Items.IRON_SWORD));
-                WeaponSession fallback = Weapons.open(worker(scene.body)).orElseThrow();
-                helper.assertTrue(
-                    scene.body.getMainHandItem().is(Items.IRON_SWORD),
-                    "usable physical melee fallback");
-                fallback.close();
+                helper.assertTrue(Weapons.open(worker(scene.body)).isEmpty(),
+                    "an unassigned sword cannot replace the empty assigned gun");
             })
             .thenSucceed();
     }

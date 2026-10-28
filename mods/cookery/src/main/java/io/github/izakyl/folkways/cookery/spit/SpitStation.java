@@ -21,6 +21,7 @@ import io.github.izakyl.folkways.core.api.work.Workshop;
 import io.github.izakyl.folkways.cookery.CookeryContent;
 import io.github.izakyl.folkways.cookery.KitchenBookings;
 import io.github.izakyl.folkways.cookery.KitchenStation;
+import io.github.izakyl.folkways.cookery.StationStack;
 import io.github.izakyl.folkways.plugins.wares.WaresContent;
 import java.util.ArrayList;
 import java.util.List;
@@ -67,6 +68,18 @@ public final class SpitStation implements KitchenStation {
         return at.in(level) ? active(colony, at, bookings) : List.of();
     }
     public boolean matches(BlockState state) { return state.is(ModBlocks.SHAWARMA_SPIT.get()); }
+
+    public Optional<Object> freezeSignature(ServerLevel level, WorldPos at) {
+        List<Object> state = new ArrayList<>();
+        for (WorldPos part : slots(level, at)) {
+            var spit = spit(level, part).orElseThrow();
+            state.add(List.of(spit, spit.getBlockState(),
+                spit.getPersistentData().getCompound("folkways.cookery.spit").copy(),
+                new StationStack(spit.cookingItem), new StationStack(spit.cookedItem), spit.cookTime <= 0));
+        }
+        return Optional.of(List.copyOf(state));
+    }
+
     public BlockPos anchor(Level level, BlockPos cell) {
         return level.getBlockState(cell).getValue(ShawarmaSpitBlock.HALF) == DoubleBlockHalf.UPPER ? cell.below() : cell;
     }

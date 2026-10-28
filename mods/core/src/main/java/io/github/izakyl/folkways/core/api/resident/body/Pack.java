@@ -29,6 +29,11 @@ public final class Pack implements Container {
 
     private final int baseSize;
     private SimpleContainer container;
+    private Runnable changed = () -> { };
+
+    public void onChanged(Runnable listener) {
+        changed = Objects.requireNonNull(listener);
+    }
 
     public Pack() {
         this(DEFAULT_SIZE);
@@ -55,6 +60,7 @@ public final class Pack implements Container {
             }
         }
         this.container = bigger;
+        changed.run();
     }
 
     // The cells left for goods by the tools carried.
@@ -100,7 +106,7 @@ public final class Pack implements Container {
 
     public ItemStack insert(ItemStack stack) {
         Objects.requireNonNull(stack);
-        return Containers.insert(container, stack);
+        return Containers.insert(this, stack);
     }
 
     public List<ItemStack> contents() {
@@ -131,17 +137,22 @@ public final class Pack implements Container {
 
     @Override
     public ItemStack removeItem(int slot, int amount) {
-        return container.removeItem(slot, amount);
+        ItemStack taken = container.removeItem(slot, amount);
+        changed.run();
+        return taken;
     }
 
     @Override
     public ItemStack removeItemNoUpdate(int slot) {
-        return container.removeItemNoUpdate(slot);
+        ItemStack taken = container.removeItemNoUpdate(slot);
+        changed.run();
+        return taken;
     }
 
     @Override
     public void setItem(int slot, ItemStack stack) {
         container.setItem(slot, stack);
+        changed.run();
     }
 
     @Override
@@ -152,6 +163,7 @@ public final class Pack implements Container {
     @Override
     public void setChanged() {
         container.setChanged();
+        changed.run();
     }
 
     @Override
@@ -162,6 +174,7 @@ public final class Pack implements Container {
     @Override
     public void clearContent() {
         container.clearContent();
+        changed.run();
     }
 
     public CompoundTag save(HolderLookup.Provider provider) {
@@ -198,6 +211,7 @@ public final class Pack implements Container {
                 }
             }
         }
+        changed.run();
     }
 
     public void dropContents(LivingEntity owner) {
@@ -206,5 +220,6 @@ public final class Pack implements Container {
                 owner.spawnAtLocation(stack);
             }
         }
+        changed.run();
     }
 }

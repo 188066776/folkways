@@ -1,12 +1,14 @@
 package io.github.izakyl.folkways.plugins.combat.weapon;
 
 import io.github.izakyl.folkways.core.api.colony.Colony;
+import io.github.izakyl.folkways.core.api.inventory.InventorySnapshot;
+import io.github.izakyl.folkways.core.api.inventory.SlotSnapshot;
 import io.github.izakyl.folkways.core.api.resident.body.Body;
 import io.github.izakyl.folkways.core.api.resident.body.Equipment;
 import io.github.izakyl.folkways.core.api.terms.Containers;
 import io.github.izakyl.folkways.core.api.terms.Goods;
 import io.github.izakyl.folkways.core.api.terms.ItemSpec;
-import io.github.izakyl.folkways.core.api.terms.Reach;
+import io.github.izakyl.folkways.core.api.terms.Stash;
 import io.github.izakyl.folkways.core.api.terms.StoreRule;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
 import io.github.izakyl.folkways.core.api.terms.WorldSpaces;
@@ -30,12 +32,14 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
 import net.minecraft.world.SimpleContainer;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.server.ServerLifecycleHooks;
 
@@ -86,6 +90,7 @@ public final class PatrolSupplies {
     private final Map<UUID, Long> duties = new HashMap<>();
     private final Map<UUID, Status> statuses = new HashMap<>();
     private final Map<UUID, PatrolSupplyNode> pending = new HashMap<>();
+    private final Set<UUID> awaitingWeapon = new HashSet<>();
 
     public PatrolSupplies(Colony colony) {
         this.colony = colony;
@@ -120,6 +125,16 @@ public final class PatrolSupplies {
             || Fronts.of(colony).settings(PatrolContent.ID).choice("no_profile").getPath().equals("engage");
     }
 
+    void weaponFailed(UUID resident) {
+        if (profiles.assigned(resident).isPresent()) {
+            awaitingWeapon.add(resident);
+        }
+    }
+
+    boolean awaitingWeapon(UUID resident) {
+        return awaitingWeapon.contains(resident);
+    }
+
     public Status status(UUID resident) {
         return statuses.getOrDefault(resident, new Status(State.INACTIVE, "inactive", 0, Optional.empty(), 0));
     }
@@ -142,6 +157,7 @@ public final class PatrolSupplies {
         revisions.merge(resident, 1L, Long::sum);
         pending.remove(resident);
         refilling.remove(resident);
+        awaitingWeapon.remove(resident);
         statuses.put(resident, new Status(State.CANCELLED, "profile"
             + " changed", 0, Optional.empty(), 0));
         var server = ServerLifecycleHooks.getCurrentServer();
@@ -157,6 +173,7 @@ public final class PatrolSupplies {
         colony.residents().forEach(resident -> roster.add(resident.id()));
         profiles.retain(roster);
         refilling.keySet().retainAll(roster);
+        awaitingWeapon.retainAll(roster);
         for (var entry : List.copyOf(pending.entrySet())) {
             Authority authority = entry.getValue().authority();
             if (!valid(authority)
@@ -178,14 +195,21 @@ public final class PatrolSupplies {
         statuses.clear();
         duties.clear();
         refilling.clear();
+        awaitingWeapon.clear();
     }
 
     public List<Amount> keeps(Body body) {
         if (!(body.mob() instanceof ResidentEntity)) {
             return List.of();
         }
+        InventorySnapshot.Resident resident = colony.inventory().snapshot().residents().get(body.id());
+        if (resident == null || resident.state() != InventorySnapshot.State.OBSERVED) {
+            colony.inventory().ensureObservedResident(body.id());
+            return profiles.assigned(body.id()).stream().flatMap(profile -> profile.entries().stream())
+                .map(entry -> new Amount(entry.items(), entry.target())).toList();
+        }
         List<Amount> kept = new ArrayList<>();
-        List<ItemStack> available = new ArrayList<>(body.pack().contents().stream().map(ItemStack::copy).toList());
+        List<ItemStack> available = new ArrayList<>(resident.pack().stream().map(SlotSnapshot::stackCopy).toList());
         profiles.assigned(body.id())
             .ifPresent(
             profile -> {
@@ -220,7 +244,6 @@ public final class PatrolSupplies {
         if (profiles.assigned(body.id()).isEmpty()) {
             return List.of();
         }
-        Equipment.reconcile(colony, body);
         DefenseControl control = DefenseControl.of(colony);
         if (order.isEmpty()
             && duty == Long.MIN_VALUE
@@ -245,26 +268,31 @@ public final class PatrolSupplies {
         Authority authority =
             new Authority(body, order.orElse(null), duty, until, revisions.getOrDefault(body.id(), 0L));
         PatrolSupplyNode current = pending.get(body.id());
-        if (current != null) {
-            if (!current.authority().equals(authority) || !valid(current.authority())) {
-                pending.remove(body.id());
-            } else if (level.getGameTime() >= current.deadline()) {
-                pending.remove(body.id());
-                report(
-                    body.id(),
-                    State.TIMED_OUT,
-                    "supply trip timed out",
-                    0,
-                    current.source(),
-                    level.getGameTime() + RETRY_TICKS);
-                return List.of();
-            } else if (missing(body, current.demand()) > 0) {
-                return List.of(current.urge());
-            } else {
-                pending.remove(body.id());
-            }
+        if (current != null && (!current.authority().equals(authority) || !valid(current.authority()))) {
+            pending.remove(body.id());
+            current = null;
+        }
+        if (current != null && level.getGameTime() >= current.deadline()) {
+            pending.remove(body.id());
+            report(body.id(), State.TIMED_OUT, "supply trip timed out", 0, current.source(),
+                level.getGameTime() + RETRY_TICKS);
+            return List.of();
+        }
+        InventorySnapshot snapshot = colony.inventory().snapshot();
+        InventorySnapshot.Resident observed = snapshot.residents().get(body.id());
+        if (observed == null || observed.state() != InventorySnapshot.State.OBSERVED) {
+            colony.inventory().ensureObservedResident(body.id());
+            report(body.id(), State.UNAVAILABLE, "inventory observation pending", 0, null, 0);
+            return List.of();
         }
         LoadoutProfile profile = profiles.assigned(body.id()).orElseThrow();
+        Map<UUID, Integer> deficits = observedDeficits(body, profile, observed);
+        if (current != null) {
+            if (deficits.getOrDefault(current.demand().entry().orElse(null), 0) > 0) {
+                return List.of(current.urge());
+            }
+            pending.remove(body.id());
+        }
         if (profile.entries().isEmpty() && profile.legacy().isPresent()) {
             report(body.id(), State.UNAVAILABLE, "loadout provider unavailable", 0, null, 0);
             return List.of();
@@ -276,22 +304,31 @@ public final class PatrolSupplies {
                 return List.of();
             }
             if (entry.kind() == LoadoutProfile.Kind.ARMOR
-                && !body.getItemBySlot(entry.slot().orElseThrow()).isEmpty()
-                && !Goods.matches(body.getItemBySlot(entry.slot().get()), entry.items())) {
+                && observed.equipment().containsKey(entry.slot().orElseThrow())
+                && !observed.equipment().get(entry.slot().orElseThrow()).stackCopy().isEmpty()
+                && !Goods.matches(observed.equipment().get(entry.slot().orElseThrow()).stackCopy(), entry.items())) {
                 report(body.id(), State.BLOCKED, "armor slot occupied", 1, null, 0);
                 return List.of();
             }
         }
-        Demand demand = wanted(body);
+        Demand demand = wanted(body, deficits);
         if (demand == null) {
+            awaitingWeapon.remove(body.id());
             report(body.id(), State.READY, "stock ready", 0, null, 0);
             return List.of();
         }
         if (level.getGameTime() < status(body.id()).retryAt()) {
             return List.of();
         }
-        int missing = missing(body, demand);
+        int missing = deficits.getOrDefault(demand.entry().orElse(null), 0);
         WorldPos noRoom = null;
+        boolean uncertain = snapshot.coverage().membershipPending() || unresolvedReservations(level, snapshot);
+        if (uncertain) {
+            colony.inventory().ensureObserved();
+            report(body.id(), State.UNAVAILABLE, "inventory observation pending", missing, null,
+                level.getGameTime() + RETRY_TICKS);
+            return List.of();
+        }
         int nearby = 0;
         int readable = 0;
         int stocked = 0;
@@ -315,17 +352,23 @@ public final class PatrolSupplies {
             .limit(32)
             .toList()) {
             nearby++;
-            Optional<Container> store = source(level, source);
-            if (store.isEmpty()) {
+            Optional<InventorySnapshot.Store> store = snapshot.store(source);
+            if (store.isEmpty() || store.get().state() != InventorySnapshot.State.OBSERVED
+                || store.get().approach().state() != InventorySnapshot.State.OBSERVED) {
+                colony.inventory().ensureObserved(Stash.at(source));
+                uncertain = true;
+                continue;
+            }
+            if (!StoreRule.takes(store.get().rules())) {
                 continue;
             }
             readable++;
-            List<ItemStack> preview = preview(level, source, store.get(), demand, missing);
+            List<ItemStack> preview = take(observedUnreserved(level, snapshot, store.get()), demand, missing);
             if (preview.isEmpty()) {
                 continue;
             }
             stocked++;
-            if (!fits(body.pack(), preview)) {
+            if (!fits(observedPack(observed), preview)) {
                 noRoom = source;
                 continue;
             }
@@ -335,9 +378,9 @@ public final class PatrolSupplies {
             // sight.
             Optional<Stances> stances =
                 Stances.of(
-                level,
-                Reach.workableCells(level, target).stream()
-                .filter(feet -> feet.distSqr(target) <= 2 * 2)
+                store.get().approach().stands().stream()
+                .map(stand -> stand.cell())
+                .filter(feet -> feet.in(level) && feet.block(level).distSqr(target) <= 2 * 2)
                 .toList());
             if (stances.isEmpty()) {
                 continue;
@@ -345,10 +388,16 @@ public final class PatrolSupplies {
             int batch = preview.stream().mapToInt(ItemStack::getCount).sum();
             PatrolSupplyNode request =
                 new PatrolSupplyNode(
-                this, authority, source, demand, batch, stances.get(), level.getGameTime() + TRIP_TICKS);
+                this, authority, source, demand, batch, stances.get(), level.getGameTime() + TRIP_TICKS,
+                store.get().stash(), store.get().version());
             pending.put(body.id(), request);
             report(body.id(), State.FETCHING, "collecting stock", missing, source, 0);
             return List.of(request.urge());
+        }
+        if (uncertain) {
+            report(body.id(), State.UNAVAILABLE, "inventory observation pending", missing, null,
+                level.getGameTime() + RETRY_TICKS);
+            return List.of();
         }
         report(
             body.id(),
@@ -368,6 +417,14 @@ public final class PatrolSupplies {
             noRoom,
             level.getGameTime() + RETRY_TICKS);
         return List.of();
+    }
+
+    void staleStore(Stash store, InventorySnapshot.Version version) {
+        colony.inventoryFeedback().stale(store, version);
+    }
+
+    void staleApproach(Stash store, InventorySnapshot.Version version) {
+        colony.inventoryFeedback().staleApproach(store, version);
     }
 
     boolean valid(Authority authority) {
@@ -398,6 +455,26 @@ public final class PatrolSupplies {
         return source.in(level) && level.isLoaded(source.block(level)) && StoreRule.takes(colony.storeRules(source))
             ? colony.store(level, source)
             : Optional.empty();
+    }
+
+    boolean unresolvedReservations(ServerLevel level, InventorySnapshot snapshot) {
+        return colony.reservedInputs(level).stream().flatMap(claim -> claim.store().stream())
+            .anyMatch(at -> snapshot.store(at).isEmpty());
+    }
+
+    SimpleContainer observedUnreserved(ServerLevel level, InventorySnapshot snapshot, InventorySnapshot.Store store) {
+        List<SlotSnapshot> slots = store.slots().stream().filter(slot -> slot.accessibleSlot().isPresent()).toList();
+        SimpleContainer free = new SimpleContainer(slots.size());
+        for (int slot = 0; slot < slots.size(); slot++) {
+            free.setItem(slot, slots.get(slot).stackCopy());
+        }
+        for (var claim : colony.reservedInputs(level)) {
+            if (claim.store().flatMap(snapshot::store)
+                .filter(found -> found.stash().equals(store.stash())).isPresent()) {
+                take(free, claim.goods(), (int) Math.min(Integer.MAX_VALUE, claim.count()), false);
+            }
+        }
+        return free;
     }
 
     List<ItemStack> preview(ServerLevel level, WorldPos source, Container actual, Demand demand, int count) {
@@ -455,7 +532,7 @@ public final class PatrolSupplies {
         return copy;
     }
 
-    private Demand wanted(ResidentEntity body) {
+    private Demand wanted(ResidentEntity body, Map<UUID, Integer> deficits) {
         Optional<LoadoutProfile> profile = profiles.assigned(body.id());
         if (profile.isEmpty()) {
             return null;
@@ -469,7 +546,7 @@ public final class PatrolSupplies {
                 entry.kind() == LoadoutProfile.Kind.WEAPON,
                 Optional.of(entry.id()),
                 Optional.of(entry));
-            int missing = missing(body, demand);
+            int missing = deficits.getOrDefault(entry.id(), 0);
             if (missing == 0) {
                 active.remove(entry.id());
                 continue;
@@ -484,12 +561,34 @@ public final class PatrolSupplies {
         return null;
     }
 
+    private static SimpleContainer observedPack(InventorySnapshot.Resident resident) {
+        SimpleContainer pack = new SimpleContainer(resident.pack().size());
+        for (SlotSnapshot slot : resident.pack()) {
+            pack.setItem(slot.physicalSlot(), slot.stackCopy());
+        }
+        return pack;
+    }
+
+    Map<UUID, Integer> observedDeficits(ResidentEntity body, LoadoutProfile profile,
+                                       InventorySnapshot.Resident resident) {
+        List<ItemStack> carried = new ArrayList<>(resident.pack().stream().map(SlotSnapshot::stackCopy).toList());
+        if (body.hasWeaponSession()) {
+            carried.add(body.getMainHandItem().copy());
+        }
+        return allocate(profile, carried, slot -> resident.equipment().containsKey(slot)
+            ? resident.equipment().get(slot).stackCopy() : ItemStack.EMPTY);
+    }
+
     /** Allocate each physical unit once, in profile order, including matching loaded ammunition. */
     public Map<UUID, Integer> deficits(ResidentEntity body, LoadoutProfile profile) {
-        List<ItemStack> available =
-            new ArrayList<>(LoadoutRegistry.carried(body).stream().map(ItemStack::copy).toList());
+        return allocate(profile, LoadoutRegistry.carried(body), body::getItemBySlot);
+    }
+
+    static Map<UUID, Integer> allocate(LoadoutProfile profile, List<ItemStack> carried,
+                                        Function<EquipmentSlot, ItemStack> equipment) {
+        List<ItemStack> available = new ArrayList<>(carried.stream().map(ItemStack::copy).toList());
         List<ItemStack> loaded = new ArrayList<>();
-        for (ItemStack weapon : LoadoutRegistry.carried(body)) {
+        for (ItemStack weapon : carried) {
             LoadoutRegistry.using(weapon)
                 .ifPresent(
                 provider -> provider.loadedAmmunition(weapon).forEach(stack -> loaded.add(stack.copy())));
@@ -498,7 +597,7 @@ public final class PatrolSupplies {
         for (LoadoutProfile.Entry entry : profile.entries()) {
             int left = entry.target();
             if (entry.kind() == LoadoutProfile.Kind.ARMOR) {
-                ItemStack worn = body.getItemBySlot(entry.slot().orElseThrow());
+                ItemStack worn = equipment.apply(entry.slot().orElseThrow());
                 if (entry.matches(worn)) {
                     left--;
                 }

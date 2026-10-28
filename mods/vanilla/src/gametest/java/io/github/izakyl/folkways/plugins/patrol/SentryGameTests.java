@@ -113,7 +113,7 @@ public final class SentryGameTests {
     }
 
     @GameTest(template = "sight_range")
-    public static void spyglassNeedsProfileAndPhysicalStockForLongerSight(GameTestHelper helper) {
+    public static void assignedSpyglassGrantsLongerSightAndSupplyDeficit(GameTestHelper helper) {
         Fixture f = new Fixture(helper);
         f.sentry.setNoAi(true);
         Zombie target = f.zombie(new BlockPos(43, 1, 2));
@@ -139,14 +139,15 @@ public final class SentryGameTests {
             "multiple physical spyglasses do not stack");
         f.sentry.pack().setItem(2, ItemStack.EMPTY);
         f.sentry.pack().setItem(3, ItemStack.EMPTY);
-        helper.assertTrue(SpottedTargets.sight(f.sentry, target) == base,
-            "removing the gear immediately restores default sight");
+        helper.assertTrue(SpottedTargets.sight(f.sentry, target)
+            == base * FolkwaysVanillaConfig.observationSightMultiplier(),
+            "assigned gear continues to determine sight after removal");
         var shortage = ProfileShortages.read(f.colony, profiles.get(profile).orElseThrow(), f.level.getServer());
         helper.assertValueEqual(shortage.missing().get(gear.id()), 1, "the missing physical gear is a profile deficit");
         helper.assertValueEqual(shortage.unavailableStock().get(gear.id()), 1,
             "absent stores expose a real stock shortage");
-        helper.assertFalse(SpottedTargets.of(f.colony).observe(f.sentry).contains(target),
-            "a configured but out-of-stock spyglass cannot discover the distant target");
+        helper.assertTrue(SpottedTargets.of(f.colony).observe(f.sentry).contains(target),
+            "assigned optics continue to discover the distant target");
         f.close();
         helper.succeed();
     }
@@ -408,6 +409,11 @@ public final class SentryGameTests {
         Fixture fixture = new Fixture(helper);
         fixture.sentry.setNoAi(true);
         fixture.sentry.pack().getItem(0).set(DataComponents.CUSTOM_NAME, Component.literal("test long-range bow"));
+        fixture.sentry.pack().setChanged();
+        var profiles = LoadoutProfiles.of(fixture.colony);
+        UUID assigned = profiles.assigned(fixture.sentry.id()).orElseThrow().id();
+        profiles.replace(new LoadoutProfile(assigned, "Long range", List.of(
+            LoadoutProfile.Entry.weapon(ItemSpec.exact(fixture.sentry.pack().getItem(0)))), Optional.empty()));
         ResidentEntity scout = fixture.resident(new BlockPos(35, 1, 5));
         scout.setNoAi(true);
         scout.setNoGravity(true);

@@ -1,6 +1,7 @@
 package io.github.izakyl.folkways.core.engine.colony;
 
 import io.github.izakyl.folkways.core.api.colony.ColonyLifecycle;
+import io.github.izakyl.folkways.core.engine.inventory.InventoryIndex;
 import io.github.izakyl.folkways.base.persist.Reader;
 import io.github.izakyl.folkways.base.persist.Writer;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
@@ -16,6 +17,8 @@ public final class ColonyData {
 
     private final Holdings holdings;
 
+    private final InventoryIndex inventory;
+
     private final Keeps keeps = new Keeps();
 
     private final ColonyWorks works = new ColonyWorks(this);
@@ -28,6 +31,7 @@ public final class ColonyData {
     public ColonyData(UUID colonyId) {
         this.colonyId = colonyId;
         this.holdings = new Holdings(colonyId);
+        this.inventory = new InventoryIndex(colonyId);
         holdings.setReleasedListener(works::released);
         wire(holdings, keeps);
     }
@@ -77,6 +81,10 @@ public final class ColonyData {
 
     public Holdings holdings() {
         return holdings;
+    }
+
+    public InventoryIndex inventory() {
+        return inventory;
     }
 
     public Keeps keeps() {

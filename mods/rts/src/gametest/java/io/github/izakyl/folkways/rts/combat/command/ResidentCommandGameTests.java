@@ -253,6 +253,7 @@ public final class ResidentCommandGameTests {
         Body body = f.resident(new BlockPos(7, 1, 2));
         body.pack().insert(new ItemStack(Items.BOW));
         body.pack().insert(new ItemStack(Items.ARROW, 8));
+        PatrolSupplies.of(f.colony).loadout(body, LoadoutRegistry.BOW);
         Zombie first = EntityType.ZOMBIE.create(f.level);
         Zombie second = EntityType.ZOMBIE.create(f.level);
         for (Zombie enemy : List.of(first, second)) {

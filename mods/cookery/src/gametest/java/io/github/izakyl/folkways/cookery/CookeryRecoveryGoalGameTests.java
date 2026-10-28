@@ -118,6 +118,8 @@ public final class CookeryRecoveryGoalGameTests {
         final ResidentEntity actor;
         final SimpleContainer pack = new SimpleContainer(12);
         final Colony colony;
+        final io.github.izakyl.folkways.core.engine.colony.ColonyData inventoryData =
+            new io.github.izakyl.folkways.core.engine.colony.ColonyData();
         final ColonyView view;
         final CookeryPresence presence;
         final List<Grown> submitted = new ArrayList<>();
@@ -152,6 +154,7 @@ public final class CookeryRecoveryGoalGameTests {
             colony = (Colony) Proxy.newProxyInstance(Colony.class.getClassLoader(), new Class<?>[] { Colony.class },
                 (proxy, method, args) -> switch (method.getName()) {
                     case "id" -> id;
+                    case "inventory", "inventoryFeedback" -> inventoryData.inventory();
                     case "views" -> List.of(view);
                     case "view" -> view;
                     case "holdings" -> args == null || args.length == 0 || CookeryContent.STATION.equals(args[0]) ? List.of(holding) : List.of();
@@ -195,6 +198,7 @@ public final class CookeryRecoveryGoalGameTests {
         public Placement placement() { return Placement.NOWHERE; }
         public void close() {
             closed = true; presence.closed(Closing.SHUTDOWN); Cadence.forget(colony); actor.discard();
+            inventoryData.inventory().clear();
             before.forEach(level::setBlockAndUpdate);
             level.getEntitiesOfClass(ItemEntity.class, new AABB(cell).inflate(8)).forEach(ItemEntity::discard);
         }

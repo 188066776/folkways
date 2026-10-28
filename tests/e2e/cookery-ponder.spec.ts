@@ -74,11 +74,11 @@ for(var folder:Scenes.declared())if(folder.id().toString().equals("folkways:cook
  var registered=new ArrayList<Object>();
  for(var pair:access.getRegisteredEntries())if(pair.getValue().getSchematicLocation().equals(schematic)){
   var entry=pair.getValue();registered.add(Map.of("component",pair.getKey().toString(),"entryComponent",entry.getComponent().toString(),
-   "schematic",entry.getSchematicLocation().toString(),"sameBoard",entry.getBoard()==scene.board()));
+   "schematic",entry.getSchematicLocation().toString(),"sameBoard",entry.getBoard()==scene));
  }
  rows.add(Map.of("id",scene.id().toString(),"schematic",schematic.toString(),"items",Scenes.itemsFor(scene).stream().map(Object::toString).toList(),
   "registered",registered,"bound",Lessons.scenesFor(scene.id()).stream().map(entry->Map.of("component",entry.getComponent().toString(),
-   "schematic",entry.getSchematicLocation().toString(),"sameBoard",entry.getBoard()==scene.board())).toList()));
+   "schematic",entry.getSchematicLocation().toString(),"sameBoard",entry.getBoard()==scene)).toList()));
 }
 return Map.of("scenes",rows,"folder",Lessons.scenesFor(ResourceLocation.fromNamespaceAndPath("folkways","cookery")).stream()
  .map(entry->Map.of("component",entry.getComponent().toString(),"schematic",entry.getSchematicLocation().toString())).toList());
@@ -96,7 +96,8 @@ function assertRegistration(registry: any, installed: boolean) {
   for (const scene of registry.scenes) {
     const components = [...new Set([...scene.items, "folkways:colony_book"])].sort();
     expect(scene.registered.map((entry: any) => entry.component).sort(), scene.id + " has one true Ponder entry per item").toEqual(components);
-    expect(scene.registered.every((entry: any) => entry.component === entry.entryComponent && entry.sameBoard && entry.schematic === scene.schematic)).toBe(true);
+    expect(scene.registered.filter((entry: any) => entry.component !== entry.entryComponent || !entry.sameBoard
+      || entry.schematic !== scene.schematic), scene.id + " mismatched registrations").toEqual([]);
     expect(scene.bound, scene.id + " has exactly one canonical playback entry").toEqual([
       { component: "folkways:colony_book", schematic: scene.schematic, sameBoard: true },
     ]);

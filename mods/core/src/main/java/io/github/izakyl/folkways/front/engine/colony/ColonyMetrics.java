@@ -17,9 +17,10 @@ public record ColonyMetrics(
     int idle,
     int members,
     int zones,
-    List<Held> stock
+    List<Held> stock,
+    boolean complete
 ) {
-    public static final ColonyMetrics EMPTY = new ColonyMetrics(0, 0, 0, 0, List.of());
+    public static final ColonyMetrics EMPTY = new ColonyMetrics(0, 0, 0, 0, List.of(), true);
 
     public record Held(ItemSpec spec, int count) {
         public ResourceLocation item() {
@@ -46,11 +47,15 @@ public record ColonyMetrics(
         int members = (int) colony.holdings().stream()
             .filter(holding -> holding.what().singleCell().isPresent()).count();
         List<Held> stock = new ArrayList<>();
-        Map<ItemSpec, Integer> tally = ColonyStocks.tally(colony, server);
+        boolean complete = colony.inventory().snapshot().coverage().complete();
+        if (!complete) {
+            colony.inventory().ensureObserved();
+        }
+        Map<ItemSpec, Integer> tally = complete ? ColonyStocks.tally(colony, server) : Map.of();
         tally.forEach((item, count) -> stock.add(new Held(item, count)));
         stock.sort(Comparator.comparingInt(Held::count).reversed());
         return new ColonyMetrics(residents.size(), idle, members,
-            ColonyFront.of(colony).zones().size(), stock);
+            ColonyFront.of(colony).zones().size(), stock, complete);
     }
 
     public int kinds() {

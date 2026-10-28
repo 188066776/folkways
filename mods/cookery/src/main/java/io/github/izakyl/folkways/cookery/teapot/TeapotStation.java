@@ -52,6 +52,12 @@ public final class TeapotStation implements KitchenStation {
     }
 
     public boolean matches(BlockState state) { return state.is(ModBlocks.TEAPOT.get()); }
+
+    public Optional<Object> freezeSignature(ServerLevel level, WorldPos at) {
+        TeapotBlockEntity pot = pot(level, at).orElse(null);
+        return pot == null ? Optional.empty() : Optional.of(List.of(pot, pot.getBlockState(), empty(pot)));
+    }
+
     static Optional<TeapotBlockEntity> pot(ServerLevel level, WorldPos at) {
         return at.in(level) && level.isLoaded(at.block(level)) && level.getBlockEntity(at.block(level)) instanceof TeapotBlockEntity pot ? Optional.of(pot) : Optional.empty();
     }

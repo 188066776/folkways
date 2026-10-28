@@ -40,6 +40,14 @@ final class BuiltinKitchenStations {
 
     private static final class Board implements KitchenStation {
         public boolean matches(BlockState state) { return state.is(ModBlocks.CHOPPING_BOARD.get()); }
+
+        public Optional<Object> freezeSignature(ServerLevel level, WorldPos at) {
+            if (!(level.getBlockEntity(at.block(level)) instanceof ChoppingBoardBlockEntity board)) {
+                return Optional.empty();
+            }
+            return Optional.of(List.of(board, board.getBlockState(), board.getCurrentCutStack().isEmpty()));
+        }
+
         public Optional<Workshop> freeze(UUID key, UUID colony, ServerLevel level, WorldPos at,
                                          Stances stances, KitchenBookings bookings, Runnable changed) {
             return ChoppingBoardWorkshops.freeze(key, colony, level, at, stances, bookings, changed);
@@ -60,6 +68,19 @@ final class BuiltinKitchenStations {
 
     private static final class Stockpot implements KitchenStation {
         public boolean matches(BlockState state) { return state.is(ModBlocks.STOCKPOT.get()); }
+
+        public Optional<Object> freezeSignature(ServerLevel level, WorldPos at) {
+            if (!(level.getBlockEntity(at.block(level)) instanceof StockpotBlockEntity pot)) {
+                return Optional.empty();
+            }
+            boolean claimed = pot.getPersistentData().contains("folkways.cookery.stockpot");
+            if (claimed && pot.getStatus() == IStockpot.PUT_SOUP_BASE && pot.isEmpty()) {
+                return Optional.empty();
+            }
+            return Optional.of(List.of(pot, pot.getBlockState(), pot.getStatus(), pot.isEmpty(), pot.hasLid(),
+                claimed));
+        }
+
         public Optional<Workshop> freeze(UUID key, UUID colony, ServerLevel level, WorldPos at,
                                          Stances stances, KitchenBookings bookings, Runnable changed) {
             return StockpotWorkshops.freeze(key, colony, level, at, stances, bookings, changed);

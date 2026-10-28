@@ -2,9 +2,11 @@ package io.github.izakyl.folkways.plugins.orders;
 
 import io.github.izakyl.folkways.FolkwaysMod;
 import io.github.izakyl.folkways.core.api.colony.Colony;
+import io.github.izakyl.folkways.core.api.colony.Colonies;
 import io.github.izakyl.folkways.core.api.terms.Containers;
 import io.github.izakyl.folkways.core.api.terms.ItemSpec;
 import io.github.izakyl.folkways.core.api.terms.ItemFilter;
+import io.github.izakyl.folkways.core.api.terms.Stash;
 import io.github.izakyl.folkways.front.api.panel.Board;
 import net.minecraft.network.chat.contents.TranslatableContents;
 import io.github.izakyl.folkways.core.api.terms.StoreRule;
@@ -47,6 +49,47 @@ public final class OrdersPlanningGameTests {
         event.register(OrdersPlanningGameTests.class);
     }
 
+    @GameTest(template = "empty")
+    public static void dirtyOrderTargetWaitsWithoutStartingABatchOrReportingAbsence(GameTestHelper helper)
+            throws ReflectiveOperationException {
+        var level = helper.getLevel();
+        BlockPos cell = helper.absolutePos(new BlockPos(2, 1, 2));
+        level.setBlockAndUpdate(cell, Blocks.BARREL.defaultBlockState());
+        WorldPos at = WorldPos.of(level, cell);
+        Colony observations = Colonies.mint(level.getServer());
+        try {
+            AtomicReference<CompoundTag> kept = new AtomicReference<>(new CompoundTag());
+            Colony colony = (Colony) Proxy.newProxyInstance(Colony.class.getClassLoader(),
+                new Class<?>[] {Colony.class}, (proxy, method, args) -> switch (method.getName()) {
+                    case "inventory" -> observations.inventory();
+                    case "id" -> observations.id();
+                    case "kept" -> kept.get().copy();
+                    case "keep" -> { kept.set(((CompoundTag) args[1]).copy()); yield null; }
+                    case "submitted" -> Set.of();
+                    case "rule", "withdraw" -> null;
+                    case "submit" -> throw new AssertionError("unknown stock cannot trigger replenishment");
+                    default -> throw new AssertionError(method.getName());
+                });
+            OrdersPresence presence = new OrdersPresence(colony);
+            Order order = new Order(at, ItemSpec.of(Items.IRON_INGOT), 32, 64, true);
+            @SuppressWarnings("unchecked")
+            Map<Order.Key, Order> orders = (Map<Order.Key, Order>) field(presence, "orders");
+            orders.put(order.key(), order);
+            observations.inventory().observe(OrdersContent.ID, level, List.of(at));
+            observations.inventoryFeedback().changed(Stash.at(at));
+            presence.refresh(level.getServer());
+            var view = ColonySnapshot.of(new ColonyData(), level);
+            helper.assertTrue(presence.goals(view).isEmpty(), "dirty stock cannot start a new replenishment batch");
+            Board.Row row = presence.board(OrdersContent.PAGE.id(), view).orElseThrow().rows().get(1);
+            helper.assertTrue(row.detail().getContents() instanceof TranslatableContents translated
+                    && translated.getKey().equals("folkways.panel.orders.unknown"),
+                "a pending stock check is not presented as a missing target or zero stock");
+        } finally {
+            observations.raze();
+        }
+        helper.succeed();
+    }
+
     @GameTest(template = "empty", timeoutTicks = 100)
     public static void lowWaterStartsOneFixedBatchWhichSurvivesInventoryChangesAndReload(GameTestHelper helper)
             throws ReflectiveOperationException {
@@ -65,9 +108,11 @@ public final class OrdersPlanningGameTests {
         AtomicInteger withdrawals = new AtomicInteger();
         AtomicReference<CompoundTag> kept = new AtomicReference<>(new CompoundTag());
         Set<UUID> submitted = new LinkedHashSet<>();
+        Colony observations = Colonies.mint(level.getServer());
         UUID colonyId = UUID.randomUUID();
         Colony colony = (Colony) Proxy.newProxyInstance(Colony.class.getClassLoader(),
             new Class<?>[] {Colony.class}, (proxy, method, args) -> switch (method.getName()) {
+                case "inventory" -> observations.inventory();
                 case "kept" -> kept.get().copy();
                 case "views" -> throw new AssertionError("orders may target containers outside marked colony cells");
                 case "submitted" -> Set.copyOf(submitted);
@@ -137,6 +182,7 @@ public final class OrdersPlanningGameTests {
         var again = restored.goals(view).getFirst();
         helper.assertTrue(!idOf(again).equals(idOf(next)) && owed(again) == 64,
             "completion rechecks stock and starts another batch if still below low water");
+        observations.raze();
         helper.succeed();
     }
 
@@ -154,8 +200,10 @@ public final class OrdersPlanningGameTests {
         ItemSpec iron = ItemSpec.of(ResourceLocation.withDefaultNamespace("iron_ingot"));
         AtomicReference<List<StoreRule>> ruled = new AtomicReference<>(List.of());
         AtomicReference<CompoundTag> kept = new AtomicReference<>(new CompoundTag());
+        Colony observations = Colonies.mint(level.getServer());
         Colony colony = (Colony) Proxy.newProxyInstance(Colony.class.getClassLoader(),
             new Class<?>[] {Colony.class}, (proxy, method, args) -> switch (method.getName()) {
+                case "inventory" -> observations.inventory();
                 case "kept" -> kept.get().copy();
                 case "keep" -> { kept.set(((CompoundTag) args[1]).copy()); yield null; }
                 case "rule" -> {
@@ -192,9 +240,15 @@ public final class OrdersPlanningGameTests {
         helper.assertTrue(reloaded.equals(shelves), "shelves survive a reload");
 
         level.setBlockAndUpdate(hall, Blocks.AIR.defaultBlockState());
+        ColonyData observed = ColonyData.find(level.getServer(), observations.id()).orElseThrow();
+        observed.inventory().advance(level, observed, Map.of());
         presence.refresh(level.getServer());
-        helper.assertTrue(ruled.get().equals(List.of(new StoreRule.Reserve(kitchenAt, bread))),
-            "a shelf goes with its container");
+        helper.assertTrue(ruled.get().equals(List.of(
+                new StoreRule.Reserve(kitchenAt, bread),
+                new StoreRule.Access(hallAt, false, false),
+                new StoreRule.Admit(hallAt, true, List.of(iron)))) && shelves.containsKey(hallAt),
+            "an unsupported observation keeps the shelf and its previous rules pending");
+        observations.raze();
         helper.succeed();
     }
 

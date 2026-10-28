@@ -6,7 +6,9 @@ import io.github.izakyl.folkways.core.api.colony.ColonyView;
 import io.github.izakyl.folkways.core.api.colony.Holding;
 import io.github.izakyl.folkways.core.api.colony.Release;
 import io.github.izakyl.folkways.core.api.colony.Sweep;
-import io.github.izakyl.folkways.core.api.terms.Reach;
+import io.github.izakyl.folkways.core.api.inventory.InventorySnapshot;
+import io.github.izakyl.folkways.core.api.terms.Stand;
+import io.github.izakyl.folkways.core.api.terms.Stash;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
 import io.github.izakyl.folkways.core.api.work.Grown;
 import io.github.izakyl.folkways.core.api.work.Stances;
@@ -47,6 +49,7 @@ public final class CompostPresence implements Facing, Holding.Watch {
     }
 
     public CompostStation station() { return station; }
+
     public SeedBudget budget(ServerLevel level) { return seeds.budget(level); }
 
     public void held(Holding holding) { dirty = true; sweep.nudge(); }
@@ -70,6 +73,10 @@ public final class CompostPresence implements Facing, Holding.Watch {
         dirty = false;
         Set<WorldPos> marked = new LinkedHashSet<>();
         colony.holdings(CompostContent.POINT).forEach(holding -> marked.addAll(holding.what().cells()));
+        for (ServerLevel level : server.getAllLevels()) {
+            colony.inventory().observe(CompostContent.ID, level,
+                marked.stream().filter(at -> at.in(level)).toList());
+        }
         for (WorldPos at : List.copyOf(sites.keySet())) {
             if (!marked.contains(at)) {
                 bookings.withdraw(at);
@@ -85,7 +92,7 @@ public final class CompostPresence implements Facing, Holding.Watch {
                     sites.remove(at);
                 } else {
                     bookings.admit(at);
-                    sites.put(at, Stances.of(level, Reach.workableCells(level, at.block(level))));
+                    sites.put(at, approach(at));
                 }
             });
         }
@@ -95,8 +102,9 @@ public final class CompostPresence implements Facing, Holding.Watch {
         List<Grown> goals = new ArrayList<>();
         ServerLevel level = view.level();
         CompostStation.Planning planning = station.planning(colony.id());
+        sites.replaceAll((at, before) -> approach(at));
         sites.forEach((at, stances) -> {
-            if (!at.in(level) || !level.isLoaded(at.block(level))) return;
+            if (!at.in(level) || !level.isLoaded(at.block(level))) { return; }
             goals.addAll(stances.isPresent()
                 ? station.recovery(colony.id(), level, at, stances.get(), bookings, sweep::nudge, planning)
                 : station.activeRecovery(colony.id(), level, at, bookings));
@@ -104,7 +112,20 @@ public final class CompostPresence implements Facing, Holding.Watch {
         return List.copyOf(goals);
     }
 
+    private Optional<Stances> approach(WorldPos at) {
+        var store = colony.inventory().snapshot().store(at);
+        if (store.isEmpty() || store.get().approach().state() != InventorySnapshot.State.OBSERVED) {
+            colony.inventory().ensureObserved(Stash.at(at));
+            return Optional.empty();
+        }
+        return store
+            .flatMap(value -> Stances.of(value.approach().stands().stream().map(Stand::cell).toList()));
+    }
+
     public void closed(Closing why) {
+        for (ServerLevel level : server.getAllLevels()) {
+            colony.inventory().observe(CompostContent.ID, level, List.of());
+        }
         station.stop(colony.id(), why);
         sites.clear();
         bookings.clear();
@@ -112,7 +133,7 @@ public final class CompostPresence implements Facing, Holding.Watch {
 
     public List<Line> blockLines(BlockPos cell, ColonyView view) {
         WorldPos at = WorldPos.of(view.level(), cell);
-        if (!sites.containsKey(at)) return List.of();
+        if (!sites.containsKey(at)) { return List.of(); }
         Component status = sites.get(at).isEmpty()
             ? Component.translatable("folkways.compost.status.unreachable") : station.status(view.level(), at);
         return List.of(Line.text(status));

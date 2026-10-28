@@ -1,6 +1,10 @@
 package io.github.izakyl.folkways.create.dispatch;
 
 import io.github.izakyl.folkways.core.api.terms.Goods;
+import io.github.izakyl.folkways.core.api.terms.Stash;
+import io.github.izakyl.folkways.core.api.inventory.InventoryFeedback;
+import io.github.izakyl.folkways.core.api.inventory.InventorySnapshot;
+import io.github.izakyl.folkways.core.engine.inventory.InventoryChanges;
 import io.github.izakyl.folkways.core.api.terms.ItemSpec;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
 import io.github.izakyl.folkways.core.api.vocation.Vocation;
@@ -33,10 +37,19 @@ final class TakeNode implements Node {
     private final ItemSpec want;
     private final long count;
     private final UUID network;
+    private final InventoryFeedback feedback;
+    private final Optional<InventorySnapshot.Version> observed;
     private volatile long takenAt = -1;
 
     TakeNode(WorldPos at, Stances stances, ItemSpec want, long count, int reachTicks, UUID network) {
+        this(at, stances, want, count, reachTicks, network, InventoryFeedback.NONE, Optional.empty());
+    }
+
+    TakeNode(WorldPos at, Stances stances, ItemSpec want, long count, int reachTicks, UUID network,
+             InventoryFeedback feedback, Optional<InventorySnapshot.Version> observed) {
         this.at = at;
+        this.feedback = feedback;
+        this.observed = observed;
         this.want = want;
         this.count = count;
         this.network = network;
@@ -85,14 +98,21 @@ final class TakeNode implements Node {
     @Override
     public Outcome commit(ServerLevel level, Worker who) {
         if (!at.in(level) || !level.isLoaded(at.block(level))) {
+            stale();
             return Outcome.failed(DispatchRefusal.NO_SUPPLY);
         }
         List<ItemStack> taken = PackageNetworks.get().takeOut(level, at.block(level),
             stack -> Goods.matches(stack, want), count);
         if (taken.isEmpty()) {
+            stale();
             return Outcome.failed(DispatchRefusal.NO_SUPPLY);
         }
+        InventoryChanges.store(level, at);
         takenAt = level.getGameTime();
         return new Outcome.Done(List.of(Rummaged.at(at.block(level))), taken, Optional.of(new Xp(hauling, 1)));
+    }
+
+    private void stale() {
+        observed.ifPresent(version -> feedback.stale(Stash.at(at), version));
     }
 }

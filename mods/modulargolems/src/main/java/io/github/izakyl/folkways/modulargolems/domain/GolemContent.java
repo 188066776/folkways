@@ -28,7 +28,7 @@ public final class GolemContent {
 
     public static void declare(Declaring declaring) {
         declaring.colony(ID, scope -> {
-            GolemPresence state = new GolemPresence();
+            GolemPresence state = new GolemPresence(scope.colony());
             scope.share(state);
             scope.urges(state::urges);
         });

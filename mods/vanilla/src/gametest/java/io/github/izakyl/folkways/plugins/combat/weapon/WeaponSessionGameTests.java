@@ -499,8 +499,8 @@ public final class WeaponSessionGameTests {
     public static void unloadAndDismissalCloseTheLoanAndNoAmmoCannotFire(GameTestHelper helper) {
         Fixture fixture = fixture(helper, Items.BOW, 0);
         try {
-            helper.assertFalse(Weapons.armed(worker(fixture.body())), "an empty bow is not a usable"
-                + " combat weapon");
+            helper.assertTrue(Weapons.armed(worker(fixture.body())),
+                "an unprofiled resident attempts combat at execution");
             helper.assertTrue(Weapons.open(worker(fixture.body())).isEmpty(), "automatic selection"
                 + " skips an"
                 + " empty bow");
@@ -514,8 +514,10 @@ public final class WeaponSessionGameTests {
                 + " is the actual"
                 + " sword");
             sword.close();
+            helper.assertTrue(Weapons.BOW.open(worker(fixture.body())).isEmpty(),
+                "direct session opening also rejects a bow without arrows");
+            fixture.body().pack().insert(new ItemStack(Items.ARROW));
             WeaponSession session = Weapons.BOW.open(worker(fixture.body())).orElseThrow();
-            helper.assertFalse(session.fire(fixture.target()), "no arrow means no bow shot");
             fixture.body().leaveColony();
             helper.assertValueEqual(
                 session.state(), WeaponSession.State.CLOSED, "dismissal closes the loan"
@@ -775,7 +777,7 @@ public final class WeaponSessionGameTests {
     }
 
     @GameTest(batch = "vanilla_weapons", template = "empty_large", timeoutTicks = 100)
-    public static void changingPreferenceStopsTheOldDrawAndAnEmptyPreferredBowFallsBackToASword(GameTestHelper helper) {
+    public static void changingPreferenceStopsTheOldDrawAndEmptyAssignedBowFails(GameTestHelper helper) {
         Fixture fixture = fixture(helper, Items.IRON_SWORD, 3);
         Colony colony = enroll(helper, fixture.body());
         ResidentEntity body = fixture.body();
@@ -818,11 +820,8 @@ public final class WeaponSessionGameTests {
                     }
                 }
                 supplies.loadout(body, LoadoutRegistry.BOW);
-                WeaponSession fallback = Weapons.open(worker(body)).orElseThrow();
-                helper.assertTrue(
-                    body.getMainHandItem().is(Items.IRON_SWORD),
-                    "an empty preferred bow still falls back to a usable carried sword");
-                fallback.close();
+                helper.assertTrue(Weapons.open(worker(body)).isEmpty(),
+                    "the assigned empty bow fails at execution rather than using an unassigned sword");
             });
         helper.runAfterDelay(
             40,

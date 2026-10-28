@@ -13,6 +13,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.Container;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -87,9 +88,13 @@ public interface PackageNetwork {
         return List.of();
     }
 
-    // What lies in one of the network's containers now.
-    default List<ItemStack> heldIn(ServerLevel level, BlockPos container) {
-        return List.of();
+    default boolean containersComplete(ServerLevel level, UUID network) {
+        return true;
+    }
+
+    // A live slot view opened only by the shared inventory observer.
+    default Container inventoryAt(ServerLevel level, BlockPos container) {
+        return null;
     }
 
     // Takes `count` of the goods out of the container by hand: all of them, or nothing when fewer are there.

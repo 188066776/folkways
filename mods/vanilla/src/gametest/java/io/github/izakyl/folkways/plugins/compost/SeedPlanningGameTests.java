@@ -87,7 +87,7 @@ public final class SeedPlanningGameTests {
     }
 
     @GameTest(template = "empty")
-    public static void freshPermitsRejectClaimsAndSettingsChangedAfterTheReadOnlyPreview(GameTestHelper helper) {
+    public static void newPlanningReadsSettingsAfterTheReadOnlyPreview(GameTestHelper helper) {
         UUID node = UUID.randomUUID();
         var location = SeedBudget.Location.pack(UUID.randomUUID());
         var goods = Goods.specOf(Items.WHEAT_SEEDS.getDefaultInstance());
@@ -96,18 +96,8 @@ public final class SeedPlanningGameTests {
         var budget = new SeedBudget(snapshot::get, () -> Set.of(Items.WHEAT_SEEDS), ignored -> keep.get());
         var preview = budget.planning();
         helper.assertValueEqual(preview.tally(Items.WHEAT_SEEDS).compostable(), 21L, "the original physical batch is affordable");
-        var own = new SeedBudget.Claim(node, location, goods, 21);
-        snapshot.set(snapshot(location, 64, List.of(own), true));
-        helper.assertTrue(budget.permits(node, new ItemStack(Items.WHEAT_SEEDS, 21)),
-            "live settlement restores real escrow and excludes only its own input claim");
-        snapshot.set(snapshot(location, 64, List.of(own,
-            new SeedBudget.Claim(UUID.randomUUID(), location, goods, 1)), true));
-        helper.assertTrue(!budget.permits(node, new ItemStack(Items.WHEAT_SEEDS, 21)),
-            "a new same-tick sowing claim cannot consume the old preview allowance");
-        snapshot.set(snapshot(location, 64, List.of(own), true));
+        snapshot.set(snapshot(location, 64, List.of(), true));
         keep.set(65);
-        helper.assertTrue(!budget.permits(node, new ItemStack(Items.WHEAT_SEEDS, 21)),
-            "a same-tick configuration increase is reread before destructive commit");
         helper.assertValueEqual(preview.tally(Items.WHEAT_SEEDS).compostable(), 21L, "the earlier read-only report stays immutable");
         helper.assertValueEqual(budget.planning().tally(Items.WHEAT_SEEDS).compostable(), 0L, "a new planning call reads current data");
         helper.succeed();
@@ -144,7 +134,6 @@ public final class SeedPlanningGameTests {
         helper.assertTrue(!unknown.complete() && unknown.reserves().isEmpty(), "unknown stock cannot create speculative reserve requests");
         helper.assertTrue(unknown.tally(Items.WHEAT_SEEDS).physical() == 100
             && unknown.tally(Items.WHEAT_SEEDS).compostable() == 0, "known physical stock is reported but cannot be destroyed");
-        helper.assertTrue(!budget.permits(UUID.randomUUID(), new ItemStack(Items.WHEAT_SEEDS)), "escrow cannot bypass an incomplete live snapshot");
         current.set(new SeedBudget.Snapshot(List.of(new SeedBudget.Stock("now loaded", location,
             List.of(new ItemStack(Items.WHEAT_SEEDS, 64), new ItemStack(Items.BEETROOT_SEEDS, 64), new ItemStack(Items.BEETROOT_SEEDS, 8)))),
             List.of(), List.of(), Map.of()));
@@ -258,7 +247,6 @@ public final class SeedPlanningGameTests {
             CompostSettings.reserve(colony, Items.WHEAT_SEEDS, 200);
             helper.assertValueEqual(budget.planning().tally(Items.WHEAT_SEEDS).compostable(), 0L,
                 "a newly configured reserve applies to the next real inventory batch");
-            helper.assertTrue(!budget.permits(UUID.randomUUID(), new ItemStack(Items.WHEAT_SEEDS)), "fresh execution cannot use the stale pre-change report");
             // A held resident goes unloaded the way it does in play: its chunk unloads it after it joined.
             ResidentEntity away = PersonBody.RESIDENT.get().create(level);away.setNoAi(true);
             away.moveTo(helper.absolutePos(new BlockPos(7, 1, 4)).getCenter());

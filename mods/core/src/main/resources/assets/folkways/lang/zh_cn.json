@@ -1,4 +1,5 @@
 {
+  "folkways.settlers.checking_stock": "正在检查库存…",
   "folkways.delegation.folkways.elevator": "电梯",
   "folkways.doing.folkways.elevator_boarding": "进入电梯",
   "folkways.doing.folkways.elevator_riding": "乘坐电梯",
@@ -358,6 +359,7 @@
   "folkways.panel.orders.draft.detail": "下限 %s · 上限 %s",
   "folkways.panel.orders.file": "下单方式",
   "folkways.panel.orders.gone": "目标已不存在",
+  "folkways.panel.orders.unknown": "等待确认库存",
   "folkways.panel.orders.here": "此处的订单",
   "folkways.panel.orders.coming": " · 在途 %s",
   "folkways.panel.orders.container": "%s（%s, %s, %s）",
@@ -1029,7 +1031,7 @@
   "folkways.ponder.cookery_teapot.text_1": "登记茶壶并为最终茶饮下订单。每个原生配方泡出十二份，计划会同时准备十二只实际空杯，并预留可到达的上茶空间。",
   "folkways.ponder.cookery_pots.text_7": "固定和灵活配方遵循原生匹配规则。灵活菜肴保留设备实际计算的品质；已投入批次在取消和重载后可恢复，恢复时取回所属产物，不会再次扣原料。",
   "folkways.ponder.cookery_tools.text_6": "需要两个任务并行时，将厨刀维持订单的最低数量和目标数量都设为 2。已借出并承诺归还到该仓库的真实厨刀仍计入库存，不会因暂时借走而重复补制。",
-  "folkways.ponder.cookery_seeds.text_4": "登记堆肥桶，堆肥不需要草帽。每批投入前重新检查余量，一次消耗原版平均用量并填至七层：空桶需 21 粒小麦种子。余量不足完整一批时等待。",
+  "folkways.ponder.cookery_seeds.text_4": "登记堆肥桶，堆肥不需要草帽。规划每批时检查余量，一次消耗原版平均用量并填至七层：空桶需 21 粒小麦种子。余量不足完整一批时等待。",
   "folkways.ponder.cookery_rice.text_4": "普通收获会留下水供续种。重新种植消耗真实种子；野生稻种和稻米共用一份播种储备，优先保留野生稻种。",
   "folkways.ponder.cookery_chain.text_2": "石磨先使用真实小麦磨出面粉，驱动者解绑并走出后再收集产物。没有安全出口时等待道路恢复。",
   "folkways.ponder.cookery_steamer.header": "蒸笼：层级、顶盖与真实热源",

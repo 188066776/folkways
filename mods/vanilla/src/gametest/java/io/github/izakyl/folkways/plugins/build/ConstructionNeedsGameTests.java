@@ -1,8 +1,10 @@
 package io.github.izakyl.folkways.plugins.build;
 
 import io.github.izakyl.folkways.FolkwaysMod;
+import io.github.izakyl.folkways.core.api.colony.Colonies;
 import io.github.izakyl.folkways.core.api.colony.Colony;
 import io.github.izakyl.folkways.core.api.resident.Resident;
+import io.github.izakyl.folkways.core.api.resident.body.Body;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
 import io.github.izakyl.folkways.core.api.work.Grown;
 import io.github.izakyl.folkways.core.api.work.Node;
@@ -14,16 +16,18 @@ import io.github.izakyl.folkways.core.engine.labor.Commit;
 import io.github.izakyl.folkways.effect.Effects;
 import io.github.izakyl.folkways.plugins.FolkwaysVanillaMod;
 import io.github.izakyl.folkways.plugins.person.PersonBody;
+import io.github.izakyl.folkways.test.InventoryObservations;
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.SimpleContainer;
+import net.minecraft.world.Container;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -59,7 +63,7 @@ public final class ConstructionNeedsGameTests {
         helper.assertTrue(outcome instanceof Outcome.Done, "normal construction commit succeeds: " + outcome);
         helper.assertTrue(helper.getLevel().getBlockState(fixture.cell).is(Blocks.CAMPFIRE), "campfire is built");
         helper.assertTrue(fixture.pack.isEmpty(), "construction spends its campfire material");
-        fixture.needs.close();
+        fixture.close();
         helper.succeed();
     }
 
@@ -70,6 +74,7 @@ public final class ConstructionNeedsGameTests {
         fixture.needs.refresh(helper.getLevel(), Map.of());
         helper.assertTrue(!fixture.asked.isEmpty() && fixture.asked.stream().allMatch(node ->
             fixture.withdrawn.contains(node.id())), "all pending work is withdrawn when its region disappears");
+        fixture.close();
         helper.succeed();
     }
 
@@ -84,14 +89,16 @@ public final class ConstructionNeedsGameTests {
         helper.assertTrue(outcome instanceof Outcome.Failed, "construction refuses a newly placed obstacle");
         helper.assertTrue(helper.getLevel().getBlockState(fixture.cell).is(Blocks.DIAMOND_BLOCK), "new block survives");
         helper.assertTrue(fixture.pack.countItem(Items.CAMPFIRE) == 1, "failed construction spends no materials");
-        fixture.needs.close();
+        fixture.close();
         helper.succeed();
     }
 
     private static final class Fixture {
         final List<Node> asked = new ArrayList<>();
         final List<UUID> withdrawn = new ArrayList<>();
-        final SimpleContainer pack = new SimpleContainer(8);
+        final Container pack;
+        final Colony inventoryColony;
+        final Body resident;
         final ConstructionNeeds needs;
         final Worker worker;
         final GameTestHelper helper;
@@ -106,14 +113,19 @@ public final class ConstructionNeedsGameTests {
                 }
             }
             helper.getLevel().setBlock(cell, Blocks.AIR.defaultBlockState(), 2);
+            inventoryColony = Colonies.mint(helper.getLevel().getServer());
             Colony colony = (Colony) Proxy.newProxyInstance(getClass().getClassLoader(), new Class<?>[] {Colony.class},
                 (proxy, method, args) -> switch (method.getName()) {
+                    case "inventory" -> inventoryColony.inventory();
+                    case "holdingAt" -> Optional.empty();
                     case "submit" -> { asked.addAll(((Grown) args[2]).nodes()); yield null; }
                     case "withdraw" -> { withdrawn.add((UUID) args[1]); yield null; }
                     default -> null;
                 });
             needs = new ConstructionNeeds(colony, ResourceLocation.fromNamespaceAndPath("folkways", "apiary"));
-            Mob body = PersonBody.RESIDENT.get().create(helper.getLevel());
+            resident = PersonBody.RESIDENT.get().create(helper.getLevel());
+            Mob body = resident.mob();
+            pack = resident.pack();
             body.setPos(Vec3.atBottomCenterOf(cell.offset(-1, 0, 0)));
             worker = (Worker) Proxy.newProxyInstance(getClass().getClassLoader(), new Class<?>[] {Worker.class},
                 (proxy, method, args) -> switch (method.getName()) {
@@ -129,10 +141,18 @@ public final class ConstructionNeedsGameTests {
         }
 
         Node operation() {
+            InventoryObservations.publish(inventoryColony, helper.getLevel(),
+                Map.of(resident.id(), resident));
             Workload.Within shift = (Workload.Within) asked.getFirst().spec().workload();
             Workload.Within.Turn turn = shift.next(helper.getLevel(), worker);
             helper.assertTrue(turn instanceof Workload.Within.Turn.Piece, "builder receives a construction operation: " + turn);
             return ((Workload.Within.Turn.Piece) turn).node();
+        }
+
+        void close() {
+            needs.close();
+            resident.mob().discard();
+            inventoryColony.raze();
         }
 
         void refresh() {

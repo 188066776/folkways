@@ -13,10 +13,22 @@ import io.github.izakyl.folkways.core.api.terms.Footing;
 import io.github.izakyl.folkways.core.api.terms.Goods;
 import io.github.izakyl.folkways.core.api.terms.Reach;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
-import io.github.izakyl.folkways.core.api.work.*;
-import io.github.izakyl.folkways.cookery.*;
+import io.github.izakyl.folkways.core.api.work.Grown;
+import io.github.izakyl.folkways.core.api.work.Intent;
+import io.github.izakyl.folkways.core.api.work.Produce;
+import io.github.izakyl.folkways.core.api.work.Refinement;
+import io.github.izakyl.folkways.core.api.work.Stances;
+import io.github.izakyl.folkways.core.api.work.WorkSite;
+import io.github.izakyl.folkways.core.api.work.Workshop;
+import io.github.izakyl.folkways.cookery.CookeryContent;
+import io.github.izakyl.folkways.cookery.KitchenBookings;
+import io.github.izakyl.folkways.cookery.KitchenStation;
 import io.github.izakyl.folkways.plugins.FolkwaysVanillaConfig;
-import java.util.*;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
@@ -37,6 +49,13 @@ public class TavernStation implements KitchenStation {
     static ResourceLocation recipe(boolean barrel) { return ResourceLocation.fromNamespaceAndPath("kaleidoscope_tavern", barrel ? "barrel/wine" : "pressing_tub/grape_bucket"); }
     static ItemStack output(boolean barrel) { return new ItemStack(barrel ? ModItems.WINE.get() : ModItems.GRAPE_BUCKET.get()); }
     public boolean matches(BlockState state) { return state.is(barrel ? ModBlocks.BARREL.get() : ModBlocks.PRESSING_TUB.get()); }
+
+    public Optional<Object> freezeSignature(ServerLevel level, WorldPos at) {
+        Object entity = level.getBlockEntity(at.block(level));
+        return entity == null ? Optional.empty()
+            : Optional.of(List.of(entity, level.getBlockState(at.block(level)), empty(level, at, barrel)));
+    }
+
     public BlockPos anchor(Level level, BlockPos cell) {
         return barrel ? BarrelBlock.getOriginPos(cell, level.getBlockState(cell)) : cell;
     }

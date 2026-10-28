@@ -3,6 +3,7 @@ package io.github.izakyl.folkways.plugins.person.living;
 import io.github.izakyl.folkways.core.api.Declaring;
 import io.github.izakyl.folkways.core.api.colony.Colonies;
 import io.github.izakyl.folkways.core.api.colony.Colony;
+import io.github.izakyl.folkways.core.api.inventory.InventoryProviders;
 import io.github.izakyl.folkways.core.api.participation.Participation;
 import io.github.izakyl.folkways.core.api.participation.Participations;
 import io.github.izakyl.folkways.core.api.participation.Stake;
@@ -84,6 +85,7 @@ public final class LivingContent {
 
     public static void declare(Declaring declaring) {
         DiningTables.installKeepout();
+        InventoryProviders.register(DiningInventory.ID, new DiningInventory());
         declaring.colony(ID, scope -> {
             LivingPresence state = new LivingPresence(scope.colony());
             scope.share(state);

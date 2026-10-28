@@ -4,6 +4,7 @@ import io.github.izakyl.folkways.FolkwaysMod;
 import io.github.izakyl.folkways.base.persist.Reader;
 import io.github.izakyl.folkways.core.api.colony.Colonies;
 import io.github.izakyl.folkways.core.api.colony.Held;
+import io.github.izakyl.folkways.core.engine.colony.ColonyData;
 import io.github.izakyl.folkways.core.api.resident.Resident;
 import io.github.izakyl.folkways.core.api.terms.Containers;
 import io.github.izakyl.folkways.core.api.terms.Goods;
@@ -416,6 +417,8 @@ public final class ItemIdentityGameTests {
         try {
             colony.hold(PlanningFixture.Rounds.OWNER, new Held.Block(f.source)).orElseThrow();
             colony.stores(PlanningFixture.Rounds.OWNER, level.dimension(), List.of(f.source));
+            var data = ColonyData.find(level.getServer(), colony.id()).orElseThrow();
+            data.inventory().advance(level, data, Map.of());
             var reading = ColonyMetrics.of(level.getServer(), colony);
             helper.assertTrue(
                 reading.stock().size() == 2 && reading.goods() == 5,

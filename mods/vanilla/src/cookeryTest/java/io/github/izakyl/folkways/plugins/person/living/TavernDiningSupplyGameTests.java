@@ -57,30 +57,30 @@ public final class TavernDiningSupplyGameTests {
                 var foreign = Containers.at(f.level, other).orElseThrow();
                 foreign.setItem(0, new ItemStack(BuiltInRegistries.ITEM.get(WINE))); foreign.setChanged();
                 f.display.setItem(0, new ItemStack(Items.BREAD)); f.display.setChanged();
-                Node meal = f.dining.urge(f.worker, f.colony.view(f.level), Urge.SPARE, false).orElseThrow().take().get();
+                Node meal = f.urge().orElseThrow().take().get();
                 helper.assertValueEqual(meal.spec().doing(), LivingContent.DINING_EATING, "another dining area's counter is never raided for this meal");
                 meal.ended(f.level, Ending.DROPPED);
                 var own = Containers.at(f.level, counter).orElseThrow();
                 own.setItem(0, new ItemStack(BuiltInRegistries.ITEM.get(WINE))); own.setChanged();
-                Node food = f.dining.urge(f.worker, f.colony.view(f.level), Urge.SPARE, false).orElseThrow().take().get();
+                Node food = f.urge().orElseThrow().take().get();
                 helper.assertValueEqual(food.spec().doing(), LivingContent.DINING_EATING, "a meal no longer fetches wine to the food table");
                 food.ended(f.level, Ending.DROPPED);
                 f.display.clearContent();
-                Node drink = f.dining.drinking(f.worker, f.colony.view(f.level)).orElseThrow().take().get();
+                Node drink = f.drinking().orElseThrow().take().get();
                 helper.assertTrue(drink.spec().focus().filter(counter::equals).isPresent(), "a bar visit focuses the native counter which holds its actual bottle stock");
-                helper.assertTrue(f.dining.drinking(f.worker, f.colony.view(f.level)).orElseThrow().take().get() == drink,
+                helper.assertTrue(f.drinking().orElseThrow().take().get() == drink,
                     "the active drink retains its reserved chair");
                 f.dining.refresh(f.level.getServer());
                 helper.assertTrue(drink.refusal(f.level).isEmpty(), "a refresh preserves an active bar visit");
                 drink.ended(f.level, Ending.DROPPED);
                 helper.assertValueEqual(own.getItem(0).getCount(), 1, "an interrupted visit never consumes the bottle");
-                Node retry = f.dining.drinking(f.worker, f.colony.view(f.level)).orElseThrow().take().get();
+                Node retry = f.drinking().orElseThrow().take().get();
                 helper.assertTrue(retry != drink, "interruption releases the seat and serving reservation");
                 f.level.removeBlock(counter, false);
                 helper.assertTrue(retry.refusal(f.level).isPresent(), "removing the service counter cancels a reserved drink without consuming stock");
                 retry.ended(f.level, Ending.DROPPED);
                 f.worker.body().getPersistentData().putLong("folkways:last_table_drink", f.level.getGameTime());
-                helper.assertTrue(f.dining.drinking(f.worker, f.colony.view(f.level)).isEmpty(), "drinking has a cooldown independent of hunger");
+                helper.assertTrue(f.drinking().isEmpty(), "drinking has a cooldown independent of hunger");
             }
             helper.succeed();
         }

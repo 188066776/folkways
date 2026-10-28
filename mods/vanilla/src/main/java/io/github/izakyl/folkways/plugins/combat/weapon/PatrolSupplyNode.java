@@ -1,6 +1,8 @@
 package io.github.izakyl.folkways.plugins.combat.weapon;
 
+import io.github.izakyl.folkways.core.api.inventory.InventorySnapshot;
 import io.github.izakyl.folkways.core.api.terms.Containers;
+import io.github.izakyl.folkways.core.api.terms.Stash;
 import io.github.izakyl.folkways.core.api.terms.Reach;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
 import io.github.izakyl.folkways.core.api.terms.WorldSpaces;
@@ -37,6 +39,8 @@ final class PatrolSupplyNode implements Node, Staged {
     private final PatrolSupplies.Demand demand;
     private final long deadline;
     private final NodeSpec spec;
+    private final Stash observedStore;
+    private final InventorySnapshot.Version observedVersion;
     private Container borrowed;
     private PatrolSupplies.State failure;
     private String failureReason;
@@ -48,12 +52,16 @@ final class PatrolSupplyNode implements Node, Staged {
         PatrolSupplies.Demand demand,
         int missing,
         Stances stances,
-        long deadline) {
+        long deadline,
+        Stash observedStore,
+        InventorySnapshot.Version observedVersion) {
         this.supplies = supplies;
         this.authority = authority;
         this.source = source;
         this.demand = demand;
         this.deadline = deadline;
+        this.observedStore = observedStore;
+        this.observedVersion = observedVersion;
         spec =
             NodeSpec.of(UUID.randomUUID(), OWNER, new WorkSite.AtBlock(source), stances, Workload.Once.of(10))
             .needs(new Need(demand.goods(), missing))
@@ -123,6 +131,9 @@ final class PatrolSupplyNode implements Node, Staged {
             || who.body() != authority.body()
             || who.pack() != authority.body().pack()
             || !withinReach(level)) {
+            if (ready(level) && who.body() == authority.body() && who.pack() == authority.body().pack()) {
+                supplies.staleApproach(observedStore, observedVersion);
+            }
             failure = PatrolSupplies.State.CANCELLED;
             failureReason =
                 !ready(level)
@@ -134,12 +145,14 @@ final class PatrolSupplyNode implements Node, Staged {
         }
         Optional<Container> stock = supplies.source(level, source);
         if (stock.isEmpty()) {
+            supplies.staleStore(observedStore, observedVersion);
             failure = PatrolSupplies.State.NO_STOCK;
             return new Short(LaborRefusal.NO_SOURCE);
         }
         int missing = (int) Math.min(spec.needs().getFirst().count(), supplies.missing(authority.body(), demand));
         List<ItemStack> incoming = supplies.preview(level, source, stock.get(), demand, missing);
         if (incoming.stream().mapToInt(ItemStack::getCount).sum() < missing) {
+            supplies.staleStore(observedStore, observedVersion);
             failure = PatrolSupplies.State.NO_STOCK;
             return new Short(LaborRefusal.GOODS_GONE);
         }
@@ -174,6 +187,7 @@ final class PatrolSupplyNode implements Node, Staged {
                     taken.add(actual);
                 }
                 if (actual.getCount() != wanted.getCount()) {
+                    supplies.staleStore(observedStore, observedVersion);
                     restore(level, who, taken);
                     failure = PatrolSupplies.State.NO_STOCK;
                     return new Short(LaborRefusal.GOODS_GONE);

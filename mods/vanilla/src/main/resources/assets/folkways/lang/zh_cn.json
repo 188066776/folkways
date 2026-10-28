@@ -45,6 +45,7 @@
   "folkways.loadouts.summary": "%s · 已分配 %s 人 · 尚缺 %s 套 · 未加载 %s 人",
   "folkways.loadouts.missing": "已分配居民尚缺 %s 件 · 仓库不足 %s 件",
   "folkways.loadouts.unloaded": "未加载：装备情况未知",
+  "folkways.loadouts.inventory_pending": "库存观察待完成",
   "folkways.loadouts.unavailable": "旧装备扩展不可用：%s。标识与选项已保留。",
   "folkways.loadouts.manage": "在聚落书的「配装」页管理分配。",
   "folkways.loadouts.no_profile": "未分配配装的居民",

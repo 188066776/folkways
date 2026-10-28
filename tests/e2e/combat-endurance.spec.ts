@@ -268,6 +268,8 @@ if (order.mode() != ResidentCommands.Mode.GUARD) throw new IllegalStateException
 var home = WorldSpaces.world(level, order.destination()).orElseThrow();
 Mob enemy = EntityType.ZOMBIE.create(level);
 enemy.setNoAi(true);
+// Keep the nighttime target visible under the light-dependent sight rules.
+enemy.setGlowingTag(true);
 enemy.setPersistenceRequired();
 enemy.getAttribute(Attributes.MAX_HEALTH).setBaseValue(60.0);
 enemy.setHealth(60.0F);

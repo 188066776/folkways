@@ -67,7 +67,7 @@ public final class FirefightingGameTests {
     public static void aResidentUsesTheAddonSprayAndItsRealFiveMillibucketCost(GameTestHelper helper) {
         Rig rig = new Rig(helper, 100);
         rig.level.setBlock(rig.fire, Blocks.FIRE.defaultBlockState(), 2);
-        var session = new ExtinguisherAdapter().open(rig.level, rig.worker, WorldPos.of(rig.level, rig.fire))
+        var session = rig.adapter().open(rig.level, rig.worker, WorldPos.of(rig.level, rig.fire))
             .orElseThrow();
         helper.assertTrue(session.suppress(rig.level, rig.fire) instanceof Outcome.Done,
             "resident spray succeeds without a player");
@@ -100,7 +100,7 @@ public final class FirefightingGameTests {
             rig.level.setBlock(at.below(), Blocks.NETHERRACK.defaultBlockState(), 2);
             rig.level.setBlock(at, Blocks.FIRE.defaultBlockState(), 2);
         }
-        var session = new ExtinguisherAdapter().open(rig.level, rig.worker, WorldPos.of(rig.level, rig.fire))
+        var session = rig.adapter().open(rig.level, rig.worker, WorldPos.of(rig.level, rig.fire))
             .orElseThrow();
         helper.assertTrue(session.suppress(rig.level, rig.fire) instanceof Outcome.Done, "one paid pulse succeeds");
         helper.assertTrue(rig.level.getBlockState(rig.fire).isAir(), "the aimed fire is extinguished");
@@ -110,7 +110,7 @@ public final class FirefightingGameTests {
             "multiple cells share one native five mB charge");
         session.close();
         rig.level.setBlock(rig.fire, Blocks.FIRE.defaultBlockState(), 2);
-        var reopened = new ExtinguisherAdapter().open(rig.level, rig.worker, WorldPos.of(rig.level, rig.fire))
+        var reopened = rig.adapter().open(rig.level, rig.worker, WorldPos.of(rig.level, rig.fire))
             .orElseThrow();
         helper.assertTrue(reopened.suppress(rig.level, rig.fire) instanceof Outcome.Failed,
             "reopening cannot bypass the native interval");
@@ -136,7 +136,7 @@ public final class FirefightingGameTests {
     public static void theExtinguisherUsesItsLastNativePartialCharge(GameTestHelper helper) {
         Rig rig = new Rig(helper, 3);
         rig.level.setBlock(rig.fire, Blocks.FIRE.defaultBlockState(), 2);
-        var session = new ExtinguisherAdapter().open(rig.level, rig.worker, WorldPos.of(rig.level, rig.fire))
+        var session = rig.adapter().open(rig.level, rig.worker, WorldPos.of(rig.level, rig.fire))
             .orElseThrow();
         helper.assertTrue(session.suppress(rig.level, rig.fire) instanceof Outcome.Done,
             "the native handler permits a final partial charge");
@@ -199,7 +199,7 @@ public final class FirefightingGameTests {
     @GameTest(template = "empty")
     public static void aStoppedSessionCannotSprayOrSpendFluid(GameTestHelper helper) {
         Rig rig = new Rig(helper, 100);
-        var session = new ExtinguisherAdapter().open(rig.level, rig.worker, WorldPos.of(rig.level, rig.fire))
+        var session = rig.adapter().open(rig.level, rig.worker, WorldPos.of(rig.level, rig.fire))
             .orElseThrow();
         session.close();
         session.close();
@@ -221,7 +221,7 @@ public final class FirefightingGameTests {
         BlockPos wall = rig.fire.west();
         rig.level.setBlock(wall, Blocks.STONE.defaultBlockState(), 2);
         rig.level.setBlock(wall.above(), Blocks.STONE.defaultBlockState(), 2);
-        var session = new ExtinguisherAdapter().open(rig.level, rig.worker, WorldPos.of(rig.level, rig.fire))
+        var session = rig.adapter().open(rig.level, rig.worker, WorldPos.of(rig.level, rig.fire))
             .orElseThrow();
         helper.assertTrue(session.suppress(rig.level, rig.fire) instanceof Outcome.Failed,
             "the native effect misses behind the wall");
@@ -253,7 +253,7 @@ public final class FirefightingGameTests {
         rig.worker.body().moveTo(Vec3.atBottomCenterOf(feet));
         rig.level.setBlock(rig.fire.west(), Blocks.STONE.defaultBlockState(), 2);
         rig.level.setBlock(rig.fire.west().above(), Blocks.STONE.defaultBlockState(), 2);
-        var adapter = new ExtinguisherAdapter();
+        var adapter = rig.adapter();
         helper.assertTrue(adapter.reaches(rig.level, rig.worker, WorldPos.of(rig.level, rig.fire)),
             "method availability checks the carried water, not a second shot ray");
         helper.assertFalse(adapter.footings(rig.level, rig.worker, WorldPos.of(rig.level, rig.fire)).contains(feet),
@@ -278,7 +278,7 @@ public final class FirefightingGameTests {
         }
         rig.level.setBlock(rig.fire, Blocks.FIRE.defaultBlockState(), 2);
         BlockPos feet = rig.fire.west(2);
-        var adapter = new ExtinguisherAdapter();
+        var adapter = rig.adapter();
         var candidates = adapter.footings(rig.level, rig.worker, WorldPos.of(rig.level, rig.fire));
         helper.assertTrue(candidates.contains(feet), "a conservative reachable stance is offered");
         helper.assertTrue(!candidates.isEmpty(), "the conservative set is nonempty");
@@ -312,7 +312,7 @@ public final class FirefightingGameTests {
         BlockPos feet = rig.fire.west(2);
         rig.level.setBlock(feet.below(), Blocks.STONE.defaultBlockState(), 2);
         rig.level.setBlock(rig.fire, Blocks.FIRE.defaultBlockState(), 2);
-        var adapter = new ExtinguisherAdapter();
+        var adapter = rig.adapter();
         helper.assertTrue(adapter.footings(rig.level, rig.worker, WorldPos.of(rig.level, rig.fire)).contains(feet),
             "the original arrival volume has no obstruction");
         BlockPos wall = rig.fire.west().north();
@@ -335,7 +335,7 @@ public final class FirefightingGameTests {
     @GameTest(template = "empty")
     public static void anEmptyOrNonWaterBottleFallsBackWithoutBeingConsumed(GameTestHelper helper) {
         Rig rig = new Rig(helper, 0);
-        var adapter = new ExtinguisherAdapter();
+        var adapter = rig.adapter();
         helper.assertTrue(adapter.open(rig.level, rig.worker, WorldPos.of(rig.level, rig.fire)).isEmpty(),
             "empty bottle cannot spray");
         new FireExtinguisherItemHandler(CreateFireFightingAdd.FIRE_EXTINGUISHER_FLUID, rig.extinguisher)
@@ -414,6 +414,7 @@ public final class FirefightingGameTests {
             ColonySettings.empty()).orElseThrow();
         var presence = new FirefightingPresence(colony, new ExtinguisherAdapter());
         try {
+            publish(colony, level);
             presence.tick(level.getServer());
             Node borrow = presence.goals(colony.view(level)).getFirst().nodes().getFirst();
             Worker worker = (Worker) Proxy.newProxyInstance(Worker.class.getClassLoader(),
@@ -446,6 +447,25 @@ public final class FirefightingGameTests {
             colony.raze();
         }
         helper.succeed();
+    }
+
+    private static void publish(io.github.izakyl.folkways.core.api.colony.Colony colony, ServerLevel level) {
+        var data = io.github.izakyl.folkways.core.engine.colony.ColonyData.find(level.getServer(), colony.id())
+            .orElseThrow();
+        var bodies = new java.util.LinkedHashMap<java.util.UUID,
+            io.github.izakyl.folkways.core.api.resident.body.Body>();
+        data.works().residents().forEach(resident ->
+            io.github.izakyl.folkways.core.api.resident.body.Bodies.of(level.getEntity(resident.id()))
+                .ifPresent(body -> bodies.put(resident.id(), body)));
+        data.inventory().advance(level, data, bodies);
+        try {
+            var work = io.github.izakyl.folkways.core.engine.inventory.InventoryIndex.class
+                .getDeclaredMethod("work", net.minecraft.server.MinecraftServer.class, int.class);
+            work.setAccessible(true);
+            work.invoke(data.inventory(), level.getServer(), 1000);
+        } catch (ReflectiveOperationException broken) {
+            throw new AssertionError(broken);
+        }
     }
 
     private static final class Rig {
@@ -488,6 +508,10 @@ public final class FirefightingGameTests {
                 case "supplied", "route" -> List.of();
                 default -> null;
             });
+        }
+
+        ExtinguisherAdapter adapter() {
+            return new ExtinguisherAdapter(id -> java.util.Optional.of(extinguisher.copy()));
         }
 
         void close() {

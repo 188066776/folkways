@@ -539,7 +539,9 @@ public final class PatrolSupplyGameTests {
             ItemStack stack = new ItemStack(Items.ARROW, slot == 2 ? 4 : 2);
             stack.set(DataComponents.CUSTOM_NAME, Component.literal("arrow component " + slot));
             failing.setItem(slot, stack);
+            scene.store.setItem(slot, stack.copy());
         }
+        RtsInventoryObservations.publish(scene.colony, scene.level);
         Colony bridged =
             (Colony)
             Proxy.newProxyInstance(

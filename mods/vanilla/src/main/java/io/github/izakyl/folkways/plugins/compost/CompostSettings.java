@@ -1,7 +1,7 @@
 package io.github.izakyl.folkways.plugins.compost;
 
 import io.github.izakyl.folkways.core.api.colony.Colony;
-import io.github.izakyl.folkways.core.api.resident.body.Bodies;
+import io.github.izakyl.folkways.core.api.inventory.SlotSnapshot;
 import io.github.izakyl.folkways.core.api.terms.Goods;
 import io.github.izakyl.folkways.front.api.Fronts;
 import io.github.izakyl.folkways.plugins.farming.CropSeeds;
@@ -16,7 +16,6 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.world.Container;
 import net.minecraft.world.item.Item;
 
 /** Per-colony compost preferences, saved with the colony rather than a player's book. */
@@ -87,21 +86,19 @@ public final class CompostSettings {
     public static List<Item> discovered(Colony colony, MinecraftServer server) {
         Set<Item> catalogue = CropSeeds.catalogue(server.overworld(), BlockPos.ZERO);
         Set<Item> found = new LinkedHashSet<>();
+        var snapshot = colony.inventory().snapshot();
+        if (!snapshot.coverage().complete()) {
+            colony.inventory().ensureObserved();
+        }
+        snapshot.stores().values().forEach(store -> inspect(store.slots().stream()
+            .filter(slot -> slot.accessibleSlot().isPresent()).toList(), catalogue, found));
+        snapshot.residents().values().forEach(resident -> inspect(resident.pack(), catalogue, found));
         for (var level : server.getAllLevels()) {
-            for (var at : colony.storesIn(level.dimension())) {
-                if (at.in(level) && level.isLoaded(at.block(level))) {
-                    colony.store(level, at).ifPresent(store -> inspect(store, catalogue, found));
-                }
-            }
-            for (var resident : colony.residents()) {
-                var entity = level.getEntity(resident.id());
-                if (entity != null) Bodies.of(entity).ifPresent(body -> inspect(body.pack(), catalogue, found));
-            }
             for (var sowing : CropSeeds.sowing(colony, level)) {
                 catalogue.stream().filter(item -> Goods.matches(item.getDefaultInstance(), sowing.seed())).forEach(found::add);
             }
             for (var zone : Fronts.of(colony).zonesIn(level)) {
-                if (!zone.delegation().equals(FarmingContent.PLOT)) continue;
+                if (!zone.delegation().equals(FarmingContent.PLOT)) { continue; }
                 found.addAll(CropSeeds.forCrop(level, zone.cells().stream().findFirst().orElse(BlockPos.ZERO),
                     zone.settings().choice(FarmingContent.CROP)));
             }
@@ -110,10 +107,10 @@ public final class CompostSettings {
             .sorted(Comparator.comparing(item -> BuiltInRegistries.ITEM.getKey(item).toString())).toList();
     }
 
-    private static void inspect(Container inventory, Set<Item> catalogue, Set<Item> found) {
-        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
-            var stack = inventory.getItem(slot);
-            if (!stack.isEmpty() && catalogue.contains(stack.getItem())) found.add(stack.getItem());
+    private static void inspect(List<SlotSnapshot> inventory, Set<Item> catalogue, Set<Item> found) {
+        for (var slot : inventory) {
+            var stack = slot.stackCopy();
+            if (!stack.isEmpty() && catalogue.contains(stack.getItem())) { found.add(stack.getItem()); }
         }
     }
 

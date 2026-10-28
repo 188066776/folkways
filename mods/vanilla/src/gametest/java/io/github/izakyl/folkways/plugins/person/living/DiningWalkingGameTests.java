@@ -239,6 +239,7 @@ public final class DiningWalkingGameTests {
             if (installed) { return; }
             DiningTables.register(ResourceLocation.fromNamespaceAndPath("folkways", "test_walking_table"),
                 new DiningTables.Table() {
+                    public boolean stable() { return true; }
                     public boolean matches(ServerLevel level, BlockPos at) {
                         return level.getBlockState(at).is(Blocks.CHISELED_QUARTZ_BLOCK);
                     }

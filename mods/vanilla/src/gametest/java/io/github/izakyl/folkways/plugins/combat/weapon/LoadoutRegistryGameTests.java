@@ -32,6 +32,21 @@ public final class LoadoutRegistryGameTests {
     }
 
     @GameTest(template = "empty")
+    public static void allocationDoesNotCountOneUnitTwice(GameTestHelper helper) {
+        var first = LoadoutProfile.Entry.supply(ItemSpec.of(Items.ARROW), 4, 1);
+        var second = LoadoutProfile.Entry.supply(ItemSpec.of(Items.ARROW), 4, 1);
+        var profile = new LoadoutProfile(UUID.randomUUID(), "Archers", List.of(first, second), Optional.empty());
+        var carried = List.of(new ItemStack(Items.ARROW, 5));
+        for (int pass = 0; pass < 3; pass++) {
+            var missing = PatrolSupplies.allocate(profile, carried, slot -> ItemStack.EMPTY);
+            helper.assertValueEqual(missing.get(first.id()), 0, "first entry receives its four arrows");
+            helper.assertValueEqual(missing.get(second.id()), 3, "second entry receives only the remaining arrow");
+            helper.assertValueEqual(carried.getFirst().getCount(), 5, "allocation does not mutate its source");
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
     public static void absentComponentTypesRemainRawThroughProfileRenameDuplicateAndSave(GameTestHelper helper) {
         var colony = Colonies.mint(helper.getLevel().getServer());
         try {

@@ -3,6 +3,7 @@ package io.github.izakyl.folkways.warfare;
 import com.atsuishio.superbwarfare.data.gun.GunData;
 import com.atsuishio.superbwarfare.data.gun.GunProp;
 import io.github.izakyl.folkways.core.api.Declaring;
+import io.github.izakyl.folkways.core.api.colony.Colonies;
 import io.github.izakyl.folkways.core.api.terms.Goods;
 import io.github.izakyl.folkways.core.api.terms.ItemSpec;
 import io.github.izakyl.folkways.plugins.combat.weapon.LoadoutProvider;
@@ -14,6 +15,7 @@ import java.util.Optional;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.event.tick.EntityTickEvent;
 
@@ -91,23 +93,31 @@ public final class WarfareWeapons {
         if (!(event.getEntity() instanceof ResidentEntity body) || body.level().isClientSide()) {
             return;
         }
+        boolean changed = false;
         for (int slot = 0; slot < body.pack().getContainerSize(); slot++) {
-            tick(body, body.pack().getItem(slot));
+            changed |= tick(body, body.pack().getItem(slot));
         }
-        if (body.hasWeaponSession()) {
-            tick(body, body.getMainHandItem());
+        if (changed) {
+            body.pack().setChanged();
+        }
+        if (body.hasWeaponSession() && tick(body, body.getMainHandItem())
+            && body.level() instanceof ServerLevel level) {
+            body.colonyId().flatMap(id -> Colonies.of(level.getServer(), id))
+                .ifPresent(colony -> colony.inventoryFeedback().changedResident(body.id()));
         }
     }
 
-    private static void tick(ResidentEntity body, ItemStack stack) {
+    private static boolean tick(ResidentEntity body, ItemStack stack) {
         if (ALL.stream().noneMatch(weapon -> weapon.accepts(stack))) {
-            return;
+            return false;
         }
+        ItemStack before = stack.copy();
         GunData data = GunData.from(stack);
         if (data.shouldStartBolt()) {
             data.startBolt();
         }
         data.tick(body, true);
+        return !ItemStack.matches(before, stack);
     }
 
     static ResourceLocation nativeId(String path) {

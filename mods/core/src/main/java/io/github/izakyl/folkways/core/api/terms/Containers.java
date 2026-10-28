@@ -183,20 +183,46 @@ public final class Containers {
     // The items no slot of the container will take, however empty it is. Most take everything, and a shulker box
     // refuses other shulker boxes; a slot that only refuses some goods some of the time is not read here.
     public static Set<Item> refused(Container container) {
-        if (!PICKY.get(container.getClass())) {
-            return Set.of();
+        Refusals reading = new Refusals(container);
+        while (!reading.step(container, 64)) {
         }
-        Set<Item> refused = new HashSet<>();
-        for (ItemStack sample : samples()) {
-            boolean taken = false;
-            for (int slot = 0; slot < container.getContainerSize() && !taken; slot++) {
-                taken = accepts(container, slot, sample);
-            }
-            if (!taken) {
-                refused.add(sample.getItem());
-            }
+        return reading.items();
+    }
+
+    public static final class Refusals {
+
+        private final Set<Item> refused = new HashSet<>();
+        private final boolean picky;
+        private int sample;
+        private int slot;
+
+        public Refusals(Container container) {
+            picky = PICKY.get(container.getClass());
         }
-        return Set.copyOf(refused);
+
+        // Each step bounds admission calls, including containers that refuse every sample in every slot.
+        public boolean step(Container container, int limit) {
+            if (!picky) {
+                return true;
+            }
+            List<ItemStack> all = samples();
+            while (sample < all.size() && limit-- > 0) {
+                ItemStack stack = all.get(sample);
+                if (slot < container.getContainerSize() && accepts(container, slot, stack)) {
+                    sample++;
+                    slot = 0;
+                } else if (++slot >= container.getContainerSize()) {
+                    refused.add(stack.getItem());
+                    sample++;
+                    slot = 0;
+                }
+            }
+            return sample >= all.size();
+        }
+
+        public Set<Item> items() {
+            return Set.copyOf(refused);
+        }
     }
 
     private static List<ItemStack> samples() {

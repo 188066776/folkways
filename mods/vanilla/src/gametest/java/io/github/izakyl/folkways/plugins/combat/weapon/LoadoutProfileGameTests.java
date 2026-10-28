@@ -3,6 +3,7 @@ package io.github.izakyl.folkways.plugins.combat.weapon;
 import io.github.izakyl.folkways.core.api.colony.Colonies;
 import io.github.izakyl.folkways.core.api.colony.Colony;
 import io.github.izakyl.folkways.core.api.colony.Held;
+import io.github.izakyl.folkways.core.api.inventory.InventorySnapshot;
 import io.github.izakyl.folkways.core.api.terms.Containers;
 import io.github.izakyl.folkways.core.api.terms.Goods;
 import io.github.izakyl.folkways.core.api.terms.ItemSpec;
@@ -69,8 +70,9 @@ public final class LoadoutProfileGameTests {
         scene.others.add(target);
         double base = SpottedTargets.sight(scene.body(), target);
         LoadoutProfile profile = scene.profile(List.of(LoadoutProfile.Entry.supply(ItemSpec.of(Items.SPYGLASS), 1, 1)));
-        helper.assertTrue(SpottedTargets.sight(scene.body(), target) == base,
-            "a profile cannot grant an absent spyglass");
+        helper.assertTrue(SpottedTargets.sight(scene.body(), target)
+            == base * FolkwaysVanillaConfig.observationSightMultiplier(),
+            "assigned optics determine sight before physical collection");
         scene.simulate();
         helper.startSequence().thenWaitUntil(() -> helper.assertTrue(scene.body().pack().count(Items.SPYGLASS) == 1,
             "normal profile logistics collect one real spyglass " + scene.supplies.status(scene.body().id())))
@@ -179,6 +181,35 @@ public final class LoadoutProfileGameTests {
     }
 
     @GameTest(template = "empty_large", timeoutTicks = 700)
+    public static void failedWeaponOpenMarksStockChangedAndProfileLogisticsRefillAmmo(GameTestHelper helper) {
+        Scene scene = new Scene(helper, 1);
+        ResidentEntity body = scene.body();
+        body.pack().insert(new ItemStack(Items.BOW));
+        Container stock = scene.store(9);
+        stock.setItem(0, new ItemStack(Items.ARROW, 4));
+        scene.profile(List.of(LoadoutProfile.Entry.weapon(ItemSpec.of(Items.BOW)),
+            LoadoutProfile.Entry.supply(ItemSpec.of(Items.ARROW), 4, 1)));
+        InventoryObservations.publish(scene.colony, helper.getLevel());
+        Worker worker = WeaponSessionGameTests.worker(body);
+        helper.assertTrue(Weapons.ranged(worker), "assigned bow determines ranged planning before refill");
+        helper.assertTrue(Weapons.open(worker).isEmpty(), "opening fails with no real ammunition");
+        helper.assertFalse(Weapons.armed(worker), "combat waits for the failed loadout to be refilled");
+        helper.assertTrue(scene.colony.inventory().snapshot().residents().get(body.id()).state()
+            != InventorySnapshot.State.OBSERVED,
+            "failed opening marks the resident observation changed");
+        scene.simulate();
+        helper.startSequence().thenWaitUntil(() -> helper.assertValueEqual(body.pack().count(Items.ARROW), 4,
+            "profile logistics deliver the missing physical ammunition"))
+            .thenExecute(() -> {
+                scene.supplies.urges(worker, Optional.empty(), Long.MIN_VALUE, Long.MIN_VALUE);
+                helper.assertTrue(Weapons.armed(worker), "combat resumes once the assigned loadout is ready");
+                WeaponSession session = Weapons.open(worker).orElseThrow();
+                helper.assertTrue(body.getMainHandItem().is(Items.BOW), "the refilled resident opens its real bow");
+                session.close();
+            }).thenSucceed();
+    }
+
+    @GameTest(template = "empty_large", timeoutTicks = 700)
     public static void restockingStartsBelowThresholdAndContinuesAcrossPartialTripsUntilTarget(GameTestHelper helper) {
         Scene scene = new Scene(helper, 1);
         Container first = scene.store(9), second = scene.store(16);
@@ -226,7 +257,7 @@ public final class LoadoutProfileGameTests {
     }
 
     @GameTest(template = "empty_large")
-    public static void profileWeaponSelectionClosesBowDrawForCloseTargetsAndForEmptyAmmo(GameTestHelper helper) {
+    public static void profileWeaponSelectionChangesWithTargetAndValidatesAmmoAtOpen(GameTestHelper helper) {
         Scene scene = new Scene(helper, 1);
         ResidentEntity body = scene.body();
         body.setNoAi(true);
@@ -261,11 +292,11 @@ public final class LoadoutProfileGameTests {
             "range selects bow again");
         helper.assertTrue(ranged.fire(target), "second bow draw begins");
         Containers.extract(body.pack(), stack -> stack.is(Items.ARROW), 2);
-        WeaponSession fallback = Weapons.select(worker, target, ranged);
-        helper.assertTrue(
-            ranged.state() == WeaponSession.State.CLOSED && body.getMainHandItem().is(Items.IRON_SWORD),
-            "no ammunition closes the old draw and falls back");
-        fallback.close();
+        WeaponSession stillDrawing = Weapons.select(worker, target, ranged);
+        helper.assertTrue(stillDrawing == ranged, "planning keeps the assigned bow despite ammunition removal");
+        stillDrawing.close();
+        helper.assertTrue(Weapons.select(worker, target, null) == null,
+            "opening the assigned bow fails after ammunition is removed");
         helper.assertValueEqual(body.pack().count(Items.BOW), 1, "one actual bow returns");
         helper.assertValueEqual(body.pack().count(Items.IRON_SWORD), 1, "one actual sword returns");
         helper.succeed();
@@ -322,6 +353,8 @@ public final class LoadoutProfileGameTests {
             1,
             "second entry still needs another physical sword");
         body.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.GOLDEN_HELMET));
+        scene.colony.inventoryFeedback().changedResident(body.id());
+        InventoryObservations.publish(scene.colony, helper.getLevel());
         scene.supplies.urges(WeaponSessionGameTests.worker(body), Optional.empty(), Long.MIN_VALUE, Long.MIN_VALUE);
         helper.assertValueEqual(
             scene.supplies.status(body.id()).state(),

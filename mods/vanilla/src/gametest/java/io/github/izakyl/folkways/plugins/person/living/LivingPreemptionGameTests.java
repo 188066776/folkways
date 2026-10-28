@@ -24,6 +24,7 @@ import io.github.izakyl.folkways.front.engine.charter.Charter;
 import io.github.izakyl.folkways.front.engine.charter.Charters;
 import io.github.izakyl.folkways.front.engine.registry.FolkwaysItems;
 import io.github.izakyl.folkways.front.engine.registry.FolkwaysPlayerAttachments;
+import io.github.izakyl.folkways.test.InventoryObservations;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -32,7 +33,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.world.Container;
-import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ItemStack;
@@ -94,6 +94,8 @@ public final class LivingPreemptionGameTests {
         UUID resident = body.resident().id();
         WorldPos bed = WorldPos.of(helper.getLevel(), helper.absolutePos(BlockPos.ZERO));
         try {
+            body.pack().setItem(0, new ItemStack(Items.BREAD));
+            InventoryObservations.publish(colony, helper.getLevel(), Map.of(resident, body));
             for (boolean urgent : List.of(false, true)) {
                 colony.keep(LivingContent.ID, Writer.of()
                     .children("hunger", List.of(resident), id -> Writer.of().uuid("resident", id)
@@ -152,7 +154,7 @@ public final class LivingPreemptionGameTests {
     }
 
     private static Worker worker(Body body, int stoic) {
-        Container pack = new SimpleContainer(new ItemStack(Items.BREAD));
+        Container pack = body.pack();
         return new Worker() {
             public Resident resident() { return body.resident(); }
             public Mob body() { return body.mob(); }

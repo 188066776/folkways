@@ -1,6 +1,9 @@
 package io.github.izakyl.folkways.cookery.tools;
 
+import io.github.izakyl.folkways.core.api.inventory.InventoryFeedback;
+import io.github.izakyl.folkways.core.api.inventory.InventorySnapshot;
 import io.github.izakyl.folkways.core.api.terms.Containers;
+import io.github.izakyl.folkways.core.api.terms.Stash;
 import io.github.izakyl.folkways.core.api.terms.Reach;
 import io.github.izakyl.folkways.core.api.terms.RefusalKind;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
@@ -38,7 +41,8 @@ abstract class ToolAction implements Node {
         this.lease = lease;
         this.at = at;
         spec = NodeSpec.of(UUID.randomUUID(), CookeryContent.ID, new WorkSite.AtBlock(at), stances,
-            Workload.Once.of(20)).leaves(Leaves.room(1)).doing(CookeryContent.PREPARING, lease.request().tools()).done();
+            Workload.Once.of(20)).leaves(Leaves.room(1)).doing(CookeryContent.PREPARING,
+                lease.request().tools()).done();
     }
 
     @Override
@@ -46,8 +50,25 @@ abstract class ToolAction implements Node {
 
     @Override
     public Optional<RefusalKind> refusal(ServerLevel level) {
-        return at.in(level) && level.isLoaded(at.block(level)) && service.stock.store(level, at).isEmpty()
+        InventorySnapshot observed = service.colony.inventory().snapshot();
+        var store = observed.store(at);
+        return store.isEmpty() && !observed.coverage().membershipPending()
             ? Optional.of(CookeryRefusal.STATION_CHANGED) : Optional.empty();
+    }
+
+    @Override
+    public boolean ready(ServerLevel level) {
+        if (service.stock.waitingForResident(lease)) {
+            return false;
+        }
+        InventorySnapshot observed = service.colony.inventory().snapshot();
+        var store = observed.store(at);
+        if (store.isPresent() && store.get().state() == InventorySnapshot.State.OBSERVED
+            || store.isEmpty() && !observed.coverage().membershipPending()) {
+            return true;
+        }
+        service.colony.inventory().ensureObserved(Stash.at(at));
+        return false;
     }
 
     boolean reaches(ServerLevel level, Worker who) {
@@ -59,7 +80,7 @@ abstract class ToolAction implements Node {
 
     // These are real container transfers, outside the food graph's consumable inputs. If an adapter throws partway
     // through a transfer, both inventories roll back together before any loan is marked carried or returned.
-    private static List<ItemStack> snapshot(Container inventory) {
+    static List<ItemStack> snapshot(Container inventory) {
         List<ItemStack> saved = new ArrayList<>();
         for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
             saved.add(inventory.getItem(slot).copy());
@@ -67,14 +88,27 @@ abstract class ToolAction implements Node {
         return saved;
     }
 
-    private static void restore(Container inventory, List<ItemStack> saved) {
+    static int insertedSlot(Container inventory, List<ItemStack> before, ItemStack expected) {
+        for (int slot = 0; slot < before.size(); slot++) {
+            ItemStack actual = inventory.getItem(slot);
+            ItemStack previous = before.get(slot);
+            if (ItemStack.isSameItemSameComponents(actual, expected)
+                    && (!ItemStack.isSameItemSameComponents(previous, expected)
+                        || actual.getCount() > previous.getCount())) {
+                return slot;
+            }
+        }
+        return -1;
+    }
+
+    static void restore(Container inventory, List<ItemStack> saved) {
         for (int slot = 0; slot < saved.size(); slot++) {
             inventory.setItem(slot, saved.get(slot).copy());
         }
         inventory.setChanged();
     }
 
-    private static boolean move(Container from, int slot, Container into) {
+    private static int move(Container from, int slot, Container into) {
         List<ItemStack> beforeFrom = snapshot(from);
         List<ItemStack> beforeInto = snapshot(into);
         try {
@@ -82,10 +116,16 @@ abstract class ToolAction implements Node {
             if (taken.isEmpty() || !Containers.insert(into, taken).isEmpty()) {
                 restore(from, beforeFrom);
                 restore(into, beforeInto);
-                return false;
+                return -1;
+            }
+            int inserted = insertedSlot(into, beforeInto, taken);
+            if (inserted < 0) {
+                restore(from, beforeFrom);
+                restore(into, beforeInto);
+                return -1;
             }
             from.setChanged();
-            return true;
+            return inserted;
         } catch (RuntimeException | LinkageError broken) {
             try {
                 restore(from, beforeFrom);
@@ -111,29 +151,46 @@ abstract class ToolAction implements Node {
 
         @Override
         public Outcome commit(ServerLevel level, Worker who) {
-            if (!who.resident().id().equals(lease.resident()) || !reaches(level, who) || !service.stock.takes(at)
+            if (!who.resident().id().equals(lease.resident())
                     || service.pool.leases(service.colony.id()).stream().noneMatch(current ->
                         current.id().equals(lease.id()) && current.phase() == KitchenTools.Phase.IN_TRANSIT)) {
                 return Outcome.failed(CookeryRefusal.STATION_CHANGED);
             }
+            if (!reaches(level, who)) {
+                service.stock.staleApproach(source.physical().store(), source.version());
+                return Outcome.failed(CookeryRefusal.STATION_CHANGED);
+            }
+            if (!service.stock.takes(at)) {
+                service.stock.stale(source);
+                return Outcome.failed(CookeryRefusal.STATION_CHANGED);
+            }
+            if (!service.stock.valid(source)) {
+                service.stock.stale(source);
+                return Outcome.failed(CookeryRefusal.STATION_CHANGED);
+            }
             Optional<Container> found = service.stock.store(level, at);
             if (found.isEmpty() || source.slot() >= found.get().getContainerSize()) {
+                service.stock.stale(source);
                 return Outcome.failed(CookeryRefusal.STATION_CHANGED);
             }
             Container inventory = found.get();
             ItemStack actual = inventory.getItem(source.slot());
             if (!ItemStack.isSameItemSameComponents(actual, source.expected()) || actual.isEmpty()) {
+                service.stock.stale(source);
                 return Outcome.failed(CookeryRefusal.STATION_CHANGED);
             }
             if (!KitRules.allows(service.colony, vocation, actual.getItem())) {
                 return Outcome.failed(CookeryRefusal.NOTHING_TO_WORK_WITH);
             }
-            if (!move(inventory, source.slot(), who.pack())) {
+            int slot = move(inventory, source.slot(), who.pack());
+            if (slot < 0) {
                 return Outcome.failed(CookeryRefusal.STATION_BUSY);
             }
             moved = true;
             service.pool.carried(lease.id());
-            service.record(lease, source.expected());
+            service.record(lease, who.pack().getItem(slot), who.pack());
+            service.colony.inventoryFeedback().changed(source.physical().store());
+            service.colony.inventoryFeedback().changedResident(lease.resident());
             service.borrowedFrom(level, lease, source.at());
             return Outcome.done();
         }
@@ -146,33 +203,53 @@ abstract class ToolAction implements Node {
     }
 
     static final class Return extends ToolAction {
+        private final ToolStock.Destination target;
         boolean moved;
         boolean missing;
 
         Return(TaskTools service, KitchenTools.Lease lease, ToolStock.Destination target) {
             super(service, lease, target.at(), target.stances());
+            this.target = target;
         }
 
         @Override
         public Outcome commit(ServerLevel level, Worker who) {
-            if (!who.resident().id().equals(lease.resident()) || !reaches(level, who) || !service.stock.stores(at)) {
+            if (!who.resident().id().equals(lease.resident())) {
+                return Outcome.failed(CookeryRefusal.STATION_CHANGED);
+            }
+            if (!reaches(level, who)) {
+                service.stock.staleApproach(Stash.at(at), target.version());
+                return Outcome.failed(CookeryRefusal.STATION_CHANGED);
+            }
+            if (!service.stock.stores(at)) {
+                service.colony.inventoryFeedback().stale(new InventoryFeedback.StoreSlot(Stash.at(at), 0),
+                    target.version());
                 return Outcome.failed(CookeryRefusal.STATION_CHANGED);
             }
             Optional<Container> found = service.stock.store(level, at);
             if (found.isEmpty()) {
+                service.colony.inventoryFeedback().stale(new InventoryFeedback.StoreSlot(Stash.at(at), 0),
+                    target.version());
                 return Outcome.failed(CookeryRefusal.STATION_CHANGED);
+            }
+            if (service.stock.waitingForResident(lease)) {
+                return Outcome.failed(CookeryRefusal.STATION_BUSY);
             }
             int slot = service.carriedSlot(who.pack(), lease, service.tool(lease).orElse(ItemStack.EMPTY));
             if (slot < 0) {
                 missing = true;
-                service.lost(lease);
+                service.missing(lease);
                 return Outcome.done();
             }
             Container destination = found.get();
-            if (!ToolStock.room(destination, who.pack().getItem(slot)) || !move(who.pack(), slot, destination)) {
+            if (!ToolStock.room(destination, who.pack().getItem(slot)) || move(who.pack(), slot, destination) < 0) {
+                service.colony.inventoryFeedback().stale(new InventoryFeedback.StoreSlot(Stash.at(at), 0),
+                    target.version());
                 return Outcome.failed(CookeryRefusal.STATION_BUSY);
             }
             moved = true;
+            service.colony.inventoryFeedback().changed(Stash.at(at));
+            service.colony.inventoryFeedback().changedResident(lease.resident());
             service.returned(lease);
             return Outcome.done();
         }

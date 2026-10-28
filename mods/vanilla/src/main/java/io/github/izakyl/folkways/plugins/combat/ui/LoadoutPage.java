@@ -14,6 +14,7 @@ import dev.vfyjxf.taffy.style.AlignItems;
 import dev.vfyjxf.taffy.style.FlexDirection;
 import dev.vfyjxf.taffy.style.FlexWrap;
 import io.github.izakyl.folkways.core.api.colony.Colony;
+import io.github.izakyl.folkways.core.api.inventory.InventorySnapshot;
 import io.github.izakyl.folkways.core.api.terms.Goods;
 import io.github.izakyl.folkways.core.api.terms.ItemFilter;
 import io.github.izakyl.folkways.core.api.terms.ItemQuery;
@@ -85,6 +86,7 @@ public final class LoadoutPage implements Draw {
     private final Label notice = Rows.note(Component.empty());
     private ProfileShortages shortage;
     private UUID shortageProfile;
+    private InventorySnapshot.Version shortageInventory;
     private long shortageAt, shortageRevision;
     private TextField name;
     private final List<TextField> amountFields = new ArrayList<>(), thresholdFields = new ArrayList<>();
@@ -727,11 +729,13 @@ public final class LoadoutPage implements Draw {
             if (shortage == null
                 || !current.id().equals(shortageProfile)
                 || profiles.revision(current.id()) != shortageRevision
+                || !colony.inventory().snapshot().version().equals(shortageInventory)
                 || now >= shortageAt + 20) {
                 shortage = ProfileShortages.read(colony, current, server.getServer());
                 shortageProfile = current.id();
                 shortageAt = now;
                 shortageRevision = profiles.revision(current.id());
+                shortageInventory = colony.inventory().snapshot().version();
             }
             ProfileShortages shortages = shortage;
             tag.putString("name", current.name());
@@ -739,12 +743,9 @@ public final class LoadoutPage implements Draw {
                 "summary",
                 Pages.text(
                 player.registryAccess(),
-                text(
-                "summary",
-                current.name(),
-                shortages.assigned(),
-                shortages.incomplete(),
-                shortages.unloaded())));
+                shortages.complete() ? text(
+                    "summary", current.name(), shortages.assigned(), shortages.incomplete(), shortages.unloaded())
+                    : text("inventory_pending")));
             Component staffing = Component.translatable("folkways.staffing.shortage", Component.literal(current.name()),
                 PatrolStaffing.of(colony).shortageFor(current.id()));
             tag.put("summary", Pages.text(player.registryAccess(), Pages.readText(player.registryAccess(),
@@ -767,12 +768,13 @@ public final class LoadoutPage implements Draw {
                 ItemStack display = Goods.display(entry.items());
                 row.put("stack", display.saveOptional(server.registryAccess()));
                 row.put("label", Pages.text(player.registryAccess(), display.getHoverName()));
-                row.put("status", Pages.text(player.registryAccess(), entry.available()
-                    ? text("missing_short", shortages.missing().getOrDefault(entry.id(), 0),
-                        shortages.unavailableStock().getOrDefault(entry.id(), 0)) : text("invalid_entry")));
+                row.put("status", Pages.text(player.registryAccess(), !entry.available() ? text("invalid_entry")
+                    : !shortages.complete() ? text("inventory_pending")
+                    : text("missing_short", shortages.missing().getOrDefault(entry.id(), 0),
+                        shortages.unavailableStock().getOrDefault(entry.id(), 0))));
                 row.put("detail", Pages.text(player.registryAccess(), label.copy().append(" · ").append(
-                    text("missing", shortages.missing().getOrDefault(entry.id(), 0),
-                        shortages.unavailableStock().getOrDefault(entry.id(), 0)))));
+                    shortages.complete() ? text("missing", shortages.missing().getOrDefault(entry.id(), 0),
+                        shortages.unavailableStock().getOrDefault(entry.id(), 0)) : text("inventory_pending"))));
                 row.putString("spec", entry.items().describe());
                 row.putString("kind", entry.kind().name());
                 row.putInt("target", entry.target());

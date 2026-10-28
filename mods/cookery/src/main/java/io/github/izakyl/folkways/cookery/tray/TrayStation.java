@@ -20,6 +20,7 @@ import io.github.izakyl.folkways.core.api.work.Workshop;
 import io.github.izakyl.folkways.cookery.CookeryContent;
 import io.github.izakyl.folkways.cookery.KitchenBookings;
 import io.github.izakyl.folkways.cookery.KitchenStation;
+import io.github.izakyl.folkways.cookery.StationStack;
 import io.github.izakyl.folkways.plugins.wares.WaresContent;
 import java.util.ArrayList;
 import java.util.List;
@@ -51,6 +52,16 @@ public final class TrayStation implements KitchenStation {
     }
 
     public boolean matches(BlockState state) { return state.is(ModBlocks.BAMBOO_TRAY.get()); }
+
+    public Optional<Object> freezeSignature(ServerLevel level, WorldPos at) {
+        var tray = tray(level, at).orElse(null);
+        if (tray == null) { return Optional.empty(); }
+        return Optional.of(List.of(tray, tray.getBlockState(),
+            tray.getPersistentData().getCompound("folkways.cookery.tray").copy(),
+            new StationStack(tray.getItem(0)), new StationStack(tray.getItem(1)),
+            new StationStack(tray.getItem(2)), new StationStack(tray.getItem(3))));
+    }
+
     static Optional<BambooTrayBlockEntity> tray(ServerLevel level, WorldPos at) {
         return at.in(level) && level.isLoaded(at.block(level)) && level.getBlockEntity(at.block(level)) instanceof BambooTrayBlockEntity tray
             ? Optional.of(tray) : Optional.empty();

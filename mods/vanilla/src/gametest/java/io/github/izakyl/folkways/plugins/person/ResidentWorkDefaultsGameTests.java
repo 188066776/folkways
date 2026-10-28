@@ -6,17 +6,23 @@ import io.github.izakyl.folkways.core.api.colony.Colony;
 import io.github.izakyl.folkways.core.api.colony.Held;
 import io.github.izakyl.folkways.core.api.colony.Release;
 import io.github.izakyl.folkways.core.api.resident.body.Keenness;
+import io.github.izakyl.folkways.core.api.terms.Stash;
+import io.github.izakyl.folkways.core.api.terms.WorldPos;
 import io.github.izakyl.folkways.core.api.vocation.Vocation;
 import io.github.izakyl.folkways.core.api.vocation.Vocations;
-import io.github.izakyl.folkways.core.api.terms.WorldPos;
+import io.github.izakyl.folkways.core.engine.colony.ColonyData;
 import io.github.izakyl.folkways.core.engine.colony.WorkDefaults;
+import io.github.izakyl.folkways.front.api.Endorsement;
+import io.github.izakyl.folkways.front.api.Endorsed;
 import io.github.izakyl.folkways.front.engine.colony.Endorsements;
 import io.github.izakyl.folkways.plugins.FolkwaysVanillaConfig;
 import io.github.izakyl.folkways.plugins.FolkwaysVanillaMod;
 import io.github.izakyl.folkways.plugins.person.living.LivingContent;
+import io.github.izakyl.folkways.plugins.person.living.LivingNeed;
 import io.github.izakyl.folkways.plugins.person.look.ResidentLooks;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -46,6 +52,101 @@ public final class ResidentWorkDefaultsGameTests {
     @SubscribeEvent
     public static void register(RegisterGameTestsEvent event) {
         event.register(ResidentWorkDefaultsGameTests.class);
+    }
+
+    @GameTest(template = "empty")
+    public static void incompleteInventoryWaitsForTheImmigrationFoodGate(GameTestHelper helper) throws Exception {
+        var level = helper.getLevel();
+        Colony colony = Colonies.mint(level.getServer());
+        try {
+            BlockPos foot = helper.absolutePos(new BlockPos(1, 1, 1));
+            level.setBlock(foot, Blocks.RED_BED.defaultBlockState().setValue(BedBlock.FACING, Direction.EAST), 2);
+            level.setBlock(foot.east(), Blocks.RED_BED.defaultBlockState().setValue(BedBlock.FACING, Direction.EAST)
+                .setValue(BedBlock.PART, BedPart.HEAD), 2);
+            colony.hold(LivingContent.BED, new Held.Block(WorldPos.of(level, foot))).orElseThrow();
+            BlockPos chest = helper.absolutePos(new BlockPos(4, 1, 1));
+            level.setBlockAndUpdate(chest, Blocks.CHEST.defaultBlockState());
+            ((ChestBlockEntity) level.getBlockEntity(chest)).setItem(0, new ItemStack(Items.BREAD, 64));
+            WorldPos store = WorldPos.of(level, chest);
+            colony.stores(PersonContent.ID, level.dimension(), List.of(store));
+            ColonyData data = ColonyData.find(level.getServer(), colony.id()).orElseThrow();
+            data.inventory().advance(level, data, Map.of());
+            var food = LivingContent.settlerNeeds(colony, level.getServer()).stream()
+                .filter(need -> need.kind() == LivingNeed.FOOD)
+                .findFirst().orElseThrow();
+            helper.assertTrue(food.met(0), "the observed food count alone exceeds the requirement");
+            var queue = colony.service(PersonContent.ID, PersonPresence.class).orElseThrow();
+            var queueField = PersonPresence.class.getDeclaredField("settlers");
+            queueField.setAccessible(true);
+            var waitingField = SettlerQueue.class.getDeclaredField("waiting");
+            waitingField.setAccessible(true);
+            waitingField.setInt(queueField.get(queue), 1);
+            int waiting = queue.waiting();
+            helper.assertTrue(waiting > 0, "a settler is waiting");
+            data.inventory().changed(Stash.at(store));
+            helper.assertFalse(colony.inventory().snapshot().coverage().complete(), "dirty food is incomplete");
+            var asked = new Endorsement.Called(colony, colony.view(level),
+                helper.makeMockPlayer(GameType.SURVIVAL), foot, PersonBody.ID);
+            var answer = new Immigration().answer(asked).orElseThrow();
+            helper.assertTrue(answer instanceof Endorsed.Pending,
+                "last-known sufficient food waits while coverage is incomplete");
+            data.inventory().advance(level, data, Map.of());
+            queue.tick(level.getServer());
+            helper.assertTrue(queue.waiting() == waiting - 1 && !colony.residents().isEmpty(),
+                "the pending admission retries after the observation is published");
+        } finally {
+            colony.raze();
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 200)
+    public static void newlyFoundedColonyWaitsForItsFirstStoreObservation(GameTestHelper helper) throws Exception {
+        var level = helper.getLevel();
+        Colony colony = Colonies.mint(level.getServer());
+        try {
+            BlockPos foot = helper.absolutePos(new BlockPos(1, 1, 1));
+            level.setBlock(foot, Blocks.RED_BED.defaultBlockState().setValue(BedBlock.FACING, Direction.EAST), 2);
+            level.setBlock(foot.east(), Blocks.RED_BED.defaultBlockState().setValue(BedBlock.FACING, Direction.EAST)
+                .setValue(BedBlock.PART, BedPart.HEAD), 2);
+            colony.hold(LivingContent.BED, new Held.Block(WorldPos.of(level, foot))).orElseThrow();
+            List<WorldPos> stores = new ArrayList<>();
+            for (int i = 0; i < 80; i++) {
+                BlockPos at = helper.absolutePos(new BlockPos(4 + i % 10, 1 + i / 10, 1));
+                level.setBlockAndUpdate(at, Blocks.BARREL.defaultBlockState());
+                stores.add(WorldPos.of(level, at));
+            }
+            colony.stores(PersonContent.ID, level.dimension(), stores);
+            WorldPos store = stores.stream().filter(at -> colony.inventory().snapshot().store(at).isEmpty())
+                .findFirst().orElseThrow();
+            ((net.minecraft.world.Container) level.getBlockEntity(store.block(level)))
+                .setItem(0, new ItemStack(Items.BREAD, 64));
+            helper.assertTrue(colony.inventory().snapshot().store(store).isEmpty(), "the store is unobserved");
+            helper.assertFalse(colony.inventory().snapshot().coverage().complete(), "discovery is pending");
+            var queue = colony.service(PersonContent.ID, PersonPresence.class).orElseThrow();
+            var queueField = PersonPresence.class.getDeclaredField("settlers");
+            queueField.setAccessible(true);
+            var waitingField = SettlerQueue.class.getDeclaredField("waiting");
+            waitingField.setAccessible(true);
+            waitingField.setInt(queueField.get(queue), 1);
+            var asked = new Endorsement.Called(colony, colony.view(level),
+                helper.makeMockPlayer(GameType.SURVIVAL), foot, PersonBody.ID);
+            helper.assertTrue(new Immigration().answer(asked).orElseThrow() instanceof Endorsed.Pending,
+                "the first admission waits without a food refusal");
+            helper.runAfterDelay(40, () -> {
+                try {
+                    queue.tick(level.getServer());
+                    helper.assertTrue(queue.waiting() == 0 && !colony.residents().isEmpty(),
+                        "the pending admission succeeds after the first publication");
+                    helper.succeed();
+                } finally {
+                    colony.raze();
+                }
+            });
+        } catch (Exception | AssertionError failure) {
+            colony.raze();
+            throw failure;
+        }
     }
 
     @GameTest(template = "empty", timeoutTicks = 180)

@@ -229,6 +229,9 @@ public final class ColonyLabor implements ColonyWorks.Listening {
         survey.reserved(reserved);
         answer(level, present);
         for (int round = 0; round < MOST_ROUNDS && !pipeline.weaving() && inbox.any(); round++) {
+            if (survey.waitingForInventory()) {
+                break;
+            }
             plan(level);
             answer(level, present);
         }

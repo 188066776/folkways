@@ -1,4 +1,5 @@
 {
+  "folkways.settlers.checking_stock": "Checking stock…",
   "folkways.delegation.folkways.elevator": "Elevator",
   "folkways.doing.folkways.elevator_boarding": "Boarding the elevator",
   "folkways.doing.folkways.elevator_riding": "Riding the elevator",
@@ -358,6 +359,7 @@
   "folkways.panel.orders.draft.detail": "low %s · high %s",
   "folkways.panel.orders.file": "Order type",
   "folkways.panel.orders.gone": "Target is gone",
+  "folkways.panel.orders.unknown": "Waiting for stock check",
   "folkways.panel.orders.here": "Orders here",
   "folkways.panel.orders.coming": " · %s on the way",
   "folkways.panel.orders.container": "%s (%s, %s, %s)",
@@ -1029,7 +1031,7 @@
   "folkways.ponder.cookery_teapot.text_1": "Mark a teapot and order the finished tea. Each native recipe brews twelve portions, so the plan also supplies twelve real empty cups and leaves an accessible place to serve them.",
   "folkways.ponder.cookery_pots.text_7": "Fixed recipes and flexible recipes use the native matching rules. Flexible dishes keep the quality calculated by the actual appliance. Accepted batches survive cancellation and reload; recovery takes the owned result rather than spending the ingredients again.",
   "folkways.ponder.cookery_tools.text_6": "For two parallel tasks, set a knife maintain order with both its minimum and target at two. Actual borrowed knives promised back to that store still count, so borrowing them does not manufacture spare copies.",
-  "folkways.ponder.cookery_seeds.text_4": "Mark a composter. Composting needs no straw hat. Each complete batch checks the surplus again and spends the average native input count to fill level seven at once: 21 wheat seeds for an empty composter. A smaller surplus waits.",
+  "folkways.ponder.cookery_seeds.text_4": "Mark a composter. Composting needs no straw hat. Planning checks surplus before each batch, which spends the average native input count to fill level seven at once: 21 wheat seeds for an empty composter. A smaller surplus waits.",
   "folkways.ponder.cookery_rice.text_4": "Ordinary harvesting leaves water for the next planting. Replanting spends a real harvested seed. Wild seeds and edible rice share one planting reserve, with wild seeds kept first.",
   "folkways.ponder.cookery_chain.text_2": "Wheat becomes flour in the real millstone. Keep the turning path and a clear exit open: the resident must finish driving the mill and walk free before another step can use the output.",
   "folkways.ponder.cookery_steamer.header": "The steamer: layers, a top lid and real heat",

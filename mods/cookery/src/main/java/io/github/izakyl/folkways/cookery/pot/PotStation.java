@@ -54,6 +54,12 @@ public final class PotStation implements KitchenStation {
 
     public boolean matches(BlockState state) { return state.is(ModBlocks.POT.get()); }
 
+    public Optional<Object> freezeSignature(ServerLevel level, WorldPos at) {
+        PotBlockEntity pot = pot(level, at).orElse(null);
+        if (pot == null || PotBatch.claimed(pot) && empty(pot)) { return Optional.empty(); }
+        return Optional.of(List.of(pot, pot.getBlockState(), empty(pot), PotBatch.claimed(pot)));
+    }
+
     @Override
     public Optional<Stances> stances(ServerLevel level, WorldPos at) {
         if (!at.in(level)) return Optional.empty();

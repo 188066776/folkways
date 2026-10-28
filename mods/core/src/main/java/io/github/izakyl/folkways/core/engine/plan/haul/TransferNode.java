@@ -27,6 +27,7 @@ import io.github.izakyl.folkways.core.api.work.Xp;
 import io.github.izakyl.folkways.core.engine.plan.Manifest;
 import io.github.izakyl.folkways.core.engine.plan.Staged;
 import io.github.izakyl.folkways.core.engine.plan.Stores;
+import io.github.izakyl.folkways.core.engine.inventory.InventoryChanges;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -237,6 +238,9 @@ public final class TransferNode implements Node, Staged {
     // The core lifts the planned goods out of the source; all of them or none.
     @Override
     public Drawn draw(ServerLevel level, Worker who) {
+        if (from instanceof Endpoint.Store store) {
+            InventoryChanges.store(level, store.stash().pos());
+        }
         if (collection.isPresent()) {
             Delivery.Source source = collection.get();
             if (!source.at().in(level) || !level.isLoaded(source.at().block(level))
@@ -258,10 +262,11 @@ public final class TransferNode implements Node, Staged {
                 return new Short(HaulRefusal.NO_ROOM);
             }
             ItemStack taken = handler.extractItem(source.slot(), wanted.getCount(), false);
+            InventoryChanges.store(level, source.at());
             return taken.isEmpty() ? new Short(HaulRefusal.NOTHING_TO_TAKE) : new Taken(List.of(taken));
         }
         if (from instanceof Endpoint.Store store
-                && !StoreRule.takes(Stores.rulesAt(store.stash().pos()))) {
+                && !StoreRule.takes(Stores.rulesAt(level, store.stash().pos()))) {
             return new Short(HaulRefusal.NOTHING_TO_TAKE);
         }
         List<ItemStack> goods = cargo.exact();
@@ -318,8 +323,11 @@ public final class TransferNode implements Node, Staged {
     // Putting the goods down is the whole of the work, and it happens only if they all fit.
     @Override
     public Outcome commit(ServerLevel level, Worker who) {
+        if (to instanceof Endpoint.Store store) {
+            InventoryChanges.store(level, store.stash().pos());
+        }
         if (!directed && to instanceof Endpoint.Store store
-                && !StoreRule.stores(Stores.rulesAt(store.stash().pos()))) {
+                && !StoreRule.stores(Stores.rulesAt(level, store.stash().pos()))) {
             return Outcome.failed(HaulRefusal.NO_ROOM);
         }
         Container destination = inventory(to, level, who).orElse(null);

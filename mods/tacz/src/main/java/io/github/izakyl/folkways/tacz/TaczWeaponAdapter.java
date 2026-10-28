@@ -7,6 +7,7 @@ import io.github.izakyl.folkways.plugins.combat.weapon.WeaponSession;
 import io.github.izakyl.folkways.plugins.person.ResidentEntity;
 import java.util.Optional;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.Container;
 import net.minecraft.world.item.ItemStack;
 
 final class TaczWeaponAdapter implements WeaponAdapter {
@@ -33,9 +34,14 @@ final class TaczWeaponAdapter implements WeaponAdapter {
             && (TaczGuns.loaded(stack) > 0 || hasAmmo(worker, stack));
     }
 
+
     static boolean hasAmmo(Worker worker, ItemStack gun) {
-        for (int slot = 0; slot < worker.pack().getContainerSize(); slot++) {
-            ItemStack ammo = worker.pack().getItem(slot);
+        return hasAmmo(worker.pack(), gun);
+    }
+
+    private static boolean hasAmmo(Container pack, ItemStack gun) {
+        for (int slot = 0; slot < pack.getContainerSize(); slot++) {
+            ItemStack ammo = pack.getItem(slot);
             if (TaczAmmoInventory.ordinary(ammo) && ((IAmmo) ammo.getItem()).isAmmoOfGun(gun, ammo)) {
                 return true;
             }

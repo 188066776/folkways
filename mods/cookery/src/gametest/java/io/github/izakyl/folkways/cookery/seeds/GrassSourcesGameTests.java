@@ -211,6 +211,7 @@ public final class GrassSourcesGameTests {
             for (boolean restore : List.of(false, true)) {
                 try (Fixture rig = new Fixture(helper)) {
                     rig.mark(restore); rig.wearHat();
+                    io.github.izakyl.folkways.cookery.InventoryObservations.publish(rig.colony, rig.level);
                     if (restore) rig.body.pack().setItem(1, new ItemStack(Items.BONE_MEAL));
                     else rig.level.setBlock(rig.center.above(), Blocks.SHORT_GRASS.defaultBlockState(), Block.UPDATE_ALL);
                     rig.presence.refresh(rig.level.getServer());
@@ -347,6 +348,7 @@ public final class GrassSourcesGameTests {
         void wearHat() {
             body.setItemSlot(EquipmentSlot.HEAD, body.pack().getItem(0).is(ModItems.STRAW_HAT.get())
                 ? body.pack().removeItem(0, 1) : new ItemStack(ModItems.STRAW_HAT.get()));
+            colony.inventoryFeedback().changedResident(body.id());
         }
         Node source() {
             return presence.goals(colony.view(level)).stream().flatMap(goal -> goal.nodes().stream())
@@ -364,6 +366,7 @@ public final class GrassSourcesGameTests {
             if (node.spec().workload() instanceof Workload.Within within) {
                 boolean complete = false;
                 for (int step = 0; step < 16; step++) {
+                    io.github.izakyl.folkways.cookery.InventoryObservations.publish(colony, level);
                     var turn = within.next(level, this);
                     if (turn instanceof Workload.Within.Turn.Leave) {
                         complete = true;

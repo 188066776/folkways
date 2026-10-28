@@ -7,7 +7,8 @@ import io.github.izakyl.folkways.core.api.colony.Colony;
 import io.github.izakyl.folkways.core.api.colony.ColonyView;
 import io.github.izakyl.folkways.core.api.colony.Sweep;
 import io.github.izakyl.folkways.core.api.resident.Resident;
-import io.github.izakyl.folkways.core.api.resident.body.Bodies;
+import io.github.izakyl.folkways.core.api.inventory.InventorySnapshot;
+import io.github.izakyl.folkways.core.api.inventory.SlotSnapshot;
 import io.github.izakyl.folkways.core.api.resident.body.Body;
 import io.github.izakyl.folkways.core.api.terms.Goods;
 import io.github.izakyl.folkways.core.api.terms.ItemSpec;
@@ -58,7 +59,6 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.TagKey;
-import net.minecraft.world.Container;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.food.FoodProperties;
@@ -402,8 +402,10 @@ final class LivingPresence implements Facing {
         Optional<Urge> meal = dining.urge(who, colony, weight, urgent || !who.effects().has(Stats.PATIENT));
         if (meal.isPresent()) { return meal; }
         if (!carriesAMeal(who)) { return Optional.empty(); }
+        var observed = this.colony.inventory().snapshot().residents().get(who.resident().id());
+        if (observed == null || observed.state() != InventorySnapshot.State.OBSERVED) { return Optional.empty(); }
         return Optional.of(new Urge(EAT, weight, urgent || !who.effects().has(Stats.PATIENT),
-            () -> new EatAction(where, this, who.resident().id(), at)));
+            () -> new EatAction(where, this, who.resident().id(), at, observed.version())));
     }
 
     private Optional<Urge> sleeping(Worker who, ColonyView colony) {
@@ -433,10 +435,18 @@ final class LivingPresence implements Facing {
         return DefenseControl.of(colony).reserved(resident) || DefenseControl.of(colony).current(resident).isPresent();
     }
 
+    void staleMeal(UUID resident, InventorySnapshot.Version observed) {
+        colony.inventoryFeedback().staleResident(resident, observed);
+    }
+
     private boolean carriesAMeal(Worker who) {
-        Container pack = who.pack();
-        for (int slot = 0; slot < pack.getContainerSize(); slot++) {
-            ItemStack stack = pack.getItem(slot);
+        var resident = colony.inventory().snapshot().residents().get(who.resident().id());
+        if (resident == null || resident.state() != InventorySnapshot.State.OBSERVED) {
+            colony.inventory().ensureObservedResident(who.resident().id());
+            return false;
+        }
+        for (SlotSnapshot slot : resident.pack()) {
+            ItemStack stack = slot.stackCopy();
             FoodProperties food = stack.isEmpty() ? null : stack.getFoodProperties(who.body());
             if (wouldEat(who.resident().id(), stack, food)) {
                 return true;
@@ -545,6 +555,7 @@ final class LivingPresence implements Facing {
         }
         ItemSpec food = allowed.get();
         ServerLevel level = view.level();
+        var inventory = colony.inventory().snapshot();
         for (Resident resident : view.residents()) {
             if (!LivingContent.looksAfter(resident)) {
                 continue;
@@ -553,7 +564,13 @@ final class LivingPresence implements Facing {
             if (body == null) {
                 continue;
             }
-            int carried = Bodies.of(body).map(had -> nourishing(had.pack(), food, had.mob())).orElse(0);
+            var observed = inventory.residents().get(resident.id());
+            if (observed == null || observed.state() != InventorySnapshot.State.OBSERVED) {
+                colony.inventory().ensureObservedResident(resident.id());
+                continue;
+            }
+            if (!(body instanceof LivingEntity living)) { continue; }
+            int carried = nourishing(observed.pack(), food, living);
             if (carried >= RESTOCK_DAYS * Hunger.FOOD_PER_DAY) {
                 continue;
             }
@@ -565,10 +582,10 @@ final class LivingPresence implements Facing {
     }
 
     // How much the food in the pack nourishes, of the food the colony eats.
-    private int nourishing(Container pack, ItemSpec food, LivingEntity body) {
+    private int nourishing(List<SlotSnapshot> pack, ItemSpec food, LivingEntity body) {
         int points = 0;
-        for (int slot = 0; slot < pack.getContainerSize(); slot++) {
-            ItemStack stack = pack.getItem(slot);
+        for (SlotSnapshot slot : pack) {
+            ItemStack stack = slot.stackCopy();
             FoodProperties eaten = stack.isEmpty() ? null : stack.getFoodProperties(body);
             if (FoodSafety.usable(Fronts.of(colony).settings(LivingContent.ID), stack, eaten) && Goods.matches(stack, food)) {
                 points += eaten.nutrition() * stack.getCount();
@@ -720,9 +737,16 @@ final class LivingPresence implements Facing {
         rows.add(Board.Row.heading(Component.translatable("folkways.page.living")));
         int mouths = mouths(colony);
         for (SettlerNeed need : settlerNeeds(level.getServer())) {
-            rows.add(Board.Row.of(new ItemStack(BuiltInRegistries.ITEM.get(need.kind().icon())),
-                Component.translatable(need.kind().nameKey()),
-                Component.literal(need.have() + " / " + need.want(mouths))).told(told(need, mouths)));
+            if (!need.complete()) {
+                this.colony.inventory().ensureObserved();
+                rows.add(Board.Row.of(new ItemStack(BuiltInRegistries.ITEM.get(need.kind().icon())),
+                    Component.translatable(need.kind().nameKey()),
+                    Component.translatable("folkways.settlers.checking_stock")));
+            } else {
+                rows.add(Board.Row.of(new ItemStack(BuiltInRegistries.ITEM.get(need.kind().icon())),
+                    Component.translatable(need.kind().nameKey()),
+                    Component.literal(need.have() + " / " + need.want(mouths))).told(told(need, mouths)));
+            }
         }
         rows.add(new Board.Row(ItemStack.EMPTY,
             Component.translatable(LivingContent.FOOD_MODE.nameKey()), Component.empty(),
@@ -782,7 +806,7 @@ final class LivingPresence implements Facing {
         return List.of(bed, LivingContent.food(colony)
             .map(food -> SettlerNeed.counting(LivingNeed.FOOD, food,
                     FolkwaysVanillaConfig.foodPerResident(), SettlerNeed.Per.RESIDENT)
-                .filled(Fronts.of(colony).stocked(server, food)))
+                .filled(Fronts.of(colony).stocked(server, food), colony.inventory().snapshot().coverage().complete()))
             .orElseGet(() -> new SettlerNeed(LivingNeed.FOOD, 0,
                 FolkwaysVanillaConfig.foodPerResident(), SettlerNeed.Per.RESIDENT, Optional.empty())));
     }

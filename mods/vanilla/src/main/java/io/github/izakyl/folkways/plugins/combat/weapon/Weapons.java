@@ -1,8 +1,10 @@
 package io.github.izakyl.folkways.plugins.combat.weapon;
 
 import io.github.izakyl.folkways.core.api.colony.Colonies;
+import io.github.izakyl.folkways.core.api.colony.Colony;
 import io.github.izakyl.folkways.core.api.resident.ResidentKinds;
 import io.github.izakyl.folkways.core.api.terms.Goods;
+import io.github.izakyl.folkways.core.api.terms.ItemSpec;
 import io.github.izakyl.folkways.core.api.vocation.Vocations;
 import io.github.izakyl.folkways.core.api.work.ToolNeed;
 import io.github.izakyl.folkways.core.api.work.Worker;
@@ -30,7 +32,7 @@ public final class Weapons {
     public static final WeaponAdapter CROSSBOW = new NativeAdapter(NativeWeaponSession.Kind.CROSSBOW, 8);
     public static final WeaponAdapter MELEE = new NativeAdapter(NativeWeaponSession.Kind.MELEE, 4.5);
 
-    private record Candidate(WeaponAdapter adapter, ItemStack stack) {
+    private record Candidate(WeaponAdapter adapter, ItemStack stack, ItemSpec items) {
         boolean ranged() {
             return LoadoutRegistry.using(stack).map(provider -> provider.ranged(stack)).orElseGet(adapter::ranged);
         }
@@ -71,7 +73,12 @@ public final class Weapons {
         if (!(worker.body() instanceof ResidentEntity)) {
             return barehanded(worker) || !worker.held(LEGACY_MELEE).isEmpty();
         }
-        return permitted(worker) && (adapter(worker, null).isPresent() || barehanded(worker));
+        return permitted(worker) && !awaitingSupply(worker)
+            && (profile(worker).isEmpty() || adapter(worker, null).isPresent() || barehanded(worker));
+    }
+
+    public static boolean awaitingSupply(Worker worker) {
+        return supplies(worker).filter(value -> value.awaitingWeapon(worker.resident().id())).isPresent();
     }
 
     public static boolean ranged(Worker worker) {
@@ -97,11 +104,7 @@ public final class Weapons {
         if (!permitted(worker)) {
             return Optional.empty();
         }
-        Optional<Candidate> adapter = adapter(worker, null);
-        if (adapter.isPresent()) {
-            return adapter.get().adapter().open(worker, adapter.get().stack());
-        }
-        return barehanded(worker) ? Optional.of(NativeWeaponSession.barehanded(worker)) : Optional.empty();
+        return open(worker, null);
     }
 
     private static boolean barehanded(Worker worker) {
@@ -143,23 +146,18 @@ public final class Weapons {
     }
 
     public static Optional<WeaponSession> open(Worker worker, LivingEntity target) {
-        if (!(worker.body() instanceof ResidentEntity) || !permitted(worker)) {
-            return Optional.empty();
-        }
-        return adapter(worker, target)
-            .flatMap(candidate -> candidate.adapter().open(worker, candidate.stack()))
-            .or(() -> barehanded(worker) ? Optional.of(NativeWeaponSession.barehanded(worker)) : Optional.empty());
+        return Optional.ofNullable(select(worker, target, null));
     }
 
     /** Return the old hand before opening another; only the current work node advances either session. */
     public static WeaponSession select(Worker worker, LivingEntity target, WeaponSession current) {
-        WeaponSession selected = select(worker, current, adapter(worker, target));
-        return selected != null || !permitted(worker) || !barehanded(worker)
+        WeaponSession selected = select(worker, current, adapter(worker, target), false);
+        return selected != null || !permitted(worker) || profile(worker).isPresent() || !barehanded(worker)
             ? selected : NativeWeaponSession.barehanded(worker);
     }
 
     public static WeaponSession selectRanged(Worker worker, LivingEntity target, WeaponSession current) {
-        return select(worker, current, adapter(worker, target, true));
+        return select(worker, current, adapter(worker, target, true), true);
     }
 
     public static double rangedRange(Worker worker, LivingEntity target) {
@@ -171,23 +169,45 @@ public final class Weapons {
             .map(provider -> provider.indirect(candidate.stack()))).orElse(false);
     }
 
-    private static WeaponSession select(Worker worker, WeaponSession current, Optional<Candidate> desired) {
-        if (current != null
-            && current.state() != WeaponSession.State.CLOSED
-            && current.state() != WeaponSession.State.STOPPING
-            && permitted(worker)
-            && worker.body() instanceof ResidentEntity resident
-            && resident.ownsWeaponHand(current)
-            && desired.filter(candidate -> candidate.stack() == resident.getMainHandItem()).isPresent()) {
+    private static WeaponSession select(Worker worker, WeaponSession current, Optional<Candidate> desired,
+                                        boolean rangedOnly) {
+        if (!(worker.body() instanceof ResidentEntity body) || !permitted(worker)) {
+            if (current != null) {
+                current.close();
+            }
+            return null;
+        }
+        if (current != null && current.state() != WeaponSession.State.CLOSED
+            && current.state() != WeaponSession.State.STOPPING && body.ownsWeaponHand(current)
+            && (profile(worker).isEmpty() || desired.filter(candidate ->
+                candidate.adapter().accepts(body.getMainHandItem())
+                    && Goods.matches(body.getMainHandItem(), candidate.items())).isPresent())) {
             return current;
         }
         if (current != null) {
             current.close();
         }
-        if (!(worker.body() instanceof ResidentEntity) || !permitted(worker)) {
-            return null;
+        for (int slot = 0; slot < worker.pack().getContainerSize(); slot++) {
+            ItemStack stack = worker.pack().getItem(slot);
+            for (Registered entry : registered) {
+                WeaponAdapter adapter = entry.adapter();
+                if (!adapter.accepts(stack) || rangedOnly && !adapter.ranged()
+                    || desired.isPresent() && (!desired.get().adapter().equals(adapter)
+                        || !Goods.matches(stack, desired.get().items()))
+                    || profile(worker).isPresent() && desired.isEmpty()
+                    || !adapter.usable(worker, stack)
+                    || !LoadoutRegistry.using(stack).map(provider -> provider.usable(worker, stack)).orElse(true)) {
+                    continue;
+                }
+                Optional<WeaponSession> opened = adapter.open(worker, stack);
+                if (opened.isPresent()) {
+                    return opened.get();
+                }
+            }
         }
-        return desired.flatMap(candidate -> candidate.adapter().open(worker, candidate.stack())).orElse(null);
+        colony(body).ifPresent(colony -> colony.inventoryFeedback().changedResident(body.id()));
+        supplies(worker).ifPresent(value -> value.weaponFailed(body.id()));
+        return null;
     }
 
     private static Optional<Candidate> adapter(Worker worker, LivingEntity target) {
@@ -195,35 +215,7 @@ public final class Weapons {
     }
 
     private static Optional<Candidate> adapter(Worker worker, LivingEntity target, boolean rangedOnly) {
-        List<ItemStack> carried = new ArrayList<>();
-        if (worker.body() instanceof ResidentEntity resident && resident.hasWeaponSession()) {
-            carried.add(resident.getMainHandItem());
-        }
-        for (int slot = 0; slot < worker.pack().getContainerSize(); slot++) {
-            carried.add(worker.pack().getItem(slot));
-        }
-        Optional<LoadoutProfile> profile =
-            supplies(worker).flatMap(supplies -> supplies.profiles().assigned(worker.resident().id()));
-        List<Candidate> candidates = new ArrayList<>();
-        if (profile.isPresent()) {
-            for (LoadoutProfile.Entry entry : profile.get().entries()) {
-                if (entry.kind() != LoadoutProfile.Kind.WEAPON) {
-                    continue;
-                }
-                for (ItemStack stack : carried) {
-                    if (Goods.matches(stack, entry.items())) {
-                        add(candidates, worker, stack);
-                    }
-                }
-            }
-        }
-        // Existing held tools and player-given equipment remain a last resort when profile
-        // equipment is unavailable.
-        if (candidates.isEmpty()) {
-            for (ItemStack stack : carried) {
-                add(candidates, worker, stack);
-            }
-        }
+        List<Candidate> candidates = new ArrayList<>(candidates(worker));
         if (rangedOnly) {
             candidates.removeIf(candidate -> !candidate.ranged());
         }
@@ -248,17 +240,29 @@ public final class Weapons {
             }));
     }
 
-    private static void add(List<Candidate> candidates, Worker worker, ItemStack stack) {
-        registered.stream()
-            .map(Registered::adapter)
-            .filter(
-            adapter ->
-                adapter.usable(worker, stack)
-                    && LoadoutRegistry.using(stack)
-                    .map(provider -> provider.usable(worker, stack))
-                    .orElse(true))
-            .findFirst()
-            .ifPresent(adapter -> candidates.add(new Candidate(adapter, stack)));
+    private static Optional<Colony> colony(ResidentEntity body) {
+        return body.level() instanceof ServerLevel level
+            ? body.colonyId().flatMap(id -> Colonies.of(level.getServer(), id)) : Optional.empty();
+    }
+
+    private static Optional<LoadoutProfile> profile(Worker worker) {
+        return supplies(worker).flatMap(value -> value.profiles().assigned(worker.resident().id()));
+    }
+
+    private static List<Candidate> candidates(Worker worker) {
+        List<Candidate> result = new ArrayList<>();
+        profile(worker).ifPresent(profile -> {
+            for (LoadoutProfile.Entry entry : profile.entries()) {
+                if (entry.kind() != LoadoutProfile.Kind.WEAPON) {
+                    continue;
+                }
+                for (ItemStack stack : LoadoutProfile.samples(entry.items())) {
+                    registered.stream().map(Registered::adapter).filter(adapter -> adapter.accepts(stack))
+                        .findFirst().ifPresent(adapter -> result.add(new Candidate(adapter, stack, entry.items())));
+                }
+            }
+        });
+        return result;
     }
 
     private record NativeAdapter(NativeWeaponSession.Kind kind, double range) implements WeaponAdapter {
@@ -303,12 +307,6 @@ public final class Weapons {
                     return open(worker, stack);
                 }
             }
-            for (int slot = 0; slot < worker.pack().getContainerSize(); slot++) {
-                ItemStack stack = worker.pack().getItem(slot);
-                if (accepts(stack)) {
-                    return open(worker, stack);
-                }
-            }
             return Optional.empty();
         }
 
@@ -320,7 +318,8 @@ public final class Weapons {
                 || !resident.isAlive()
                 || resident.isRemoved()
                 || !(resident.level() instanceof ServerLevel level)
-                || !level.getServer().isSameThread()) {
+                || !level.getServer().isSameThread()
+                || !usable(worker, weapon)) {
                 return Optional.empty();
             }
             int selected = -1;

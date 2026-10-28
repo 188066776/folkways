@@ -1,6 +1,5 @@
 package io.github.izakyl.folkways.core.engine.labor;
 
-import io.github.izakyl.folkways.effect.Effects;
 import io.github.izakyl.folkways.core.api.resident.Resident;
 import io.github.izakyl.folkways.core.api.terms.Containers;
 import io.github.izakyl.folkways.core.api.terms.Goods;
@@ -10,10 +9,12 @@ import io.github.izakyl.folkways.core.api.work.Need;
 import io.github.izakyl.folkways.core.api.work.Node;
 import io.github.izakyl.folkways.core.api.work.Outcome;
 import io.github.izakyl.folkways.core.api.work.Placement;
+import io.github.izakyl.folkways.core.api.work.Staged;
 import io.github.izakyl.folkways.core.api.work.ToolNeed;
 import io.github.izakyl.folkways.core.api.work.Worker;
-import io.github.izakyl.folkways.core.api.work.Staged;
+import io.github.izakyl.folkways.core.engine.inventory.InventoryChanges;
 import io.github.izakyl.folkways.core.engine.plan.Stores;
+import io.github.izakyl.folkways.effect.Effects;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Predicate;
@@ -31,6 +32,15 @@ public final class Commit {
     }
 
     public static Outcome run(ServerLevel level, Node node, Worker who) {
+        try {
+            return execute(level, node, who);
+        } finally {
+            who.pack().setChanged();
+            InventoryChanges.resident(who.body());
+        }
+    }
+
+    private static Outcome execute(ServerLevel level, Node node, Worker who) {
         if (node instanceof Staged staged) {
             return switch (staged.draw(level, who)) {
                 case Staged.Short(var why) -> Outcome.failed(why);
@@ -97,6 +107,8 @@ public final class Commit {
                 continue;
             }
             planned = true;
+            one.draw.from().ifPresent(stash ->
+                InventoryChanges.store((ServerLevel) who.body().level(), stash.pos()));
             Container source = one.draw.from().map(stash -> storeAt(who, stash)).orElse(who.pack());
             if (source == null || left <= 0) {
                 continue;
@@ -114,8 +126,12 @@ public final class Commit {
         left = drawFrom(who.pack(), matching, left, drawn);
         if (!need.carried()) {
             for (Worker.Store store : who.within()) {
-                if (StoreRule.takes(Stores.rulesAt(store.at()))) {
+                if (StoreRule.takes(Stores.rulesAt((ServerLevel) who.body().level(), store.at()))) {
+                    long before = left;
                     left = drawFrom(store.contents(), matching, left, drawn);
+                    if (before > 0 && who.body().level() instanceof ServerLevel level) {
+                        InventoryChanges.store(level, store.at());
+                    }
                 }
             }
         }
@@ -125,7 +141,7 @@ public final class Commit {
     private static Container storeAt(Worker who, Stash stash) {
         for (Worker.Store store : who.within()) {
             if (store.at().equals(stash.pos())
-                    && StoreRule.takes(Stores.rulesAt(store.at()))) {
+                    && StoreRule.takes(Stores.rulesAt((ServerLevel) who.body().level(), store.at()))) {
                 return store.contents();
             }
         }
@@ -163,8 +179,11 @@ public final class Commit {
             if (left.isEmpty()) {
                 break;
             }
-            if (StoreRule.stores(Stores.rulesAt(store.at()))) {
+            if (StoreRule.stores(Stores.rulesAt((ServerLevel) who.body().level(), store.at()))) {
                 left = Containers.insert(store.contents(), left);
+                if (who.body().level() instanceof ServerLevel level) {
+                    InventoryChanges.store(level, store.at());
+                }
             }
         }
         who.spill(left);

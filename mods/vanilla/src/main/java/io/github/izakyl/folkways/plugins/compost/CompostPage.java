@@ -117,8 +117,16 @@ public final class CompostPage implements Draw {
 
     private Tag reading(Player player) {
         CompoundTag tag = new CompoundTag();
-        List<Item> all = colony(player).flatMap(colony -> Pages.levelOf(player)
+        boolean pending = colony(player).map(colony -> {
+            if (!colony.inventory().snapshot().coverage().complete()) {
+                colony.inventory().ensureObserved();
+                return true;
+            }
+            return false;
+        }).orElse(false);
+        List<Item> all = pending ? List.of() : colony(player).flatMap(colony -> Pages.levelOf(player)
             .map(level -> CompostSettings.discovered(colony, level.getServer()))).orElseGet(List::of);
+        tag.putBoolean("pending", pending);
         offset = Math.clamp(offset, 0, Math.max(0, all.size() - 1) / ROW_SLOTS * ROW_SLOTS);
         window = all.subList(offset, Math.min(all.size(), offset + ROW_SLOTS));
         ListTag rows = new ListTag();
@@ -148,6 +156,8 @@ public final class CompostPage implements Draw {
         ListTag rows = tag.getList("rows", Tag.TAG_COMPOUND);
         counter.setText(Component.translatable("folkways.settings.compost.page", tag.getInt("page"), tag.getInt("pages")));
         empty.setDisplay(tag.getInt("total") == 0);
+        empty.setText(Component.translatable(tag.getBoolean("pending") ? "folkways.settlers.checking_stock"
+            : "folkways.settings.compost.empty"));
         for (int slot = 0; slot < ROW_SLOTS; slot++) {
             boolean shown = slot < rows.size();
             slots.get(slot).setDisplay(shown);

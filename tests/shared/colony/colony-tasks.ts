@@ -186,13 +186,20 @@ waiting.setInt(queue, seeded);
 ResourceLocation kind = PersonBody.ID;
 List<Object> rounds = new ArrayList<Object>();
 int admitted = 0;
+boolean pending = false;
 for (int round = 0; round < seeded; round++) {
-    String refusal = refusalKey(Endorsements.called(level, colony, player, kind));
+    Attempt attempt = Endorsements.called(level, colony, player, kind);
+    String refusal = refusalKey(attempt);
     Map<String, Object> one = new LinkedHashMap<String, Object>();
     one.put("round", Integer.valueOf(round));
     one.put("refusal", refusal);
+    one.put("pending", Boolean.valueOf(attempt instanceof Attempt.Pending));
     one.put("roster", Integer.valueOf(colony.residents().size()));
     rounds.add(one);
+    if (attempt instanceof Attempt.Pending) {
+        pending = true;
+        break;
+    }
     if (refusal != null) {
         break;
     }
@@ -204,10 +211,11 @@ out.put("ok", Boolean.TRUE);
 out.put("settler_cap", Integer.valueOf(cap));
 out.put("seeded", Integer.valueOf(seeded));
 out.put("admitted", Integer.valueOf(admitted));
+out.put("pending", Boolean.valueOf(pending));
 out.put("waiting_left", Integer.valueOf(waiting.getInt(queue)));
 out.put("roster", Integer.valueOf(colony.residents().size()));
 out.put("rounds", rounds);
-if (admitted != seeded) {
+if (admitted != seeded && !pending) {
     throw new TaskException("refused", "admitted " + admitted + " of " + seeded + " settlers", out);
 }
 return Sync.stamp(out);

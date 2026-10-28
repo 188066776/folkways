@@ -6,6 +6,7 @@ import io.github.izakyl.folkways.core.api.work.Ending;
 import io.github.izakyl.folkways.core.api.work.Grown;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.BiConsumer;
@@ -24,6 +25,11 @@ public final class ConstructionNeeds {
 
     public ConstructionNeeds(Colony colony, ResourceLocation owner) {
         asks = new BuildSite.Asks() {
+            @Override
+            public Optional<Colony> colony() {
+                return Optional.of(colony);
+            }
+
             @Override
             public void submit(ResourceKey<Level> dimension, Grown work, BiConsumer<UUID, Ending> ended) {
                 colony.submit(owner, dimension, work, ended);

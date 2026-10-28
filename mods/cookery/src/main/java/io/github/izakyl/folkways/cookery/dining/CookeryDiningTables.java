@@ -25,8 +25,12 @@ public final class CookeryDiningTables {
         if (registered) { return; }
         ResourceLocation id = ResourceLocation.fromNamespaceAndPath("folkways", "cookery_dining");
         DiningTables.register(id, new DiningTables.Table() {
+            public boolean stable() { return true; }
             public Optional<BlockState> sample() { return Optional.of(ModBlocks.TABLE_OAK.get().defaultBlockState()); }
-            public boolean matches(ServerLevel level, BlockPos at) { return level.getBlockEntity(at) instanceof TableBlockEntity; }
+            public boolean matches(ServerLevel level, BlockPos at) {
+                if (!level.getBlockState(at).hasBlockEntity()) { return false; }
+                return level.getBlockEntity(at) instanceof TableBlockEntity;
+            }
             public Container inventory(ServerLevel level, BlockPos at) {
                 return level.getBlockEntity(at) instanceof TableBlockEntity table ? new TableStore(table) : null;
             }

@@ -110,6 +110,8 @@ public final class StoveSchedulingGameTests {
         final ResidentEntity actor;
         final SimpleContainer pack = new SimpleContainer(6);
         final Colony colony;
+        final io.github.izakyl.folkways.core.engine.colony.ColonyData inventoryData =
+            new io.github.izakyl.folkways.core.engine.colony.ColonyData();
         final ColonyView view;
         final CookeryPresence presence;
         final List<Grown> submitted = new ArrayList<>();
@@ -144,6 +146,7 @@ public final class StoveSchedulingGameTests {
             colony = (Colony) Proxy.newProxyInstance(Colony.class.getClassLoader(), new Class<?>[] { Colony.class },
                 (proxy, method, args) -> switch (method.getName()) {
                     case "id" -> id;
+                    case "inventory", "inventoryFeedback" -> inventoryData.inventory();
                     case "views" -> List.of(view);
                     case "view" -> view;
                     case "holdings" -> args == null || args.length == 0 || CookeryContent.STATION.equals(args[0]) ? List.of(holding) : List.of();
@@ -183,6 +186,7 @@ public final class StoveSchedulingGameTests {
         public Placement placement() { return Placement.NOWHERE; }
         public void close() {
             closed = true; presence.closed(Closing.SHUTDOWN); Cadence.forget(colony); actor.discard(); before.forEach(level::setBlockAndUpdate);
+            inventoryData.inventory().clear();
         }
     }
 }

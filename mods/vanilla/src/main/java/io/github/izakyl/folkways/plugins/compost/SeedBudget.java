@@ -17,16 +17,20 @@ import java.util.function.ToIntFunction;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 
-/** A destructive consumer's allowance over one fresh, physical inventory snapshot. */
+/** Seed allocations over published planning observations and fresh execution tallies. */
 public final class SeedBudget {
     public record Location(Optional<WorldPos> store, Optional<UUID> resident) {
         public static final Location UNKNOWN = new Location(Optional.empty(), Optional.empty());
         public Location {
             Objects.requireNonNull(store);
             Objects.requireNonNull(resident);
-            if (store.isPresent() && resident.isPresent()) throw new IllegalArgumentException("two physical locations");
+            if (store.isPresent() && resident.isPresent()) {
+                throw new IllegalArgumentException("two physical locations");
+            }
         }
+
         public static Location store(WorldPos at) { return new Location(Optional.of(at), Optional.empty()); }
+
         public static Location pack(UUID resident) { return new Location(Optional.empty(), Optional.of(resident)); }
     }
 
@@ -44,7 +48,7 @@ public final class SeedBudget {
             Objects.requireNonNull(node);
             Objects.requireNonNull(at);
             Objects.requireNonNull(goods);
-            if (count < 0) throw new IllegalArgumentException("negative claim");
+            if (count < 0) { throw new IllegalArgumentException("negative claim"); }
         }
     }
 
@@ -53,7 +57,7 @@ public final class SeedBudget {
         public FutureNeed {
             Objects.requireNonNull(identity);
             Objects.requireNonNull(goods);
-            if (count < 0) throw new IllegalArgumentException("negative future need");
+            if (count < 0) { throw new IllegalArgumentException("negative future need"); }
         }
     }
 
@@ -61,15 +65,17 @@ public final class SeedBudget {
         public StockTarget {
             Objects.requireNonNull(identity);
             Objects.requireNonNull(goods);
-            if (count < 0) throw new IllegalArgumentException("negative stock target");
+            if (count < 0) { throw new IllegalArgumentException("negative stock target"); }
         }
     }
 
     public record Snapshot(List<Stock> stock, List<Claim> claims, List<FutureNeed> future,
                            Map<Item, Long> maintainTargets, List<StockTarget> targets, boolean complete) {
-        public Snapshot(List<Stock> stock, List<Claim> claims, List<FutureNeed> future, Map<Item, Long> maintainTargets) {
+        public Snapshot(List<Stock> stock, List<Claim> claims, List<FutureNeed> future,
+                Map<Item, Long> maintainTargets) {
             this(stock, claims, future, maintainTargets, List.of(), true);
         }
+
         public Snapshot {
             stock = List.copyOf(stock);
             claims = List.copyOf(claims);
@@ -121,11 +127,17 @@ public final class SeedBudget {
         }
 
         public boolean complete() { return complete; }
+
         public Tally tally(Item seed) { return tallies.getOrDefault(seed, NOTHING); }
+
         public List<Reserve> reserves() { return reserves; }
     }
 
     private final Supplier<Snapshot> snapshots;
+    private Snapshot previous;
+    private Set<Item> previousSeeds;
+    private Map<List<Item>, Long> previousMinimums;
+    private Planning previousPlanning;
     private final Supplier<Set<Item>> seeds;
     private final ToIntFunction<Item> retained;
 
@@ -143,7 +155,7 @@ public final class SeedBudget {
         return alternatives.stream().mapToLong(item -> Math.max(0, retained.applyAsInt(item))).max().orElse(0);
     }
 
-    public Tally tally(Item seed) { return tally(seed, ItemStack.EMPTY, Set.of()); }
+    public Tally tally(Item seed) { return planning().tally(seed); }
 
     public boolean complete() { return snapshots.get().complete(); }
 
@@ -153,8 +165,16 @@ public final class SeedBudget {
         Set<Item> known = new LinkedHashSet<>(seeds.get());
         List<List<Item>> purposes = purposes(known);
         Map<List<Item>, Long> minimums = minimums(purposes);
-        return new Planning(snapshot.complete(), measure(snapshot, known, purposes, minimums, ItemStack.EMPTY, Set.of()),
-            purposes, minimums);
+        if (previous == snapshot && known.equals(previousSeeds) && minimums.equals(previousMinimums)) {
+            return previousPlanning;
+        }
+        Planning result = new Planning(snapshot.complete(),
+            measure(snapshot, known, purposes, minimums), purposes, minimums);
+        previous = snapshot;
+        previousSeeds = Set.copyOf(known);
+        previousMinimums = Map.copyOf(minimums);
+        previousPlanning = result;
+        return result;
     }
 
     public List<Reserve> reserves() {
@@ -162,51 +182,32 @@ public final class SeedBudget {
         return snapshot.complete() ? planning(snapshot).reserves() : List.of();
     }
 
-    // Core has drawn the current input before commit. Add that real escrow back to its former physical
-    // total and exclude only this consuming action's claim, then settle consumption or return it unused.
-    public boolean permits(UUID consumingNode, ItemStack escrow) {
-        return !escrow.isEmpty() && tally(escrow.getItem(), escrow, Set.of(consumingNode)).compostable() >= escrow.getCount();
-    }
-
-    public Tally tally(Item seed, ItemStack escrow, Set<UUID> consumingNodes) {
-        Snapshot snapshot = snapshots.get();
-        Set<Item> known = new LinkedHashSet<>(seeds.get());
-        if (!known.contains(seed)) return NOTHING;
-        List<List<Item>> purposes = purposes(known);
-        return measure(snapshot, known, purposes, minimums(purposes), escrow, consumingNodes).get(seed);
-    }
-
-    // Allocation depends on the snapshot and escrow, not on which seed asks for its final total.
-    // Settle physical claims, future demand and ordered retention once, then report every seed.
     private Map<Item, Tally> measure(Snapshot snapshot, Set<Item> known, List<List<Item>> purposes,
-            Map<List<Item>, Long> minimums, ItemStack escrow, Set<UUID> consumingNodes) {
+            Map<List<Item>, Long> minimums) {
         Map<String, Stock> distinct = new LinkedHashMap<>();
         snapshot.stock().forEach(stock -> distinct.putIfAbsent(stock.identity(), stock));
         List<Unit> units = new ArrayList<>();
         distinct.values().forEach(stock -> stock.stacks().stream().filter(stack -> !stack.isEmpty())
             .forEach(stack -> units.add(new Unit(stock.at(), stack))));
-        if (!escrow.isEmpty()) units.add(new Unit(Location.UNKNOWN, escrow));
         Map<ItemSpec, Long> physical = new LinkedHashMap<>();
         units.forEach(unit -> physical.merge(Goods.specOf(unit.stack), unit.free, Long::sum));
         record ClaimKey(UUID node, Location at, ItemSpec goods) { }
         Map<ClaimKey, Long> claims = new LinkedHashMap<>();
         for (Claim claim : snapshot.claims()) {
-            if (!consumingNodes.contains(claim.node())) {
-                claims.merge(new ClaimKey(claim.node(), claim.at(), claim.goods()), claim.count(), Math::max);
-            }
+            claims.merge(new ClaimKey(claim.node(), claim.at(), claim.goods()), claim.count(), Math::max);
         }
         // Bound claims consume only goods still present at their physical location. A store draw and its
         // later pack transit never create two stocks; unknown claims conservatively consume remaining units.
         claims.forEach((key, count) -> {
-            if (!key.at().equals(Location.UNKNOWN)) allocate(units, key.at(), key.goods(), count);
+            if (!key.at().equals(Location.UNKNOWN)) { allocate(units, key.at(), key.goods(), count); }
         });
         claims.forEach((key, count) -> {
-            if (key.at().equals(Location.UNKNOWN)) allocate(units, Location.UNKNOWN, key.goods(), count);
+            if (key.at().equals(Location.UNKNOWN)) { allocate(units, Location.UNKNOWN, key.goods(), count); }
         });
         Map<String, FutureNeed> future = new LinkedHashMap<>();
         for (FutureNeed need : snapshot.future()) {
             FutureNeed old = future.get(need.identity());
-            if (old == null || need.count() > old.count()) future.put(need.identity(), need);
+            if (old == null || need.count() > old.count()) { future.put(need.identity(), need); }
         }
         future.values().forEach(need -> allocate(units, Location.UNKNOWN, need.goods(), need.count()));
         Map<ItemSpec, Long> available = new LinkedHashMap<>();
@@ -249,13 +250,13 @@ public final class SeedBudget {
                     long take = Math.min(room, left);
                     ordered.merge(entry.getKey(), take, Long::sum);
                     left -= take;
-                    if (left == 0) break;
+                    if (left == 0) { break; }
                 }
             }
         }
         Map<Item, Tally> tallies = new LinkedHashMap<>();
         for (Item seed : known) {
-            ItemSpec wanted = !escrow.isEmpty() && escrow.is(seed) ? Goods.specOf(escrow) : ItemSpec.of(seed);
+            ItemSpec wanted = ItemSpec.of(seed);
             long total =
                 physical.entrySet().stream()
                 .filter(entry -> Goods.overlap(entry.getKey(), wanted))
@@ -291,8 +292,10 @@ public final class SeedBudget {
     private static void allocate(List<Unit> units, Location where, ItemSpec goods, long count) {
         long left = count;
         for (Unit unit : units) {
-            if (left == 0) break;
-            if ((!where.equals(Location.UNKNOWN) && !where.equals(unit.at)) || !Goods.matches(unit.stack, goods)) continue;
+            if (left == 0) { break; }
+            if ((!where.equals(Location.UNKNOWN) && !where.equals(unit.at)) || !Goods.matches(unit.stack, goods)) {
+                continue;
+            }
             long taken = Math.min(unit.free, left);
             unit.free -= taken;
             left -= taken;
@@ -303,6 +306,7 @@ public final class SeedBudget {
         final Location at;
         final ItemStack stack;
         long free;
+
         Unit(Location at, ItemStack stack) {
             this.at = at;
             this.stack = stack;

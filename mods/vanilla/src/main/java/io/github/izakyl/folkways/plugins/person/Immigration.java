@@ -32,15 +32,20 @@ final class Immigration implements Admission {
         if (!FolkwaysVanillaConfig.immigrationEnabled()) {
             return new Endorsed.Refused(Notice.of(ImmigrationRefusal.SWITCHED_OFF));
         }
-        int heads = PersonPresence.heads(called.view());
-        for (SettlerNeed need : LivingContent.settlerNeeds(called.colony(), called.view().level().getServer())) {
-            if (!need.met(heads)) {
-                return new Endorsed.Refused(need.asRefusal(heads));
-            }
-        }
         PersonPresence people = queue(called).orElse(null);
         if (people == null || people.waiting() <= 0) {
             return new Endorsed.Refused(Notice.of(ImmigrationRefusal.NOBODY_WAITING));
+        }
+        int heads = PersonPresence.heads(called.view());
+        for (SettlerNeed need : LivingContent.settlerNeeds(called.colony(), called.view().level().getServer())) {
+            if (!need.complete()) {
+                called.colony().inventory().ensureObserved();
+                people.retry(called);
+                return new Endorsed.Pending();
+            }
+            if (!need.met(heads)) {
+                return new Endorsed.Refused(need.asRefusal(heads));
+            }
         }
         ResidentEntity person = PersonBody.RESIDENT.get().create(called.view().level());
         if (person == null) {

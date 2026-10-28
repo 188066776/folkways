@@ -165,6 +165,34 @@ public final class SurveyGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 100)
+    public static void haulApproachesAreReusedUntilDropsMove(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        BlockPos origin = helper.absolutePos(new BlockPos(2, 1, 2));
+        floor(level, origin.offset(-2, -1, -2), origin.offset(4, -1, 4), Blocks.STONE);
+        ItemEntity drop = new ItemEntity(level, origin.getX() + 0.5, origin.getY(), origin.getZ() + 0.5,
+            new ItemStack(Items.COBBLESTONE));
+        level.addFreshEntity(drop);
+        try {
+            Set<BlockPos> cells = box(origin, origin.offset(1, 1, 1));
+            Survey.Drops known = new Survey.Drops();
+            new Survey(level, cells).haul(cell -> WorldPos.of(level, cell), known);
+            Survey.Drop first = known.known.get(drop.getUUID());
+            helper.assertTrue(first != null, "the drop has a cached approach");
+            new Survey(level, cells).haul(cell -> WorldPos.of(level, cell), known);
+            helper.assertTrue(known.known.get(drop.getUUID()) == first, "an unmoved drop reuses its approach");
+            drop.setPos(origin.getX() + 1.5, origin.getY(), origin.getZ() + 0.5);
+            new Survey(level, cells).haul(cell -> WorldPos.of(level, cell), known);
+            helper.assertTrue(known.known.get(drop.getUUID()) != first, "a moved drop gets a new approach");
+            drop.discard();
+            new Survey(level, cells).haul(cell -> WorldPos.of(level, cell), known);
+            helper.assertTrue(known.known.isEmpty(), "removed drops leave the cache");
+        } finally {
+            drop.discard();
+        }
+        helper.succeed();
+    }
+
     private static Set<BlockPos> box(BlockPos min, BlockPos max) {
         Set<BlockPos> cells = new LinkedHashSet<>();
         BlockPos.betweenClosed(min, max).forEach(cell -> cells.add(cell.immutable()));

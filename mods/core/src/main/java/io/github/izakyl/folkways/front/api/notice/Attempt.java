@@ -11,6 +11,9 @@ public sealed interface Attempt {
     record Refused(Notice why) implements Attempt {
     }
 
+    record Pending() implements Attempt {
+    }
+
     static Attempt went() {
         return new Went();
     }

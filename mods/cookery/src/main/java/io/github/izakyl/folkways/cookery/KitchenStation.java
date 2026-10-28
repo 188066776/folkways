@@ -78,6 +78,10 @@ public interface KitchenStation {
     }
 
     static Optional<Stances> reaching(ServerLevel level, Stances offered, List<WorldPos> points) {
+        return StationApproach.reaching(level, offered, points);
+    }
+
+    static Optional<Stances> calculateReaching(ServerLevel level, Stances offered, List<WorldPos> points) {
         if (points.isEmpty() || points.stream().anyMatch(point -> !point.in(level))) { return Optional.empty(); }
         Stances candidates = offered instanceof Stances.Cells ? offered : around(level, points).orElse(null);
         if (candidates == null) { return Optional.empty(); }
@@ -86,6 +90,11 @@ public interface KitchenStation {
                 && WorldSpaces.storage(level, footing).filter(cell -> Footing.withFeetAt(level, cell)
                     && points.stream().allMatch(point -> Reach.withinReach(cell, point.block(level))
                         && Reach.inSight(level, cell, point.block(level)))).isPresent()).toList());
+    }
+
+    // Empty means that this provider must recompute its offer on every observation.
+    default Optional<Object> freezeSignature(ServerLevel level, WorldPos at) {
+        return Optional.empty();
     }
 
     default Optional<Workshop> freeze(UUID key, UUID colony, ServerLevel level, WorldPos at,

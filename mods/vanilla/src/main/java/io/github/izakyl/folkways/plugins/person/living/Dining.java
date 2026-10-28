@@ -2,12 +2,28 @@ package io.github.izakyl.folkways.plugins.person.living;
 
 import io.github.izakyl.folkways.core.api.colony.Colony;
 import io.github.izakyl.folkways.core.api.colony.ColonyView;
+import io.github.izakyl.folkways.core.api.inventory.InventorySnapshot;
+import io.github.izakyl.folkways.core.api.ground.BlockChanges;
+import io.github.izakyl.folkways.core.api.terms.Stash;
+import io.github.izakyl.folkways.core.api.terms.Containers;
 import io.github.izakyl.folkways.core.api.terms.Footing;
 import io.github.izakyl.folkways.core.api.terms.Goods;
 import io.github.izakyl.folkways.core.api.terms.ItemSpec;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
 import io.github.izakyl.folkways.core.api.terms.WorldSpaces;
-import io.github.izakyl.folkways.core.api.work.*;
+import io.github.izakyl.folkways.core.api.work.Ending;
+import io.github.izakyl.folkways.core.api.work.Grown;
+import io.github.izakyl.folkways.core.api.work.Need;
+import io.github.izakyl.folkways.core.api.work.Node;
+import io.github.izakyl.folkways.core.api.work.NodeSpec;
+import io.github.izakyl.folkways.core.api.work.Outcome;
+import io.github.izakyl.folkways.core.api.work.Stances;
+import io.github.izakyl.folkways.core.api.work.Urge;
+import io.github.izakyl.folkways.core.api.work.WorkEffort;
+import io.github.izakyl.folkways.core.api.work.WorkGesture;
+import io.github.izakyl.folkways.core.api.work.WorkSite;
+import io.github.izakyl.folkways.core.api.work.Worker;
+import io.github.izakyl.folkways.core.api.work.Workload;
 import io.github.izakyl.folkways.front.api.Fronts;
 import io.github.izakyl.folkways.front.api.ZoneView;
 import io.github.izakyl.folkways.front.api.notice.Line;
@@ -19,6 +35,7 @@ import java.util.ArrayDeque;
 import java.util.LinkedHashMap;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -29,6 +46,10 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.levelgen.structure.BoundingBox;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
@@ -44,6 +65,10 @@ final class Dining {
     private final DiningSupplies supplies;
     private final java.util.random.RandomGenerator random;
     private volatile List<Table> tables = List.of();
+    private List<ZoneKey> geometry = List.of();
+    private final List<BlockChanges.Heard> watches = new ArrayList<>();
+    private boolean geometryDirty = true;
+    private final Map<WorldPos, Servings> servings = new HashMap<>();
     private final Map<WorldPos, UUID> seats = new ConcurrentHashMap<>();
     private final Map<Portion, UUID> portions = new ConcurrentHashMap<>();
     private final Map<UUID, BarDrink> drinks = new ConcurrentHashMap<>();
@@ -54,9 +79,12 @@ final class Dining {
     private static final int MAX_TABLE_CELLS = 128;
     private static final int MAX_DINING_ZONE_CELLS = 4096;
     record Table(ServerLevel level, UUID zone, BlockPos at, ItemSpec food, int target,
-                 Set<BlockPos> tops, List<Seat> seats, List<BlockPos> approaches) { }
+                 Set<BlockPos> tops, List<Seat> seats, List<BlockPos> approaches, boolean display, boolean provider) { }
     private record Portion(WorldPos at, int slot) { }
-    private record Choice(Table table, Seat seat, int slot) { }
+    private record Choice(Table table, Seat seat, int slot, InventorySnapshot.Version version, ItemStack expected) { }
+    private record Servings(InventorySnapshot.Version version, ItemSpec menu, List<Integer> slots) { }
+    private record ZoneKey(ResourceKey<Level> dimension, UUID id, Set<BlockPos> cells, Optional<ItemSpec> food,
+                           Optional<ItemSpec> drink, int target, Set<Long> loaded) { }
     private record Refill(Portion portion, UUID zone, ItemSpec menu, int target) { }
 
     private static Refill refill(Table table, int slot) {
@@ -73,16 +101,32 @@ final class Dining {
     }
 
     void refresh(MinecraftServer server) {
+        for (ColonyView view : colony.views(server)) {
+            for (var resident : view.residents()) {
+                if (meals.values().stream().noneMatch(meal -> meal.who.resident().id().equals(resident.id()))
+                        && drinks.values().stream().noneMatch(drink -> drink.who.resident().id().equals(resident.id()))
+                        && view.level().getEntity(resident.id()) instanceof Mob body) { DiningTables.stand(body); }
+            }
+        }
+        List<ZoneKey> next = geometry(server);
+        if (!geometryDirty && geometry.equals(next)) { return; }
+        geometryDirty = false;
+        geometry = next;
+        watches.forEach(BlockChanges.Heard::close);
+        watches.clear();
+        for (ColonyView view : colony.views(server)) {
+            for (ZoneView zone : Fronts.of(colony).zonesIn(view.level())) {
+                if (!zone.delegation().equals(LivingContent.DINING) || zone.cells().isEmpty()
+                        || zone.cells().size() > MAX_DINING_ZONE_CELLS) { continue; }
+                var box = BoundingBox.encapsulatingPositions(zone.cells()).orElseThrow().inflatedBy(3);
+                watches.add(BlockChanges.listen(view.level(), box, at -> geometryDirty = true));
+            }
+        }
         supplies.refresh(server);
         List<Table> found = new ArrayList<>();
         Set<WorldPos> seen = new HashSet<>();
         for (ColonyView view : colony.views(server)) {
             ServerLevel level = view.level();
-            for (var resident : view.residents()) {
-                if (meals.values().stream().noneMatch(meal -> meal.who.resident().id().equals(resident.id()))
-                        && drinks.values().stream().noneMatch(drink -> drink.who.resident().id().equals(resident.id()))
-                        && level.getEntity(resident.id()) instanceof Mob body) { DiningTables.stand(body); }
-            }
             for (ZoneView zone : Fronts.of(colony).zonesIn(level)) {
                 if (!zone.delegation().equals(LivingContent.DINING)) { continue; }
                 Optional<ItemSpec> food = zone.settings().items(LivingContent.DINING_FOOD.key());
@@ -120,14 +164,73 @@ final class Dining {
                         for (BlockPos at : tops) {
                             seen.add(WorldPos.of(level, at));
                             found.add(new Table(level, zone.id(), at, food.get(),
-                                Math.clamp(zone.settings().count(LivingContent.DINING_SERVINGS.key()), 1, 4), tops, seats, List.copyOf(approaches)));
+                                Math.clamp(zone.settings().count(LivingContent.DINING_SERVINGS.key()), 1, 4),
+                                tops, seats, List.copyOf(approaches), DiningTables.inventory(level, at).isPresent(),
+                                Containers.at(level, at).isEmpty()));
                         }
                     }
                 }
             }
         }
+        for (Table previous : tables) {
+            if (unavailable(previous.level, previous.at) && current(previous)
+                    && seen.add(WorldPos.of(previous.level, previous.at))) {
+                found.add(previous);
+            }
+        }
         tables = List.copyOf(found);
+        servings.clear();
+        for (ServerLevel level : server.getAllLevels()) {
+            colony.inventory().observe(DiningInventory.ID, level, tables.stream()
+                .filter(table -> table.level == level && table.display && !table.provider)
+                .map(table -> WorldPos.of(level, table.at)).toList());
+            DiningInventory.update(colony, level, tables.stream()
+                .filter(table -> table.level == level && table.display && table.provider)
+                .map(table -> WorldPos.of(level, table.at))
+                .sorted(Comparator.comparing(at -> at.toString())).toList(), complete(level));
+        }
         refills.keySet().removeIf(refill -> tables.stream().noneMatch(table -> refill.equals(refill(table, refill.portion.slot))));
+    }
+
+    private boolean unavailable(ServerLevel level, BlockPos at) {
+        return !level.isLoaded(at) || colony.inventory().snapshot().store(WorldPos.of(level, at))
+            .filter(store -> store.state() == InventorySnapshot.State.UNLOADED).isPresent();
+    }
+
+    private boolean complete(ServerLevel level) {
+        for (ZoneView zone : Fronts.of(colony).zonesIn(level)) {
+            if (!zone.delegation().equals(LivingContent.DINING)) { continue; }
+            if (zone.settings().items(LivingContent.DINING_FOOD.key()).isEmpty()
+                    && zone.settings().items(LivingContent.DINING_DRINK.key()).isEmpty()) { continue; }
+            for (BlockPos cell : zone.cells()) {
+                if (!level.isLoaded(cell) || !level.isLoaded(cell.above())) { return false; }
+            }
+        }
+        return true;
+    }
+
+    private List<ZoneKey> geometry(MinecraftServer server) {
+        List<ZoneKey> result = new ArrayList<>();
+        for (ColonyView view : colony.views(server)) {
+            for (ZoneView zone : Fronts.of(colony).zonesIn(view.level())) {
+                if (!zone.delegation().equals(LivingContent.DINING)) { continue; }
+                Set<Long> chunks = new HashSet<>();
+                for (BlockPos cell : zone.cells()) {
+                    for (int x = (cell.getX() - 3) >> 4; x <= (cell.getX() + 3) >> 4; x++) {
+                        for (int z = (cell.getZ() - 3) >> 4; z <= (cell.getZ() + 3) >> 4; z++) {
+                            if (view.level().hasChunk(x, z)) { chunks.add(ChunkPos.asLong(x, z)); }
+                        }
+                    }
+                }
+                result.add(new ZoneKey(view.level().dimension(), zone.id(), Set.copyOf(zone.cells()),
+                    zone.settings().items(LivingContent.DINING_FOOD.key()),
+                    zone.settings().items(LivingContent.DINING_DRINK.key()),
+                    zone.settings().count(LivingContent.DINING_SERVINGS.key()), Set.copyOf(chunks)));
+            }
+        }
+        result.sort(Comparator.comparing((ZoneKey key) -> key.dimension.location().toString())
+            .thenComparing(ZoneKey::id));
+        return List.copyOf(result);
     }
 
     private static Set<BlockPos> tableCells(ServerLevel level, ZoneView zone) {
@@ -156,17 +259,25 @@ final class Dining {
     }
 
     List<Grown> goals(ColonyView view) {
+        if (geometryDirty) { refresh(view.level().getServer()); }
         List<Grown> wanted = new ArrayList<>(supplies.goals(view));
         Set<Refill> pending = new HashSet<>();
+        Set<WorldPos> unknown = new HashSet<>();
+        var snapshot = colony.inventory().snapshot();
         for (Table table : tables) {
-            if (table.level != view.level() || !valid(table)) { continue; }
-            Optional<Container> display = DiningTables.inventory(view.level(), table.at);
-            int count = display.map(pack -> pack.getContainerSize()).orElse(1);
+            if (table.level != view.level() || !current(table)) { continue; }
+            var display = snapshot.store(WorldPos.of(view.level(), table.at)).orElse(null);
+            if (table.display && (display == null || display.state() != InventorySnapshot.State.OBSERVED)) {
+                colony.inventory().ensureObserved(Stash.at(WorldPos.of(view.level(), table.at)));
+                unknown.add(WorldPos.of(view.level(), table.at));
+                continue;
+            }
+            int count = table.display ? display.slots().size() : 1;
             for (int slot = 0; slot < count; slot++) {
-                if (slot >= foodSlots(table)) { continue; }
+                if (slot >= (table.display ? Math.min(table.target, count) : 1)) { continue; }
                 List<ItemSpec> accepted = accepted(table);
                 if (accepted.isEmpty()) { continue; }
-                if (display.isPresent() ? !display.get().getItem(slot).isEmpty()
+                if (table.display ? !display.slots().get(slot).stackCopy().isEmpty()
                         : !view.level().getBlockState(table.at.above()).isAir()) { continue; }
                 Refill refill = refill(table, slot);
                 pending.add(refill);
@@ -174,10 +285,11 @@ final class Dining {
                 // Keep that choice through repeated sweeps until this physical serving is delivered.
                 ItemSpec food = refills.compute(refill, (key, chosen) -> chosen != null && accepted.contains(chosen)
                     ? chosen : accepted.get(random.nextInt(accepted.size())));
-                wanted.add(Grown.of(new SetTable(table, slot, food)));
+                wanted.add(Grown.of(new SetTable(table, slot, food, table.display ? display.version() : null)));
             }
         }
-        refills.keySet().removeIf(refill -> refill.portion.at.in(view.level()) && !pending.contains(refill));
+        refills.keySet().removeIf(refill -> refill.portion.at.in(view.level())
+            && !unknown.contains(refill.portion.at) && !pending.contains(refill));
         return List.copyOf(wanted);
     }
 
@@ -209,27 +321,57 @@ final class Dining {
     }
 
     private List<Choice> choices(Worker who, ColonyView view) {
+        if (geometryDirty) { refresh(view.level().getServer()); }
         List<Choice> choices = new ArrayList<>();
         ServerLevel level = view.level();
+        var snapshot = colony.inventory().snapshot();
         BlockPos from = WorldSpaces.at(who.body()).block(level);
         for (Table table : tables) {
-            if (table.level != level || table.tops.stream().noneMatch(at -> at.distSqr(from) <= 16 * 16) || !valid(table)) { continue; }
-            Optional<Container> display = DiningTables.inventory(level, table.at);
-            int count = display.map(Container::getContainerSize).orElse(1);
-            for (int slot = 0; slot < count; slot++) {
+            if (table.level != level || table.tops.stream().noneMatch(at -> at.distSqr(from) <= 16 * 16)
+                    || !current(table)) { continue; }
+            var display = snapshot.store(WorldPos.of(level, table.at)).orElse(null);
+            if (table.display && (display == null || display.state() != InventorySnapshot.State.OBSERVED)) {
+                colony.inventory().ensureObserved(Stash.at(WorldPos.of(level, table.at)));
+                continue;
+            }
+            List<Integer> candidates = table.display ? servingSlots(table, display) : List.of(0);
+            for (int slot : candidates) {
                 if (portions.containsKey(new Portion(WorldPos.of(level, table.at), slot))) { continue; }
-                Optional<DiningFoods.Serving> serving = serving(table, slot, who);
+                Optional<DiningFoods.Serving> serving = table.display
+                    ? serving(table, display.slots().get(slot).stackCopy(), who) : serving(table, slot, who);
                 if (serving.isEmpty() || !living.wouldEat(who.resident().id(), serving.get().food())) { continue; }
                 for (Seat seat : table.seats) {
-                    if (!seats.containsKey(WorldPos.of(level, seat.chair)) && valid(table, seat)
+                    if (!seats.containsKey(WorldPos.of(level, seat.chair))
                             && DiningTables.available(level, seat.chair, who.body())) {
-                        choices.add(new Choice(table, seat, slot));
+                        choices.add(new Choice(table, seat, slot, table.display ? display.version() : null,
+                            table.display ? display.slots().get(slot).stackCopy() : ItemStack.EMPTY));
                     }
                 }
             }
         }
         choices.sort(Comparator.comparingDouble(choice -> choice.seat.approach.distSqr(from)));
         return choices;
+    }
+
+    private List<Integer> servingSlots(Table table, InventorySnapshot.Store display) {
+        WorldPos at = WorldPos.of(table.level, table.at);
+        Servings cached = servings.get(at);
+        if (cached != null && cached.version.equals(display.version()) && cached.menu.equals(table.food)) {
+            return cached.slots;
+        }
+        List<Integer> slots = new ArrayList<>();
+        for (int slot = 0; slot < display.slots().size(); slot++) {
+            ItemStack stack = display.slots().get(slot).stackCopy();
+            if (!stack.isEmpty() && Goods.matches(stack, table.food)) { slots.add(slot); }
+        }
+        servings.put(at, new Servings(display.version(), table.food, List.copyOf(slots)));
+        return slots;
+    }
+
+    private Optional<DiningFoods.Serving> serving(Table table, ItemStack stack, Worker who) {
+        FoodProperties food = stack.isEmpty() ? null : stack.getFoodProperties(who.body());
+        return food == null || !Goods.matches(stack, table.food) ? Optional.empty()
+            : Optional.of(new DiningFoods.Serving(stack.copyWithCount(1), food));
     }
 
     private Optional<DiningFoods.Serving> serving(Table table, int slot, Worker who) {
@@ -243,6 +385,13 @@ final class Dining {
         }
         return DiningFoods.serving(table.level, table.at.above())
             .filter(portion -> Goods.matches(portion.item(), table.food));
+    }
+
+    private boolean current(Table table) {
+        return Fronts.of(colony).zonesIn(table.level).stream().anyMatch(zone -> zone.id().equals(table.zone)
+            && zone.delegation().equals(LivingContent.DINING) && includes(zone, table.at)
+            && Math.clamp(zone.settings().count(LivingContent.DINING_SERVINGS.key()), 1, 4) == table.target
+            && zone.settings().items(LivingContent.DINING_FOOD.key()).filter(table.food::equals).isPresent());
     }
 
     private boolean valid(Table table) {
@@ -286,7 +435,7 @@ final class Dining {
     }
 
     private static List<ItemSpec> accepted(Table table) {
-        boolean display = DiningTables.inventory(table.level, table.at).isPresent();
+        boolean display = table.display;
         return Goods.members(table.food).stream().map(item -> item.getDefaultInstance())
             .filter(stack -> display ? edible(stack, null) : DiningFoods.placeable(stack))
             .map(stack -> ItemSpec.of(BuiltInRegistries.ITEM.getKey(stack.getItem()))).toList();
@@ -320,7 +469,23 @@ final class Dining {
         }
     }
 
-    void clear() { List.copyOf(drinks.values()).forEach(BarDrink::finish); List.copyOf(meals.values()).forEach(Meal::finish); tables = List.of(); refills.clear(); supplies.clear(); }
+    void clear() {
+        List.copyOf(drinks.values()).forEach(BarDrink::finish);
+        List.copyOf(meals.values()).forEach(Meal::finish);
+        tables.stream().map(Table::level).distinct().forEach(level -> {
+            colony.inventory().observe(DiningInventory.ID, level, List.of());
+            DiningInventory.update(colony, level, List.of(), true);
+        });
+        DiningInventory.forget(colony);
+        watches.forEach(BlockChanges.Heard::close);
+        watches.clear();
+        geometry = List.of();
+        geometryDirty = true;
+        servings.clear();
+        tables = List.of();
+        refills.clear();
+        supplies.clear();
+    }
 
     List<Line> lines(ZoneView zone, ColonyView view) {
         List<Table> here = tables.stream().filter(table -> table.zone.equals(zone.id())).toList();
@@ -331,6 +496,7 @@ final class Dining {
 
     /** A stocked service counter with an adjacent chair offers drinks independently of meals. */
     Optional<Urge> drinking(Worker who, ColonyView view) {
+        if (geometryDirty) { refresh(view.level().getServer()); }
         Optional<BarDrink> active = drinks.values().stream().filter(drink -> drink.who.body() == who.body()).findFirst();
         if (active.isPresent()) { return Optional.of(new Urge(LivingPresence.EAT, Urge.SPARE, false, active::get)); }
         if (unsafe(who.body()) || who.body().isPassenger()) { return Optional.empty(); }
@@ -338,33 +504,36 @@ final class Dining {
         if (history.contains("folkways:last_table_drink")
                 && view.level().getGameTime() - history.getLong("folkways:last_table_drink") < Mood.DAY / 4) { return Optional.empty(); }
         for (var cabinet : supplies.cabinets().stream().sorted(Comparator.comparingDouble(one -> one.at().distSqr(who.body().blockPosition()))).toList()) {
-            if (cabinet.level() != view.level() || cabinet.at().distSqr(who.body().blockPosition()) > 16 * 16 || !supplies.valid(cabinet)) { continue; }
-            Container stock = DiningDrinks.supply(view.level(), cabinet.at()).orElse(null);
-            if (stock == null) { continue; }
-            for (Direction side : Direction.Plane.HORIZONTAL) {
-                BlockPos chair = cabinet.at().relative(side);
+            if (cabinet.level() != view.level() || cabinet.at().distSqr(who.body().blockPosition()) > 16 * 16
+                    || !supplies.current(cabinet)) { continue; }
+            var stock = colony.inventory().snapshot().store(WorldPos.of(view.level(), cabinet.at())).orElse(null);
+            if (stock == null || stock.state() != InventorySnapshot.State.OBSERVED) {
+                colony.inventory().ensureObserved(Stash.at(WorldPos.of(view.level(), cabinet.at())));
+                continue;
+            }
+            for (Seat seat : cabinet.seats()) {
+                BlockPos chair = seat.chair;
+                BlockPos approach = seat.approach;
                 if (!barChair(cabinet, chair, who)) { continue; }
-                for (Direction aisle : Direction.Plane.HORIZONTAL) {
-                    BlockPos approach = chair.relative(aisle);
-                    if (approach.equals(cabinet.at()) || !view.level().isLoaded(approach)
-                            || !Footing.withFeetAt(view.level(), approach) || !view.level().getFluidState(approach).isEmpty()) { continue; }
-                    for (int slot = 0; slot < stock.getContainerSize(); slot++) {
-                        ItemStack serving = stock.getItem(slot);
-                        Portion portion = new Portion(WorldPos.of(view.level(), cabinet.at()), slot);
-                        if (serving.isEmpty() || !Goods.matches(serving, cabinet.menu()) || !DiningDrinks.accepts(serving)
-                                || portions.containsKey(portion)) { continue; }
-                        int chosen = slot;
-                        ItemStack bottle = serving.copyWithCount(1);
-                        return Optional.of(new Urge(LivingPresence.EAT, Urge.SPARE, false, () -> {
-                            UUID token = UUID.randomUUID();
-                            WorldPos seat = WorldPos.of(view.level(), chair);
-                            if (seats.putIfAbsent(seat, token) != null) { return unavailableBar(cabinet, approach); }
-                            if (portions.putIfAbsent(portion, token) != null) { seats.remove(seat, token); return unavailableBar(cabinet, approach); }
-                            BarDrink drink = new BarDrink(token, who, cabinet, new Seat(chair, approach), chosen, bottle);
-                            drinks.put(token, drink);
-                            return drink;
-                        }));
-                    }
+                for (var observed : stock.slots()) {
+                    int slot = observed.physicalSlot();
+                    ItemStack serving = observed.stackCopy();
+                    Portion portion = new Portion(WorldPos.of(view.level(), cabinet.at()), slot);
+                    if (serving.isEmpty() || !Goods.matches(serving, cabinet.menu()) || !DiningDrinks.accepts(serving)
+                            || portions.containsKey(portion)) { continue; }
+                    ItemStack bottle = serving.copyWithCount(1);
+                    return Optional.of(new Urge(LivingPresence.EAT, Urge.SPARE, false, () -> {
+                        UUID token = UUID.randomUUID();
+                        WorldPos chairPos = WorldPos.of(view.level(), chair);
+                        if (seats.putIfAbsent(chairPos, token) != null) { return unavailableBar(cabinet, approach); }
+                        if (portions.putIfAbsent(portion, token) != null) {
+                            seats.remove(chairPos, token);
+                            return unavailableBar(cabinet, approach);
+                        }
+                        BarDrink drink = new BarDrink(token, who, cabinet, seat, slot, bottle, stock.version());
+                        drinks.put(token, drink);
+                        return drink;
+                    }));
                 }
             }
         }
@@ -397,12 +566,15 @@ final class Dining {
         final Seat seat;
         final int slot;
         final ItemStack bottle;
+        final InventorySnapshot.Version observed;
         final NodeSpec spec;
         final long expires;
         boolean finished;
         boolean engaged;
-        BarDrink(UUID token, Worker who, DiningSupplies.Cabinet cabinet, Seat seat, int slot, ItemStack bottle) {
-            this.token = token; this.who = who; this.cabinet = cabinet; this.seat = seat; this.slot = slot; this.bottle = bottle;
+        BarDrink(UUID token, Worker who, DiningSupplies.Cabinet cabinet, Seat seat, int slot, ItemStack bottle,
+                 InventorySnapshot.Version observed) {
+            this.token = token; this.who = who; this.cabinet = cabinet; this.seat = seat;
+            this.slot = slot; this.bottle = bottle; this.observed = observed;
             int duration = FolkwaysVanillaConfig.diningMealTicks();
             expires = cabinet.level().getGameTime() + 500 + duration;
             spec = NodeSpec.of(token, LivingContent.ID, WorkSite.at(cabinet.level(), cabinet.at()),
@@ -422,26 +594,54 @@ final class Dining {
                 }).done();
         }
         public NodeSpec spec() { return spec; }
+
+        public boolean ready(ServerLevel level) {
+            WorldPos at = WorldPos.of(cabinet.level(), cabinet.at());
+            var stock = colony.inventory().snapshot().store(at);
+            if (stock.isPresent() && stock.get().state() == InventorySnapshot.State.OBSERVED) {
+                return true;
+            }
+            colony.inventory().ensureObserved(Stash.at(at));
+            return false;
+        }
+
         public Optional<io.github.izakyl.folkways.core.api.terms.RefusalKind> refusal(ServerLevel level) {
-            Container stock = DiningDrinks.supply(level, cabinet.at()).orElse(null);
+            var stock = colony.inventory().snapshot().store(WorldPos.of(cabinet.level(), cabinet.at())).orElse(null);
+            boolean serving = stock == null || stock.state() != InventorySnapshot.State.OBSERVED
+                || stock.version().epoch().equals(observed.epoch())
+                    && stock.slots().stream().anyMatch(item -> item.physicalSlot() == slot
+                        && ItemStack.isSameItemSameComponents(item.stackCopy(), bottle));
             return finished || level != cabinet.level() || who.body().level() != level || !who.body().isAlive()
                 || who.body().isRemoved() || level.getEntity(who.body().getUUID()) != who.body() || unsafe(who.body())
-                || !supplies.valid(cabinet) || !DiningTables.chair(level, seat.chair)
+                || !supplies.current(cabinet) || !DiningTables.chair(level, seat.chair)
                 || !DiningTables.available(level, seat.chair, who.body())
                 || !level.isLoaded(seat.approach) || !Footing.withFeetAt(level, seat.approach)
-                || Fronts.of(colony).zonesIn(level).stream().noneMatch(zone -> zone.id().equals(cabinet.zone()) && includes(zone, seat.chair))
-                || engaged && who.body().blockPosition().distSqr(seat.chair) > 16
-                || stock == null || slot >= stock.getContainerSize() || !ItemStack.isSameItemSameComponents(stock.getItem(slot), bottle)
+                || Fronts.of(colony).zonesIn(level).stream()
+                    .noneMatch(zone -> zone.id().equals(cabinet.zone()) && includes(zone, seat.chair))
+                || engaged && who.body().blockPosition().distSqr(seat.chair) > 16 || !serving
                 ? Optional.of(LivingRefusal.NOTHING_TO_EAT) : Optional.empty();
         }
+
         public Outcome commit(ServerLevel level, Worker worker) {
             try {
                 if (worker.body() != who.body() || refusal(level).isPresent() || who.body().blockPosition().distSqr(seat.chair) > 16) {
                     return Outcome.failed(LivingRefusal.NOTHING_TO_EAT);
                 }
+                var publication = colony.inventory().snapshot().store(WorldPos.of(level, cabinet.at())).orElse(null);
+                if (publication == null || publication.state() != InventorySnapshot.State.OBSERVED) {
+                    return Outcome.failed(LivingRefusal.NOTHING_TO_EAT);
+                }
+                Container stock = DiningDrinks.supply(level, cabinet.at()).orElse(null);
+                if (stock == null || slot >= stock.getContainerSize()
+                        || !ItemStack.isSameItemSameComponents(stock.getItem(slot), bottle)) {
+                    colony.inventoryFeedback().stale(Stash.at(WorldPos.of(level, cabinet.at())),
+                        publication.version());
+                    return Outcome.failed(LivingRefusal.NOTHING_TO_EAT);
+                }
                 int before = who.body().getPersistentData().getInt("folkways:table_drinks");
-                List<ItemStack> left = DiningDrinks.consume(level, who.body(), DiningDrinks.supply(level, cabinet.at()).orElseThrow(), slot);
+                List<ItemStack> left = DiningDrinks.consume(level, who.body(), stock, slot);
                 if (who.body().getPersistentData().getInt("folkways:table_drinks") == before) { return Outcome.failed(LivingRefusal.NOTHING_TO_EAT); }
+                colony.inventoryFeedback().changed(Stash.at(WorldPos.of(level, cabinet.at())));
                 living.drank(who.resident().id(), level.getGameTime());
                 return new Outcome.Done(List.of(), left, Optional.empty());
             } finally { finish(); }
@@ -469,8 +669,9 @@ final class Dining {
         final int slot;
         final ItemSpec food;
         final NodeSpec spec;
-        SetTable(Table table, int slot, ItemSpec food) {
-            this.table = table; this.slot = slot; this.food = food;
+        final InventorySnapshot.Version observed;
+        SetTable(Table table, int slot, ItemSpec food, InventorySnapshot.Version observed) {
+            this.table = table; this.slot = slot; this.food = food; this.observed = observed;
             UUID id = UUID.nameUUIDFromBytes(("dining/" + table.zone + "/" + table.at + "/" + slot + "/" + food.describe() + "/" + table.tops.stream().sorted(BlockPos::compareTo).toList() + "/" + table.target)
                 .getBytes(StandardCharsets.UTF_8));
             spec = NodeSpec.of(id, LivingContent.ID, WorkSite.at(table.level, table.at),
@@ -489,6 +690,9 @@ final class Dining {
             Optional<Container> display = DiningTables.inventory(level, table.at);
             if (display.isPresent() ? slot >= display.get().getContainerSize() || slot >= foodSlots(table)
                     || !display.get().getItem(slot).isEmpty() : !level.getBlockState(table.at.above()).isAir()) {
+                if (observed != null) {
+                    colony.inventoryFeedback().stale(Stash.at(WorldPos.of(level, table.at)), observed);
+                }
                 return new Outcome.Done(List.of(), List.of(), Optional.empty(), back);
             }
             for (ItemStack stack : back) {
@@ -497,6 +701,7 @@ final class Dining {
                     if (!edible(stack, who.body()) || !display.get().canPlaceItem(slot, stack)) { continue; }
                     display.get().setItem(slot, stack.copyWithCount(1));
                     display.get().setChanged();
+                    colony.inventoryFeedback().changed(Stash.at(WorldPos.of(level, table.at)));
                     stack.shrink(1);
                 } else {
                     ItemStack actual = stack.copyWithCount(1);
@@ -554,6 +759,15 @@ final class Dining {
             if (refusal(level).isPresent() || eater.body() != who.body() || !present(true)) {
                 finish(); return Outcome.failed(LivingRefusal.NOTHING_TO_EAT);
             }
+            if (choice.version != null) {
+                var current = DiningTables.inventory(level, choice.table.at).orElse(null);
+                if (current == null || choice.slot >= current.getContainerSize()
+                        || !ItemStack.isSameItemSameComponents(current.getItem(choice.slot), choice.expected)) {
+                    colony.inventoryFeedback().stale(Stash.at(WorldPos.of(level, choice.table.at)), choice.version);
+                    finish();
+                    return Outcome.failed(LivingRefusal.NOTHING_TO_EAT);
+                }
+            }
             Optional<DiningFoods.Serving> portion = serving(choice.table, choice.slot, eater);
             if (portion.isEmpty() || !living.wouldEat(eater.resident().id(), portion.get().food())) {
                 finish(); return Outcome.failed(LivingRefusal.NOTHING_TO_EAT);
@@ -563,6 +777,7 @@ final class Dining {
                 Outcome outcome;
                 if (display.isPresent()) {
                     outcome = EatAction.consume(level, eater, living, display.get(), choice.slot);
+                    colony.inventoryFeedback().changed(Stash.at(WorldPos.of(level, choice.table.at)));
                 } else {
                     List<ItemStack> left = DiningFoods.eat(level, choice.table.at.above(), eater);
                     living.ate(eater.resident().id(), portion.get().food(), portion.get().item(), level.getGameTime());

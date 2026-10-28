@@ -8,6 +8,7 @@ import io.github.izakyl.folkways.core.api.terms.Containers;
 import io.github.izakyl.folkways.core.api.terms.ItemFilter;
 import io.github.izakyl.folkways.core.api.terms.StoreRule;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
+import io.github.izakyl.folkways.core.engine.colony.ColonyData;
 import io.github.izakyl.folkways.core.api.work.Stances;
 import io.github.izakyl.folkways.front.api.Facings;
 import io.github.izakyl.folkways.front.api.Schema;
@@ -16,7 +17,12 @@ import io.github.izakyl.folkways.front.engine.Enrollments;
 import io.github.izakyl.folkways.front.engine.colony.ColonyFront;
 import io.github.izakyl.folkways.front.engine.colony.ColonySettings;
 import io.github.izakyl.folkways.cookery.CookeryContent;
-import io.github.izakyl.folkways.plugins.compost.*;
+import io.github.izakyl.folkways.plugins.compost.CompostBookings;
+import io.github.izakyl.folkways.plugins.compost.CompostContent;
+import io.github.izakyl.folkways.plugins.compost.CompostPresence;
+import io.github.izakyl.folkways.plugins.compost.CompostSettings;
+import io.github.izakyl.folkways.plugins.compost.SeedReserves;
+import io.github.izakyl.folkways.plugins.compost.SeedSupport;
 import io.github.izakyl.folkways.plugins.farming.FarmingContent;
 import io.github.izakyl.folkways.plugins.orders.Orders;
 import io.github.izakyl.folkways.plugins.orders.OrdersContent;
@@ -24,6 +30,7 @@ import io.github.izakyl.folkways.plugins.person.PersonBody;
 import io.github.izakyl.folkways.plugins.person.PersonContent;
 import io.github.izakyl.folkways.plugins.person.ResidentEntity;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
@@ -149,6 +156,8 @@ public final class SeedSupportGameTests {
                 java.util.Set.of(helper.absolutePos(new BlockPos(4, 1, 4))), ColonySettings.empty().with(FarmingContent.CROP,
                     new ColonySettings.Value.Choice(BuiltInRegistries.BLOCK.getKey(Blocks.BEETROOTS)))).isPresent(),
                 "a real colony plot is configured for beetroot without owning its seed");
+            var data = ColonyData.find(rig.level.getServer(), rig.colony.id()).orElseThrow();
+            data.inventory().advance(rig.level, data, Map.of(rig.body.id(), rig.body));
             var found = CompostSettings.discovered(rig.colony, rig.level.getServer());
             helper.assertTrue(found.containsAll(List.of(Items.WHEAT_SEEDS, Items.CARROT, Items.BEETROOT_SEEDS)),
                 "carried seeds, edible stored seeds and the configured crop each receive an individual row");

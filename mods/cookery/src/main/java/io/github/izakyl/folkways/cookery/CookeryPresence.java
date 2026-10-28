@@ -6,6 +6,8 @@ import io.github.izakyl.folkways.core.api.colony.ColonyView;
 import io.github.izakyl.folkways.core.api.colony.Holding;
 import io.github.izakyl.folkways.core.api.colony.Release;
 import io.github.izakyl.folkways.core.api.colony.Sweep;
+import io.github.izakyl.folkways.core.api.inventory.InventorySnapshot;
+import io.github.izakyl.folkways.core.api.terms.Stash;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
 import io.github.izakyl.folkways.core.api.work.Grown;
 import io.github.izakyl.folkways.core.api.work.Stances;
@@ -22,6 +24,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
@@ -38,6 +41,8 @@ public final class CookeryPresence implements Facing, Holding.Watch {
     private final KitchenBookings bookings = new KitchenBookings();
     private final Map<WorldPos, Station> stations = new LinkedHashMap<>();
     private final Set<ResourceKey<Level>> published = new LinkedHashSet<>();
+    private final Map<ResourceKey<Level>, Set<WorldPos>> racks = new LinkedHashMap<>();
+    private InventorySnapshot.Version rackVersion;
     private boolean refreshPending;
 
     public CookeryPresence(Colony colony, MinecraftServer server) {
@@ -52,7 +57,7 @@ public final class CookeryPresence implements Facing, Holding.Watch {
         for (WorldPos at : holding.what().cells()) {
             bookings.admit(at);
             at.level(server).ifPresent(level -> stations.putIfAbsent(at,
-                new Station(level, UUID.randomUUID(), Optional.empty(), KitchenStations.find(level.getBlockState(at.block(level))).orElse(null))));
+                new Station(level, UUID.randomUUID(), Optional.empty(), null, null)));
         }
         refreshPending = true;
     }
@@ -62,6 +67,7 @@ public final class CookeryPresence implements Facing, Holding.Watch {
         for (WorldPos at : holding.what().cells()) {
             bookings.withdraw(at);
             Station station = stations.remove(at);
+            if (station != null && station.approach() != null) { station.approach().close(); }
             ServerLevel level = station == null ? at.level(server).orElse(null) : station.level();
             if (level != null) {
                 release(level, at);
@@ -87,11 +93,20 @@ public final class CookeryPresence implements Facing, Holding.Watch {
 
     void refresh(MinecraftServer server) {
         refreshPending = false;
+        InventorySnapshot inventory = colony.inventory().snapshot();
+        if (inventory.coverage().membershipPending()) {
+            colony.inventory().ensureObserved();
+        }
+        boolean updateRacks = !inventory.coverage().membershipPending() && (rackVersion == null
+            || !rackVersion.epoch().equals(inventory.version().epoch())
+            || rackVersion.topology() != inventory.version().topology()
+            || rackVersion.coverage() != inventory.version().coverage());
         Set<WorldPos> marked = new LinkedHashSet<>();
         CookeryContent.stations().forEach(owner -> colony.holdings(owner).forEach(holding -> marked.addAll(holding.what().cells())));
         stations.entrySet().removeIf(entry -> {
             if (!marked.contains(entry.getKey())) {
                 bookings.withdraw(entry.getKey());
+                if (entry.getValue().approach() != null) { entry.getValue().approach().close(); }
                 release(entry.getValue().level(), entry.getKey());
                 return true;
             }
@@ -106,35 +121,65 @@ public final class CookeryPresence implements Facing, Holding.Watch {
             CookeryContent.stations().forEach(owner -> cells.addAll(view.blocks(owner)));
             for (BlockPos cell : cells) {
                 if (!level.isLoaded(cell)) {
+                    Station previous = stations.get(WorldPos.of(level, cell));
+                    if (previous != null && previous.approach() != null) {
+                        previous.approach().close();
+                        stations.put(WorldPos.of(level, cell),
+                            new Station(level, previous.key(), Optional.empty(), null, null));
+                    }
                     continue;
                 }
                 WorldPos at = WorldPos.of(level, cell);
                 if (!CookeryContent.station(level.getBlockState(cell))) {
                     bookings.withdraw(at);
-                    stations.remove(at);
+                    Station removed = stations.remove(at);
+                    if (removed != null && removed.approach() != null) { removed.approach().close(); }
                     continue;
                 }
                 bookings.admit(at);
                 KitchenStation provider = KitchenStations.find(level.getBlockState(cell)).orElseThrow();
-                Optional<Stances> stances = provider.stances(level, at);
-                UUID key = stations.containsKey(at) ? stations.get(at).key() : UUID.randomUUID();
-                stations.put(at, new Station(level, key, stances, provider));
+                Station previous = stations.get(at);
+                UUID key = previous == null ? UUID.randomUUID() : previous.key();
+                StationApproach approach = previous == null ? null : previous.approach();
+                if (previous == null || previous.provider() != provider || previous.level() != level) {
+                    if (approach != null) { approach.close(); }
+                    approach = new StationApproach(level, at, provider);
+                }
+                Optional<Stances> stances = approach.get();
+                stations.put(at, new Station(level, key, stances, provider, approach));
                 if (stances.isPresent()) {
-                    provider.freeze(key, colony.id(), level, at, stances.get(), bookings, sweep::nudge)
+                    approach.freeze(() -> provider.freeze(key, colony.id(), level, at, stances.get(), bookings,
+                        sweep::nudge))
                         .ifPresent(workshops::add);
                 }
             }
             colony.publish(CookeryContent.ID, level.dimension(), workshops);
-            colony.rule(CookeryContent.ID, level.dimension(),
-                io.github.izakyl.folkways.cookery.racks.KitchenRacks.rules(
-                    colony.storesIn(level.dimension()).stream().filter(at -> level.isLoaded(at.block(level))
-                        && io.github.izakyl.folkways.cookery.racks.KitchenRacks.matches(
-                            level.getBlockState(at.block(level)))).toList()));
+            if (!inventory.coverage().membershipPending() && (updateRacks || !racks.containsKey(level.dimension()))) {
+                Set<WorldPos> previous = racks.getOrDefault(level.dimension(), Set.of());
+                Set<WorldPos> found = new LinkedHashSet<>();
+                for (WorldPos at : colony.storesIn(level.dimension())) {
+                    var store = inventory.store(at).orElse(null);
+                    if (store == null || store.state() != InventorySnapshot.State.OBSERVED) {
+                        colony.inventory().ensureObserved(Stash.at(at));
+                        if (previous.contains(at)) { found.add(at); }
+                    } else if (store.block().isEmpty()) {
+                        if (previous.contains(at)) { found.add(at); }
+                    } else if (store.block().get().equals(BuiltInRegistries.BLOCK.getKey(
+                            com.github.ysbbbbbb.kaleidoscopecookery.init.ModBlocks.KITCHENWARE_RACKS.get()))) {
+                        found.add(at);
+                    }
+                }
+                racks.put(level.dimension(), found);
+                colony.rule(CookeryContent.ID, level.dimension(),
+                    io.github.izakyl.folkways.cookery.racks.KitchenRacks.rules(found));
+            }
         }
+        if (updateRacks) { rackVersion = inventory.version(); }
         for (ResourceKey<Level> dimension : published) {
             if (!dimensions.contains(dimension)) {
                 colony.publish(CookeryContent.ID, dimension, List.of());
                 colony.rule(CookeryContent.ID, dimension, List.of());
+                racks.remove(dimension);
             }
         }
         published.clear();
@@ -146,8 +191,10 @@ public final class CookeryPresence implements Facing, Holding.Watch {
         List<Grown> goals = new ArrayList<>(tools.goals(view));
         stations.forEach((at, station) -> {
             if (at.in(level) && level.isLoaded(at.block(level)) && station.provider() != null) {
-                if (station.stances().isPresent()) {
-                    goals.addAll(station.provider().recovery(colony.id(), level, at, station.stances().get(), bookings, sweep::nudge));
+                Optional<Stances> current = station.approach().get();
+                if (current.isPresent()) {
+                    goals.addAll(station.approach().observe(() -> station.provider().recovery(colony.id(), level, at,
+                        current.get(), bookings, sweep::nudge)));
                 } else {
                     goals.addAll(station.provider().activeRecovery(colony.id(), level, at, bookings));
                 }
@@ -171,7 +218,12 @@ public final class CookeryPresence implements Facing, Holding.Watch {
                 release(station.level(), at);
             });
         }
+        stations.values().forEach(station -> {
+            if (station.approach() != null) { station.approach().close(); }
+        });
         stations.clear();
+        racks.clear();
+        rackVersion = null;
         published.clear();
         bookings.clear();
     }
@@ -229,6 +281,7 @@ public final class CookeryPresence implements Facing, Holding.Watch {
             : station.provider().status(level, WorldPos.of(level, cell));
     }
 
-    private record Station(ServerLevel level, UUID key, Optional<Stances> stances, KitchenStation provider) {
+    private record Station(ServerLevel level, UUID key, Optional<Stances> stances, KitchenStation provider,
+                           StationApproach approach) {
     }
 }

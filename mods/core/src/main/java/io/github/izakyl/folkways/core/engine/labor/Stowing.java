@@ -5,8 +5,10 @@ import io.github.izakyl.folkways.core.api.terms.Stash;
 import io.github.izakyl.folkways.core.api.terms.StoreRule;
 import io.github.izakyl.folkways.core.api.work.Placement;
 import io.github.izakyl.folkways.core.api.work.Worker;
+import io.github.izakyl.folkways.core.engine.inventory.InventoryChanges;
 import io.github.izakyl.folkways.core.engine.plan.Stores;
 import java.util.List;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
 
 final class Stowing {
@@ -23,8 +25,11 @@ final class Stowing {
                 }
                 for (Worker.Store store : who.within()) {
                     if (store.at().equals(into.pos())) {
-                        if (StoreRule.stores(Stores.rulesAt(store.at()))) {
+                        if (StoreRule.stores(Stores.rulesAt((ServerLevel) who.body().level(), store.at()))) {
                             left = Containers.insert(store.contents(), left);
+                            if (who.body().level() instanceof ServerLevel level) {
+                                InventoryChanges.store(level, store.at());
+                            }
                         }
                         break;
                     }

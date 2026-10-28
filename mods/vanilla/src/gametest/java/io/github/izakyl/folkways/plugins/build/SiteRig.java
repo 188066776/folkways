@@ -19,6 +19,7 @@ import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.item.ItemStack;
 
 /** A build site asking a colony that only writes down what it is asked, for the game tests to answer by hand. */
 final class SiteRig implements BuildSite.Asks {
@@ -45,6 +46,15 @@ final class SiteRig implements BuildSite.Asks {
         SiteRig rig = new SiteRig(target, temporary);
         rig.site.start(level, met, joined);
         return rig;
+    }
+
+    @Override
+    public Optional<List<ItemStack>> pack(Worker who) {
+        List<ItemStack> items = new ArrayList<>();
+        for (int slot = 0; slot < who.pack().getContainerSize(); slot++) {
+            items.add(who.pack().getItem(slot).copy());
+        }
+        return Optional.of(items);
     }
 
     @Override

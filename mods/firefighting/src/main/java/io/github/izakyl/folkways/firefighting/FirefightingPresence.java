@@ -6,11 +6,13 @@ import io.github.izakyl.folkways.core.api.colony.Closing;
 import io.github.izakyl.folkways.core.api.colony.Colony;
 import io.github.izakyl.folkways.core.api.colony.ColonyView;
 import io.github.izakyl.folkways.core.api.colony.Sweep;
+import io.github.izakyl.folkways.core.api.inventory.InventorySnapshot;
 import io.github.izakyl.folkways.core.api.resident.body.Bodies;
 import io.github.izakyl.folkways.core.api.resident.body.Body;
 import io.github.izakyl.folkways.core.api.resident.body.TaskTools;
 import io.github.izakyl.folkways.core.api.terms.ItemSpec;
-import io.github.izakyl.folkways.core.api.terms.Reach;
+import io.github.izakyl.folkways.core.api.terms.Stand;
+import io.github.izakyl.folkways.core.api.terms.Stash;
 import io.github.izakyl.folkways.core.api.terms.StoreRule;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
 import io.github.izakyl.folkways.core.api.work.Amount;
@@ -48,6 +50,9 @@ final class FirefightingPresence {
     private final Colony colony;
     private final Sweep sweep;
     private final ExtinguisherAdapter method;
+    private final FireStock stock;
+    private int tankTurn;
+    private MinecraftServer server;
     private final Map<UUID, UUID> loans = new LinkedHashMap<>();
     private final Map<UUID, Node> chores = new LinkedHashMap<>();
     private boolean closed;
@@ -55,10 +60,13 @@ final class FirefightingPresence {
     FirefightingPresence(Colony colony, ExtinguisherAdapter method) {
         this.colony = colony;
         this.method = method;
+        stock = new FireStock(colony);
+        method.bind(colony, stock);
         sweep = new Sweep(colony, FolkwaysFirefightingMod.OWNER, 100);
     }
 
     void tick(MinecraftServer server) {
+        this.server = server;
         sweep.tick(server, this::refresh, this::goals);
         for (UUID resident : loans.keySet()) {
             for (ServerLevel level : server.getAllLevels()) {
@@ -70,7 +78,7 @@ final class FirefightingPresence {
                     doing.what().equals(DamageControlContent.EXTINGUISHING)
                         || doing.toward().filter(DamageControlContent.EXTINGUISHING::equals).isPresent())
                     .isPresent()).ifPresent(body -> {
-                        ItemStack tool = ExtinguisherAdapter.find(body.pack());
+                        ItemStack tool = stock.resident(resident).orElse(ItemStack.EMPTY);
                         var water = FireExtinguisherItem.getFluid(tool);
                         if (!HoseSessions.owns(resident)
                             && !body.mob().getMainHandItem().is(
@@ -93,6 +101,7 @@ final class FirefightingPresence {
                     && zone.settings().flag("refill"))
                 .toList();
             if (zones.isEmpty()) {
+                colony.inventory().observe(FolkwaysFirefightingMod.OWNER, level, List.of());
                 continue;
             }
             method.sources(colony.id()).stream()
@@ -100,6 +109,20 @@ final class FirefightingPresence {
                     && zones.stream().anyMatch(zone -> zone.cells().contains(at.block(level))
                         && zone.at(at.block(level)).equals(at)))
                 .forEach(sources::add);
+            colony.inventory().observe(FolkwaysFirefightingMod.OWNER, level, method.sources(colony.id()).stream()
+                .filter(at -> at.in(level)).toList());
+            InventorySnapshot snapshot = colony.inventory().snapshot();
+            List<WorldPos> offered = colony.storesIn(view.dimension());
+            Set<WorldPos> tanks = new LinkedHashSet<>();
+            int examined = Math.min(64, offered.size());
+            for (int index = 0; index < examined; index++) {
+                WorldPos source = offered.get(Math.floorMod(tankTurn + index, offered.size()));
+                if (source.in(level) && level.isLoaded(source.block(level))
+                    && RefillNode.canSupply(level, source)) {
+                    tanks.add(source);
+                }
+            }
+            tankTurn += examined;
             for (var resident : view.residents()) {
                 var entity = level.getEntity(resident.id());
                 if (!(entity instanceof LivingEntity living) || !living.isAlive()) {
@@ -110,7 +133,11 @@ final class FirefightingPresence {
                     continue;
                 }
                 present.add(resident.id());
-                ItemStack extinguisher = ExtinguisherAdapter.find(body.get().pack());
+                Optional<ItemStack> observed = stock.resident(resident.id());
+                if (observed.isEmpty()) {
+                    continue;
+                }
+                ItemStack extinguisher = observed.get();
                 if (!extinguisher.isEmpty()) {
                     UUID loan = loans.computeIfAbsent(resident.id(), id -> UUID.randomUUID());
                     TaskTools.keep(loan, resident.id(),
@@ -125,23 +152,34 @@ final class FirefightingPresence {
                         || !StoreRule.takes(colony.storeRules(source))) {
                         continue;
                     }
-                    Optional<Stances> stances = Stances.of(level, Reach.workableCells(level, source.block(level)));
+                    InventorySnapshot.Store store = snapshot.store(source).orElse(null);
+                    if (store == null || store.state() != InventorySnapshot.State.OBSERVED
+                        && !(tanks.contains(source) && !extinguisher.isEmpty())) {
+                        colony.inventory().ensureObserved(Stash.at(source));
+                        continue;
+                    }
+                    Optional<Stances> stances = approach(store);
                     if (stances.isEmpty()) {
                         continue;
                     }
                     if (extinguisher.isEmpty()) {
-                        var store = colony.store(level, source);
-                        if (store.isEmpty() || ExtinguisherAdapter.find(store.get()).isEmpty()) {
+                        if (!stock.extinguisher(snapshot, store).orElse(false)) {
                             continue;
                         }
                         chores.put(resident.id(), borrow(resident.id(), source, stances.get()));
                     } else {
-                        if (!RefillNode.canSupply(level, source, colony.store(level, source).orElse(null))) {
+                        if (!tanks.contains(source) && !stock.water(snapshot, store).orElse(false)) {
                             continue;
                         }
                         chores.put(resident.id(), new RefillNode(resident.id(), source, stances.get(),
                             () -> !closed && present(resident.id(), level)
-                            && StoreRule.takes(colony.storeRules(source))));
+                            && StoreRule.takes(colony.storeRules(source)), false, () -> {
+                                colony.inventoryFeedback().stale(store.stash(), store.version());
+                                var pack = snapshot.residents().get(resident.id());
+                                if (pack != null) {
+                                    colony.inventoryFeedback().staleResident(resident.id(), pack.version());
+                                }
+                            }));
                     }
                     break;
                 }
@@ -155,7 +193,7 @@ final class FirefightingPresence {
                                 && zone.at(source.block(level)).equals(source))) {
                             continue;
                         }
-                        Optional<Stances> stances = Stances.of(level, Reach.workableCells(level, source.block(level)));
+                        Optional<Stances> stances = snapshot.store(source).flatMap(FirefightingPresence::approach);
                         if (stances.isPresent()) {
                             chores.put(resident.id(), new RefillNode(resident.id(), source, stances.get(),
                                 () -> !closed && present(resident.id(), level)
@@ -179,6 +217,11 @@ final class FirefightingPresence {
             return true;
         });
         chores.keySet().retainAll(present);
+    }
+
+    private static Optional<Stances> approach(InventorySnapshot.Store store) {
+        return store.approach().state() == InventorySnapshot.State.OBSERVED
+            ? Stances.of(store.approach().stands().stream().map(Stand::cell).toList()) : Optional.empty();
     }
 
     private boolean present(UUID resident, ServerLevel level) {
@@ -268,6 +311,11 @@ final class FirefightingPresence {
 
     void closed(Closing why) {
         closed = true;
+        if (server != null) {
+            for (ServerLevel level : server.getAllLevels()) {
+                colony.inventory().observe(FolkwaysFirefightingMod.OWNER, level, List.of());
+            }
+        }
         method.forget(colony.id());
         loans.values().forEach(TaskTools::release);
         loans.clear();

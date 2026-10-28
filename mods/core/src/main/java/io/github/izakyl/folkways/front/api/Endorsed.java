@@ -13,4 +13,7 @@ public sealed interface Endorsed {
 
     record Refused(Notice why) implements Endorsed {
     }
+
+    record Pending() implements Endorsed {
+    }
 }

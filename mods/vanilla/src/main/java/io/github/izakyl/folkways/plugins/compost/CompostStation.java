@@ -216,12 +216,7 @@ public final class CompostStation {
             List<ItemStack> supplied = who.supplied().stream().map(ItemStack::copy).toList();
             int required = averageInputs(seed.get().getDefaultInstance(), before.getValue(ComposterBlock.LEVEL));
             long provided = supplied.stream().filter(stack -> stack.is(seed.get())).mapToLong(ItemStack::getCount).sum();
-            Optional<SeedBudget> fresh = budgets.apply(site.colony());
-            // The full escrow is still physical stock: restore it to the snapshot, then test only
-            // the amount this batch will consume (a player may have partly filled the bucket).
-            ItemStack escrow = new ItemStack(seed.get(), inputs);
-            if (!enabled.test(site.colony()) || provided != inputs || required <= 0 || required > inputs
-                    || fresh.isEmpty() || fresh.get().tally(seed.get(), escrow, Set.of(id())).compostable() < required) {
+            if (!enabled.test(site.colony()) || provided != inputs || required <= 0 || required > inputs) {
                 return new Outcome.Done(List.of(), List.of(), Optional.empty(), supplied);
             }
             BlockState filled = before.setValue(ComposterBlock.LEVEL, 7);

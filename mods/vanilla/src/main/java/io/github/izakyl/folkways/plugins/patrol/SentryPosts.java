@@ -219,7 +219,7 @@ public final class SentryPosts implements Facing {
     public List<Urge> urges(Worker worker, ColonyView view) {
         UUID resident = worker.resident().id();
         UUID assigned = assignment(resident).orElse(null);
-        if (assigned == null || !valid(view.level(), resident, assigned)) {
+        if (assigned == null || !valid(view.level(), resident, assigned) || Weapons.awaitingSupply(worker)) {
             return List.of();
         }
         ZoneView zone = zone(view.level(), assigned).orElseThrow();

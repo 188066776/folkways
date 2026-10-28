@@ -177,6 +177,27 @@ public final class ContainerConstructionGameTests {
     }
 
     @GameTest(template = "empty_large", timeoutTicks = 100)
+    public static void dirtyDestinationDefersNoRoomDecision(GameTestHelper helper) {
+        try (Fixture f = new Fixture(helper)) {
+            f.place(f.at, Blocks.CHEST.defaultBlockState());
+            f.contents(f.at).setItem(0, new ItemStack(Items.DIAMOND, 7));
+            for (int slot = 0; slot < f.store.getContainerSize(); slot++) {
+                f.store.setItem(slot, new ItemStack(Items.COBBLESTONE, 64));
+            }
+            f.file(Map.of(f.at, Blocks.AIR.defaultBlockState()));
+            f.blocked(BuildRefusal.NO_ROOM_TO_EMPTY);
+            f.real.inventoryFeedback().changed(Stash.at(WorldPos.of(f.level, f.storeAt)));
+            f.site().tick(f.level);
+            f.blocked(BuildRefusal.EMPTYING_CONTAINER);
+            helper.assertTrue(f.deliveries().isEmpty(), "unknown capacity does not authorize a delivery");
+            f.publish();
+            f.site().tick(f.level);
+            f.blocked(BuildRefusal.NO_ROOM_TO_EMPTY);
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty_large", timeoutTicks = 100)
     public static void noStoreLeavesTheContainerUntouched(GameTestHelper helper) {
         try (Fixture f = new Fixture(helper)) {
             f.real.holdingAt(WorldPos.of(f.level, f.storeAt)).ifPresent(holding ->
@@ -386,6 +407,22 @@ public final class ContainerConstructionGameTests {
                 BlueprintVolume.around(blocks.stream().map(BlueprintBlock::offset).toList()).orElseThrow(), 0, true);
             order = presence.fileOnce(level, drawing, at).orElseThrow().id();
             presence.settle(level.getServer());
+            publish();
+            presence.settle(level.getServer());
+        }
+
+        void publish() {
+            var data = io.github.izakyl.folkways.core.engine.colony.ColonyData.find(level.getServer(), real.id())
+                .orElseThrow();
+            data.inventory().advance(level, data, Map.of());
+            try {
+                var work = io.github.izakyl.folkways.core.engine.inventory.InventoryIndex.class
+                    .getDeclaredMethod("work", net.minecraft.server.MinecraftServer.class, int.class);
+                work.setAccessible(true);
+                work.invoke(data.inventory(), level.getServer(), 1000);
+            } catch (ReflectiveOperationException broken) {
+                throw new AssertionError(broken);
+            }
         }
 
         BuildSite site() { return presence.site(order).orElseThrow(); }
@@ -438,6 +475,7 @@ public final class ContainerConstructionGameTests {
                     }
                     helper.assertTrue(Commit.run(level, put, plan.worker) instanceof Outcome.Failed,
                         "a full destination refuses the put");
+                    publish();
                     site().tick(level);
                     blocked(BuildRefusal.NO_ROOM_TO_EMPTY);
                     helper.assertTrue(!plan.worker.pack().isEmpty(), "the undelivered items stay in the pack");
@@ -457,6 +495,7 @@ public final class ContainerConstructionGameTests {
         void finish() {
             plan.worker.pack().setItem(4, new ItemStack(Items.DIRT, 16));
             for (int turn = 0; turn < 64 && presence.site(order).isPresent(); turn++) {
+                publish();
                 presence.settle(level.getServer());
                 if (!deliveries().isEmpty()) {
                     haul();

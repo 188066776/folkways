@@ -106,6 +106,7 @@ public final class WarfareWeapon implements WeaponAdapter {
         return accepts(stack) && (GunData.from(stack).ammo.get() > 0 || Goods.countIn(worker.pack(), ammunition()) > 0);
     }
 
+
     @Override
     public Optional<WeaponSession> open(Worker worker) {
         if (!(worker.body() instanceof ResidentEntity resident)

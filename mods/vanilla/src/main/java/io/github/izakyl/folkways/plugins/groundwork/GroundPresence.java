@@ -58,6 +58,7 @@ final class GroundPresence implements Facing {
         private boolean rekeyForage;
         private boolean loaded;
         private String configuration;
+        private final Survey.Drops drops = new Survey.Drops();
         private final Map<String, Chores> works = new LinkedHashMap<>();
         private Optional<GroundRefusal> refusal = Optional.empty();
         private Weeding weeding = new Weeding(false, false);
@@ -133,7 +134,7 @@ final class GroundPresence implements Facing {
                     weeds);
             }
             if (settings.flag(GroundworkContent.HAUL)) {
-                settle(GroundworkContent.HAUL, (at, chore) -> new HaulNode(at, chore), survey.haul(view::at));
+                settle(GroundworkContent.HAUL, (at, chore) -> new HaulNode(at, chore), survey.haul(view::at, drops));
             }
             works.keySet().removeIf(work -> work.equals(GroundworkContent.WEED) ? !grass && !flowers
                 : !settings.flag(work));

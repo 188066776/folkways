@@ -484,9 +484,13 @@ public final class DomainPage implements Draw {
         }
         switch (acts.get(slot)) {
             case Board.Act.Do carry -> act(serverPlayer, colony.get(), level.get(), carry.actionKey());
-            case Board.Act.Admit admit -> Endorsements
-                .called(level.get(), colony.get(), serverPlayer, admit.kind())
-                .refusal().ifPresent(why -> serverPlayer.displayClientMessage(why.component(), true));
+            case Board.Act.Admit admit -> {
+                Attempt result = Endorsements.called(level.get(), colony.get(), serverPlayer, admit.kind());
+                result.refusal().ifPresent(why -> serverPlayer.displayClientMessage(why.component(), true));
+                if (result instanceof Attempt.Pending) {
+                    serverPlayer.displayClientMessage(Component.translatable("folkways.settlers.checking_stock"), true);
+                }
+            }
             case Board.Act.Edit edit -> setting(edit.settingKey()).ifPresent(pair -> {
                 SettingsPage.Scope where = new SettingsPage.Scope.AtColony(pair.scope());
                 switch (pair.setting()) {

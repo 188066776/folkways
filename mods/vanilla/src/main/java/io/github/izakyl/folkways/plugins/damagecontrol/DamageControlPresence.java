@@ -6,6 +6,7 @@ import io.github.izakyl.folkways.core.api.colony.Closing;
 import io.github.izakyl.folkways.core.api.colony.Colony;
 import io.github.izakyl.folkways.core.api.colony.ColonyView;
 import io.github.izakyl.folkways.core.api.colony.Sweep;
+import io.github.izakyl.folkways.core.api.inventory.InventorySnapshot;
 import io.github.izakyl.folkways.core.api.resident.Resident;
 import io.github.izakyl.folkways.core.api.resident.body.Bodies;
 import io.github.izakyl.folkways.core.api.resident.body.Body;
@@ -40,7 +41,6 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -51,6 +51,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
+import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -85,6 +86,8 @@ final class DamageControlPresence implements Facing {
     private int responsesLeft;
     private int surveyTurn;
     private final Map<WorldPos, DamageControlRefusal> refusals = new LinkedHashMap<>();
+    private InventorySnapshot.Version fluidVersion;
+    private final Map<UUID, Integer> fluids = new LinkedHashMap<>();
     private boolean closed;
 
     DamageControlPresence(Colony colony) {
@@ -537,17 +540,37 @@ final class DamageControlPresence implements Facing {
         return Optional.of(new Board(List.of(
             new Board.Figure("folkways.page.damage_control.fires", Component.literal("" + fires().size())),
             new Board.Figure("folkways.page.damage_control.workers", Component.literal("" + incidents.workers())),
-            new Board.Figure("folkways.page.damage_control.fluid", Component.literal("" + view.residents().stream()
-                .map(resident -> view.level().getEntity(resident.id()))
-                .filter(Objects::nonNull)
-                .map(Bodies::of)
-                .flatMap(Optional::stream)
-                .mapToInt(body -> SuppressionMethods.all().stream()
-                    .mapToInt(method -> method.fluid(body.pack()))
-                    .max()
-                    .orElse(0))
-                .sum()))), rows,
+            new Board.Figure("folkways.page.damage_control.fluid", fluid(view))), rows,
             Optional.of(Component.translatable("folkways.page.damage_control.empty"))));
+    }
+
+    private Component fluid(ColonyView view) {
+        InventorySnapshot snapshot = colony.inventory().snapshot();
+        boolean pending = false;
+        for (var resident : view.residents()) {
+            var observed = snapshot.residents().get(resident.id());
+            if (observed == null || observed.state() != InventorySnapshot.State.OBSERVED) {
+                colony.inventory().ensureObservedResident(resident.id());
+                pending = true;
+            }
+        }
+        if (pending) {
+            return Component.translatable("folkways.settlers.checking_stock");
+        }
+        InventorySnapshot.Version version = snapshot.version();
+        if (fluidVersion == null || !fluidVersion.epoch().equals(version.epoch())
+            || fluidVersion.contents() != version.contents() || fluidVersion.topology() != version.topology()) {
+            fluids.clear();
+            for (InventorySnapshot.Resident resident : snapshot.residents().values()) {
+                SimpleContainer pack = new SimpleContainer(resident.pack().size());
+                resident.pack().forEach(slot -> pack.setItem(slot.physicalSlot(), slot.stackCopy()));
+                fluids.put(resident.resident(), SuppressionMethods.all().stream()
+                    .mapToInt(method -> method.fluid(pack)).max().orElse(0));
+            }
+            fluidVersion = version;
+        }
+        return Component.literal(Integer.toString(
+            view.residents().stream().mapToInt(resident -> fluids.getOrDefault(resident.id(), 0)).sum()));
     }
 
     DamageControlState state(ColonyView view) {

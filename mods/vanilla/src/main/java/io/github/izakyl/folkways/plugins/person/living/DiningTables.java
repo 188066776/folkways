@@ -1,6 +1,8 @@
 package io.github.izakyl.folkways.plugins.person.living;
 
+import io.github.izakyl.folkways.core.api.ground.BlockChanges;
 import io.github.izakyl.folkways.core.api.terms.Keepouts;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -14,6 +16,8 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.levelgen.structure.BoundingBox;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.StairBlock;
 import net.minecraft.world.level.block.state.BlockState;
@@ -25,6 +29,8 @@ public final class DiningTables {
         boolean matches(ServerLevel level, BlockPos table);
         Container inventory(ServerLevel level, BlockPos table);
         default Optional<BlockState> sample() { return Optional.empty(); }
+        // Matching must only change on block changes or chunk replacement when opting into the cache.
+        default boolean stable() { return false; }
     }
     public interface Seat {
         boolean matches(ServerLevel level, BlockPos chair);
@@ -33,7 +39,23 @@ public final class DiningTables {
     }
     private static final Map<ResourceLocation, Table> TABLES = new LinkedHashMap<>();
     private static final Map<ResourceLocation, Seat> SEATS = new LinkedHashMap<>();
+    private static final TagKey<Block> DINING_TABLES = tag("dining/tables");
+    private static final TagKey<Block> HOUSING_TABLES = tag("housing/table");
     private static final String SEAT_MARKER = "folkways:dining_seat";
+    private record ChunkKey(ServerLevel level, int x, int z) { }
+    private record TableCell(BlockState state, boolean table) { }
+    private static final class TableChunk {
+        final LevelChunk chunk;
+        final Map<BlockPos, TableCell> cells = new HashMap<>();
+        final BlockChanges.Heard watch;
+        TableChunk(ServerLevel level, int x, int z, LevelChunk chunk) {
+            this.chunk = chunk;
+            BoundingBox box = new BoundingBox((x << 4) - 1, level.getMinBuildHeight(), (z << 4) - 1,
+                (x << 4) + 16, level.getMaxBuildHeight(), (z << 4) + 16);
+            watch = BlockChanges.listen(level, box, at -> cells.clear());
+        }
+    }
+    private static final Map<ChunkKey, TableChunk> TABLE_CHUNKS = new LinkedHashMap<>(16, 0.75f, true);
     private static boolean keepoutInstalled;
     private DiningTables() { }
 
@@ -41,12 +63,14 @@ public final class DiningTables {
     static synchronized void installKeepout() {
         if (keepoutInstalled) { return; }
         Keepouts.install((level, x, y, z) -> level instanceof ServerLevel server
-            && table(server, new BlockPos(x, y - 1, z)));
+            && keepout(server, new BlockPos(x, y - 1, z)));
         keepoutInstalled = true;
     }
 
     public static synchronized void register(ResourceLocation id, Table adapter) {
         if (TABLES.putIfAbsent(id, adapter) != null) { throw new IllegalArgumentException("duplicate dining table: " + id); }
+        TABLE_CHUNKS.values().forEach(chunk -> chunk.watch.close());
+        TABLE_CHUNKS.clear();
     }
     public static synchronized void registerSeat(ResourceLocation id, Seat adapter) {
         if (SEATS.putIfAbsent(id, adapter) != null) { throw new IllegalArgumentException("duplicate dining seat: " + id); }
@@ -61,8 +85,8 @@ public final class DiningTables {
     /** Tags are synced to clients; adapters are installed during common setup. */
     public static boolean anyTable() {
         return !TABLES.isEmpty()
-            || BuiltInRegistries.BLOCK.getTag(tag("dining/tables")).filter(tables -> tables.size() > 0).isPresent()
-            || BuiltInRegistries.BLOCK.getTag(tag("housing/table")).filter(tables -> tables.size() > 0).isPresent();
+            || BuiltInRegistries.BLOCK.getTag(DINING_TABLES).filter(tables -> tables.size() > 0).isPresent()
+            || BuiltInRegistries.BLOCK.getTag(HOUSING_TABLES).filter(tables -> tables.size() > 0).isPresent();
     }
     /** Resolve afresh so previews follow the current world's table tags. */
     public static Optional<BlockState> sample() {
@@ -73,11 +97,44 @@ public final class DiningTables {
         }
         return TABLES.values().stream().flatMap(adapter -> adapter.sample().stream()).findFirst();
     }
+    private static boolean keepout(ServerLevel level, BlockPos at) {
+        if (!level.isLoaded(at)) { return false; }
+        BlockState state = level.getBlockState(at);
+        if (state.is(DINING_TABLES) || state.is(HOUSING_TABLES)) { return true; }
+        if (TABLES.values().stream().anyMatch(adapter -> !adapter.stable())) { return table(level, at); }
+        int x = at.getX() >> 4;
+        int z = at.getZ() >> 4;
+        LevelChunk loaded = level.getChunkSource().getChunkNow(x, z);
+        if (loaded == null) { return false; }
+        ChunkKey key = new ChunkKey(level, x, z);
+        TableChunk chunk = TABLE_CHUNKS.get(key);
+        if (chunk == null || chunk.chunk != loaded) {
+            if (chunk != null) { chunk.watch.close(); }
+            chunk = new TableChunk(level, x, z, loaded);
+            TABLE_CHUNKS.put(key, chunk);
+            if (TABLE_CHUNKS.size() > 256) {
+                ChunkKey oldest = TABLE_CHUNKS.keySet().iterator().next();
+                TABLE_CHUNKS.remove(oldest).watch.close();
+            }
+        }
+        TableCell cached = chunk.cells.get(at);
+        if (cached != null && cached.state == state) { return cached.table; }
+        boolean found = false;
+        for (Table adapter : TABLES.values()) {
+            if (adapter.matches(level, at)) { found = true; break; }
+        }
+        chunk.cells.put(at.immutable(), new TableCell(state, found));
+        return found;
+    }
+
     public static boolean table(ServerLevel level, BlockPos at) {
         if (!level.isLoaded(at)) { return false; }
         var state = level.getBlockState(at);
-        return state.is(tag("dining/tables")) || state.is(tag("housing/table"))
-            || TABLES.values().stream().anyMatch(adapter -> adapter.matches(level, at));
+        if (state.is(DINING_TABLES) || state.is(HOUSING_TABLES)) { return true; }
+        for (Table adapter : TABLES.values()) {
+            if (adapter.matches(level, at)) { return true; }
+        }
+        return false;
     }
     public static boolean chair(ServerLevel level, BlockPos at) {
         if (!level.isLoaded(at)) { return false; }

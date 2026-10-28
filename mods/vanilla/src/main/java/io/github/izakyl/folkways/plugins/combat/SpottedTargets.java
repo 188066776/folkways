@@ -69,7 +69,7 @@ public final class SpottedTargets {
     private static Vision vision(Mob observer) {
         double base = FolkwaysVanillaConfig.defenderSightRadius()
             + Bodies.of(observer).map(body -> body.effects().value(PatrolContent.ALERT_RANGE)).orElse(0.0);
-        double magnification = observer instanceof ResidentEntity body && ObservationGear.carried(body)
+        double magnification = observer instanceof ResidentEntity body && ObservationGear.assigned(body)
             ? FolkwaysVanillaConfig.observationSightMultiplier() : 1;
         return new Vision(base, magnification);
     }

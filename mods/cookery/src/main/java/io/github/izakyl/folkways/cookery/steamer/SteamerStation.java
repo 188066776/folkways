@@ -22,6 +22,7 @@ import io.github.izakyl.folkways.core.api.work.Workshop;
 import io.github.izakyl.folkways.cookery.CookeryContent;
 import io.github.izakyl.folkways.cookery.KitchenBookings;
 import io.github.izakyl.folkways.cookery.KitchenStation;
+import io.github.izakyl.folkways.cookery.StationStack;
 import io.github.izakyl.folkways.plugins.wares.WaresContent;
 import java.util.ArrayList;
 import java.util.List;
@@ -67,6 +68,22 @@ public final class SteamerStation implements KitchenStation {
         return at.in(level) ? active(colony, at, bookings) : List.of();
     }
     public boolean matches(BlockState state) { return state.is(ModBlocks.STEAMER.get()); }
+
+    public Optional<Object> freezeSignature(ServerLevel level, WorldPos at) {
+        List<Object> state = new ArrayList<>();
+        for (WorldPos part : parts(level, at)) {
+            var steamer = steamer(level, part).orElseThrow();
+            List<Object> items = new ArrayList<>();
+            for (int slot = 0; slot < steamer.getItems().size(); slot++) {
+                items.add(new StationStack(steamer.getItems().get(slot)));
+                items.add(steamer.getCookingTime()[slot]);
+            }
+            state.add(List.of(steamer, steamer.getBlockState(), accessible(level, part.block(level)),
+                steamer.getPersistentData().getCompound("folkways.cookery.steamer").copy(), List.copyOf(items)));
+        }
+        return Optional.of(List.copyOf(state));
+    }
+
     public BlockPos anchor(Level level, BlockPos cell) {
         BlockPos base = cell;
         while (base.getY() > level.getMinBuildHeight() && level.getBlockState(base.below()).is(ModBlocks.STEAMER.get())) { base = base.below(); }

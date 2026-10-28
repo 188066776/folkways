@@ -72,6 +72,15 @@ public final class MillstoneStation implements KitchenStation {
         return at.in(level) ? active(colony, at, bookings) : List.of();
     }
     public boolean matches(BlockState state) { return state.is(ModBlocks.MILLSTONE.get()); }
+
+    public Optional<Object> freezeSignature(ServerLevel level, WorldPos at) {
+        var mill = mill(level, at).orElse(null);
+        if (mill == null || mill.getPersistentData().contains(MillstoneBatch.KEY)) { return Optional.empty(); }
+        return Optional.of(List.of(mill, mill.getBlockState(), mill.hasEntity(),
+            !mill.hasEntity() || MillstoneDrive.external(level, mill),
+            mill.getInput().isEmpty(), mill.isOutputEmpty()));
+    }
+
     public BlockPos anchor(Level level, BlockPos cell) {
         var part = level.getBlockState(cell).getValue(MillstoneBlock.PART);
         return cell.offset(-part.getPosX(), 0, -part.getPosY());

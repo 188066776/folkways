@@ -136,6 +136,35 @@ record CreateLayout(List<BlockPos> packagers, List<BlockPos> containers, Set<Blo
         return found;
     }
 
+    static boolean containersComplete(ServerLevel level, UUID network) {
+        LogisticsNetwork wired = Create.LOGISTICS.logisticsNetworks.get(network);
+        if (wired == null) {
+            return true;
+        }
+        for (GlobalPos link : wired.totalLinks) {
+            if (!link.dimension().equals(level.dimension())) {
+                continue;
+            }
+            if (!wired.loadedLinks.contains(link) || !level.isLoaded(link.pos())) {
+                return false;
+            }
+            for (Direction side : Direction.values()) {
+                BlockPos beside = link.pos().relative(side);
+                if (!level.isLoaded(beside)) {
+                    return false;
+                }
+                if (level.getBlockEntity(beside) instanceof PackagerBlockEntity) {
+                    Direction facing = level.getBlockState(beside).getOptionalValue(PackagerBlock.FACING)
+                        .orElse(Direction.UP);
+                    if (!level.isLoaded(beside.relative(facing.getOpposite()))) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
     // The container a packager packs from and unpacks into: the block behind the way it faces, if that holds items.
     static Optional<BlockPos> targetOf(ServerLevel level, BlockPos packager) {
         Direction facing = level.getBlockState(packager).getOptionalValue(PackagerBlock.FACING).orElse(Direction.UP);

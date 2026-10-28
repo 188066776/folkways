@@ -75,7 +75,6 @@ public final class SeedReservationGameTests {
         helper.assertValueEqual(tally.physical(), 129L, "the allowance reads the three actual completed fetches");
         helper.assertValueEqual(tally.committed(), 129L, "every seed is still promised to the one consumer");
         helper.assertValueEqual(tally.compostable(), 0L, "there is no bogus 129th surplus after max(64,64,1) plus a reserve");
-        helper.assertTrue(!budget.permits(UUID.randomUUID(), ItemStack.EMPTY), "no undeclared escrow can change that allowance");
         helper.succeed();
     }
 

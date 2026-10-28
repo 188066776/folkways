@@ -32,7 +32,7 @@ public final class CookeryConnectedDiningGameTests {
             Node supply = f.goals().stream().filter(node -> node.spec().focus().filter(far::equals).isPresent()).findFirst().orElseThrow();
             Container display = DiningTables.inventory(f.level, far).orElseThrow();
             display.setItem(1, new ItemStack(Items.MUSHROOM_STEW));
-            Node meal = f.dining.urge(f.worker, f.colony.view(f.level), Urge.SPARE, false).orElseThrow().take().get();
+            Node meal = f.urge().orElseThrow().take().get();
             helper.assertTrue(meal.spec().focus().filter(far::equals).isPresent(), "near chair reserved the far physical serving");
             // Breaking an empty middle piece must invalidate both snapshots before any resurvey.
             f.level.setBlockAndUpdate(f.at.east(3), Blocks.AIR.defaultBlockState());
@@ -44,11 +44,11 @@ public final class CookeryConnectedDiningGameTests {
             helper.assertTrue(display.getItem(1).is(Items.MUSHROOM_STEW), "failed meal leaves the original native serving untouched");
             helper.assertValueEqual(f.living.foodLevelOf(f.person.getUUID()).orElseThrow(), 4, "split grants no nourishment");
             f.dining.refresh(f.level.getServer());
-            helper.assertTrue(f.dining.urge(f.worker, f.colony.view(f.level), Urge.SPARE, false).isEmpty(),
+            helper.assertTrue(f.urge().isEmpty(),
                 "the far half without a chair cannot supply the near half");
             f.level.setBlockAndUpdate(f.at.east(3), ModBlocks.TABLE_OAK.get().defaultBlockState());
             f.dining.refresh(f.level.getServer());
-            Node retry = f.dining.urge(f.worker, f.colony.view(f.level), Urge.SPARE, false).orElseThrow().take().get();
+            Node retry = f.urge().orElseThrow().take().get();
             helper.assertTrue(retry.commit(f.level, f.worker) instanceof Outcome.Done, "reconnecting releases and reclaims the real chair and serving");
             helper.assertTrue(display.isEmpty(), "exactly the original far serving was consumed once");
         }
@@ -91,7 +91,7 @@ public final class CookeryConnectedDiningGameTests {
             Container display = DiningTables.inventory(f.level, far).orElseThrow();
             helper.assertTrue(ItemStack.isSameItemSameComponents(display.getItem(0), soup), "distant native storage preserves meal components");
             helper.assertTrue(f.display.isEmpty(), "near native storage has no copied serving");
-            Node meal = f.dining.urge(f.worker, f.colony.view(f.level), Urge.SPARE, false).orElseThrow().take().get();
+            Node meal = f.urge().orElseThrow().take().get();
             Outcome.Done eaten = (Outcome.Done) meal.commit(f.level, f.worker);
             helper.assertTrue(display.isEmpty(), "shared meal removes food at its actual far location");
             helper.assertValueEqual(eaten.made().stream().filter(item -> item.is(Items.BOWL)).mapToInt(ItemStack::getCount).sum(), 1,

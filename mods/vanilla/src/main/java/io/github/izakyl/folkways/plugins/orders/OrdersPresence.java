@@ -5,13 +5,15 @@ import io.github.izakyl.folkways.core.api.colony.Asking;
 import io.github.izakyl.folkways.core.api.colony.Closing;
 import io.github.izakyl.folkways.core.api.colony.Colony;
 import io.github.izakyl.folkways.core.api.colony.ColonyView;
+import io.github.izakyl.folkways.core.api.inventory.InventorySnapshot;
 import io.github.izakyl.folkways.base.persist.Reader;
 import io.github.izakyl.folkways.base.persist.Writer;
 import io.github.izakyl.folkways.core.api.terms.Containers;
 import io.github.izakyl.folkways.core.api.terms.Goods;
 import io.github.izakyl.folkways.core.api.terms.ItemSpec;
 import io.github.izakyl.folkways.core.api.terms.ItemFilter;
-import io.github.izakyl.folkways.core.api.terms.Reach;
+import io.github.izakyl.folkways.core.api.terms.Stand;
+import io.github.izakyl.folkways.core.api.terms.Stash;
 import io.github.izakyl.folkways.core.api.terms.StoreRule;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
 import io.github.izakyl.folkways.core.api.terms.WorldSpaces;
@@ -45,7 +47,6 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.Container;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 
@@ -62,6 +63,7 @@ final class OrdersPresence implements Facing {
 
     private final Asking asking;
     private CompoundTag saved;
+    private MinecraftServer observedServer;
     private final Map<Order.Key, Order> orders = new LinkedHashMap<>();
     private final Map<WorldPos, Shelf> shelves = new LinkedHashMap<>();
     private Set<ResourceKey<Level>> ruledIn = Set.of();
@@ -261,6 +263,7 @@ final class OrdersPresence implements Facing {
             return Attempt.refused(OrderRefusal.TOO_MANY, Notice.count(MAX_ORDERS));
         }
         orders.put(order.key(), order);
+        observeTargets(view.level().getServer());
         filling.remove(order.key());
         pending.remove(order.key());
         refreshPending.set(true);
@@ -300,13 +303,15 @@ final class OrdersPresence implements Facing {
 
     void refresh(MinecraftServer server) {
         settleCompleted();
+        observeTargets(server);
+        InventorySnapshot inventory = colony.inventory().snapshot();
         Set<ServerLevel> levels = new LinkedHashSet<>();
         for (Order order : orders.values()) {
             order.into().level(server).ifPresent(levels::add);
         }
         Map<ResourceKey<Level>, List<Grown>> work = new LinkedHashMap<>();
         for (ServerLevel level : levels) {
-            work.put(level.dimension(), inspect(level));
+            work.put(level.dimension(), inspect(level, inventory));
         }
         stated = Map.copyOf(work);
         asking.offer(stated);
@@ -314,14 +319,36 @@ final class OrdersPresence implements Facing {
         write();
     }
 
+    private void observeTargets(MinecraftServer server) {
+        observedServer = server;
+        for (ServerLevel level : server.getAllLevels()) {
+            Set<WorldPos> endpoints = new LinkedHashSet<>();
+            orders.values().stream().map(Order::into).filter(at -> at.in(level)).forEach(endpoints::add);
+            shelves.keySet().stream().filter(at -> at.in(level)).forEach(endpoints::add);
+            colony.inventory().observe(OrdersContent.ID, level, endpoints);
+        }
+    }
+
     // Standing orders are reserves; shelves govern access and incoming goods.
     private void rule(MinecraftServer server) {
+        InventorySnapshot inventory = colony.inventory().snapshot();
+        boolean pending = false;
+        for (Shelf shelf : shelves.values()) {
+            var observed = inventory.store(shelf.into());
+            if (observed.isEmpty() || observed.get().state() != InventorySnapshot.State.OBSERVED) {
+                colony.inventory().ensureObserved(Stash.at(shelf.into()));
+                pending = true;
+            }
+        }
+        if (pending) {
+            return;
+        }
         Map<ResourceKey<Level>, List<StoreRule>> rules = new LinkedHashMap<>();
         for (Order order : orders.values()) {
             if (order.standing()) {
                 order.into().level(server).ifPresent(level -> rules
                     .computeIfAbsent(level.dimension(), key -> new ArrayList<>())
-                    .add(new StoreRule.Reserve(anchored(level, order.into()), order.what())));
+                    .add(new StoreRule.Reserve(anchored(order.into()), order.what())));
             }
         }
         for (Shelf shelf : List.copyOf(shelves.values())) {
@@ -330,12 +357,8 @@ final class OrdersPresence implements Facing {
                 continue;
             }
             ServerLevel level = in.get();
-            if (Containers.gone(level, shelf.into().block(level))) {
-                shelves.remove(shelf.into());
-                continue;
-            }
             rules.computeIfAbsent(level.dimension(), key -> new ArrayList<>())
-                .addAll(shelf.rules(anchored(level, shelf.into())));
+                .addAll(shelf.rules(anchored(shelf.into())));
         }
         for (ResourceKey<Level> dimension : ruledIn) {
             if (!rules.containsKey(dimension)) {
@@ -347,9 +370,8 @@ final class OrdersPresence implements Facing {
     }
 
     // Either half of a double chest names the same store as the colony does: the lower corner.
-    private static WorldPos anchored(ServerLevel level, WorldPos where) {
-        BlockPos cell = where.block(level);
-        return level.isLoaded(cell) ? WorldPos.of(level, Containers.anchor(level, cell)) : where;
+    private WorldPos anchored(WorldPos where) {
+        return colony.inventory().snapshot().store(where).map(store -> store.stash().pos()).orElse(where);
     }
 
     private void settleCompleted() {
@@ -367,6 +389,11 @@ final class OrdersPresence implements Facing {
     }
 
     public void closed(Closing why) {
+        if (observedServer != null) {
+            for (ServerLevel level : observedServer.getAllLevels()) {
+                colony.inventory().observe(OrdersContent.ID, level, List.of());
+            }
+        }
         if (why == Closing.RAZED) {
             orders.clear();
             shelves.clear();
@@ -381,16 +408,15 @@ final class OrdersPresence implements Facing {
         return stated.getOrDefault(view.level().dimension(), List.of());
     }
 
-    private List<Grown> inspect(ServerLevel level) {
+    private List<Grown> inspect(ServerLevel level, InventorySnapshot inventory) {
         List<Grown> wanted = new ArrayList<>();
         for (Order order : List.copyOf(orders.values())) {
             if (!order.into().in(level)) {
                 continue;
             }
-            if (Containers.gone(level, order.into().block(level))) {
-                orders.remove(order.key());
-                filling.remove(order.key());
-                pending.remove(order.key());
+            var observed = inventory.store(order.into());
+            if (observed.filter(store -> store.state() == InventorySnapshot.State.UNSUPPORTED).isPresent()) {
+                colony.inventory().ensureObserved(Stash.at(order.into()));
                 continue;
             }
             Filling delivery = filling.get(order.key());
@@ -398,12 +424,14 @@ final class OrdersPresence implements Facing {
                 continue;
             }
             if (delivery == null) {
-                Optional<Container> target = Containers.at(level, order.into().block(level));
-                if (target.isEmpty()) {
+                if (observed.isEmpty() || observed.get().state() != InventorySnapshot.State.OBSERVED) {
+                    colony.inventory().ensureObserved(Stash.at(order.into()));
                     continue;
                 }
-                long held = Goods.countIn(target.get(), order.what());
-                if (order.standing()) held += OrderReturns.count(colony, order.into(), order.what());
+                var target = observed.get();
+                long held = target.slots().stream().map(slot -> slot.stackCopy())
+                    .filter(stack -> Goods.matches(stack, order.what())).mapToLong(ItemStack::getCount).sum();
+                if (order.standing()) { held += OrderReturns.count(colony, order.into(), order.what()); }
                 long count = pending.getOrDefault(order.key(), order.replenishment(held));
                 if (count <= 0) {
                     if (!order.standing() && held >= order.high()) {
@@ -411,8 +439,8 @@ final class OrdersPresence implements Facing {
                     }
                     continue;
                 }
-                Optional<Stances> stands = Stances.of(level,
-                    Reach.workableCells(level, order.into().block(level)));
+                Optional<Stances> stands = target.approach().state() == InventorySnapshot.State.OBSERVED
+                    ? Stances.of(target.approach().stands().stream().map(Stand::cell).toList()) : Optional.empty();
                 if (stands.isEmpty()) {
                     continue;
                 }
@@ -427,11 +455,6 @@ final class OrdersPresence implements Facing {
         return List.copyOf(wanted);
     }
 
-    private static Optional<Container> containerOf(Order order, MinecraftServer server) {
-        return order.into().level(server)
-            .flatMap(level -> Containers.at(level, order.into().block(level)));
-    }
-
     // Every order the colony keeps, under the container it fills: the container a heading that finds it in the world,
     // its orders the lines beneath. The draft is filed at a container, so it is not here but on the container's page.
     @Override
@@ -439,7 +462,7 @@ final class OrdersPresence implements Facing {
         if (!page.equals(OrdersContent.PAGE.id())) {
             return Optional.empty();
         }
-        MinecraftServer server = view.level().getServer();
+        InventorySnapshot inventory = colony.inventory().snapshot();
         Map<WorldPos, List<Order>> byContainer = new LinkedHashMap<>();
         for (Order order : orders.values()) {
             byContainer.computeIfAbsent(order.into(), any -> new ArrayList<>()).add(order);
@@ -451,7 +474,7 @@ final class OrdersPresence implements Facing {
                     .map(cell -> List.<Board.Act>of(new Board.Act.Ping(cell))).orElse(List.of()),
                 Optional.empty(), true));
             for (Order order : filed) {
-                rows.add(orderRow(order, server, List.of()));
+                rows.add(orderRow(order, inventory, List.of()));
             }
         });
         return Optional.of(new Board(
@@ -471,6 +494,7 @@ final class OrdersPresence implements Facing {
         }
         WorldPos into = WorldPos.of(level, Containers.anchor(level, at));
         List<Order> here = ordersAt(into);
+        InventorySnapshot inventory = colony.inventory().snapshot();
         List<Board.Row> rows = new ArrayList<>();
         rows.addAll(shelfRows(shelfAt(into)));
         rows.add(Board.Row.heading(Component.translatable("folkways.panel.orders.replenish")));
@@ -482,7 +506,7 @@ final class OrdersPresence implements Facing {
                     icon("chest_minecart")))).actions().wide());
         rows.add(Board.Row.heading(Component.translatable("folkways.panel.orders.here")));
         for (Order order : here) {
-            rows.add(orderRow(order, level.getServer(), List.of(new Board.Act.Do(
+            rows.add(orderRow(order, inventory, List.of(new Board.Act.Do(
                 OrderAct.withdrawing(order.what()).key(), "folkways.action.delete", icon("barrier")))));
         }
         if (here.isEmpty()) {
@@ -499,10 +523,18 @@ final class OrdersPresence implements Facing {
 
     // One order on a line of its own: what it keeps, then whether it stands or comes once, the counts it keeps to, how
     // many the container holds now and how many are still on their way; in pictures, with the words for the rest.
-    private Board.Row orderRow(Order order, MinecraftServer server, List<Board.Act> acts) {
-        Optional<Long> present = containerOf(order, server).map(held -> Goods.countIn(held, order.what()));
+    private Board.Row orderRow(Order order, InventorySnapshot inventory, List<Board.Act> acts) {
+        var target = inventory.store(order.into());
+        Optional<Long> present = target.filter(store -> store.state() == InventorySnapshot.State.OBSERVED)
+            .map(store -> store.slots().stream().map(slot -> slot.stackCopy())
+                .filter(stack -> Goods.matches(stack, order.what())).mapToLong(ItemStack::getCount).sum());
         long left = onTheWay(order);
-        return new Board.Row(iconOf(order.what()), nameOf(order.what()), detailOf(order, present, left), acts)
+        if (present.isEmpty()) {
+            colony.inventory().ensureObserved(Stash.at(order.into()));
+        }
+        Component detail = present.isEmpty() ? Component.translatable("folkways.panel.orders.unknown")
+            : detailOf(order, present, left);
+        return new Board.Row(iconOf(order.what()), nameOf(order.what()), detail, acts)
             .told(present.map(here -> toldOf(order, here, left)).orElse(Sentence.EMPTY))
             .wide();
     }
@@ -514,7 +546,7 @@ final class OrdersPresence implements Facing {
 
     private static Component detailOf(Order order, Optional<Long> present, long left) {
         if (present.isEmpty()) {
-            return Component.translatable("folkways.panel.orders.gone");
+            return Component.translatable("folkways.panel.orders.unknown");
         }
         MutableComponent detail = order.standing()
             ? Component.translatable("folkways.panel.orders.standing", present.get(), order.low(), order.high())

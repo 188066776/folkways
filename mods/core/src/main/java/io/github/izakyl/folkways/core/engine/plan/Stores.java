@@ -1,10 +1,17 @@
 package io.github.izakyl.folkways.core.engine.plan;
 
 import io.github.izakyl.folkways.core.api.terms.Containers;
+import io.github.izakyl.folkways.core.engine.inventory.InventoryChanges;
 import io.github.izakyl.folkways.core.api.terms.StoreRule;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
 import io.github.izakyl.folkways.core.api.terms.WorldSpaces;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashSet;
+import java.util.Set;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.ChestBlock;
+import net.minecraft.world.level.block.state.properties.ChestType;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -29,7 +36,8 @@ public final class Stores {
         return WorldSpaces.resolve(level.getServer(), where)
             .filter(block -> block.level() == level)
             .flatMap(block -> Containers.at(block.level(), block.cell()))
-            .flatMap(container -> kept(container, rulesAt(where)));
+            .flatMap(container -> kept(container, rulesAt(level, where)))
+            .map(container -> new Watched(container, () -> InventoryChanges.store(level, where)));
     }
 
     public static void ruled(UUID colony, Map<WorldPos, List<StoreRule>> rules) {
@@ -53,9 +61,44 @@ public final class Stores {
         return List.copyOf(found);
     }
 
+    public static List<StoreRule> rulesAt(Collection<WorldPos> aliases) {
+        Set<StoreRule> rules = new LinkedHashSet<>();
+        aliases.forEach(alias -> rules.addAll(rulesAt(alias)));
+        return List.copyOf(rules);
+    }
+
+    public static List<StoreRule> rulesAt(ServerLevel level, WorldPos where) {
+        BlockPos pos = WorldSpaces.storage(level, where).orElse(null);
+        if (pos == null || !level.isLoaded(pos)) {
+            return rulesAt(where);
+        }
+        var state = level.getBlockState(pos);
+        if (state.getBlock() instanceof ChestBlock && state.getValue(ChestBlock.TYPE) != ChestType.SINGLE) {
+            WorldPos other = WorldPos.of(level, pos.relative(ChestBlock.getConnectedDirection(state)));
+            return rulesAt(List.of(where, other));
+        }
+        return rulesAt(where);
+    }
+
     // The container itself, beneath whatever view of it the rules gave.
     public static Container inner(Container container) {
-        return container instanceof Kept kept ? kept.inner() : container;
+        return switch (container) {
+            case Kept kept -> inner(kept.inner());
+            case Watched watched -> inner(watched.inner());
+            default -> container;
+        };
+    }
+
+    public static int accessibleSlot(List<StoreRule> rules, int size, int physicalSlot) {
+        int from = 0;
+        int to = size;
+        for (StoreRule rule : rules) {
+            if (rule instanceof StoreRule.Slots slots) {
+                from = Math.max(from, slots.from());
+                to = Math.min(to, slots.to());
+            }
+        }
+        return physicalSlot >= from && physicalSlot < to ? physicalSlot - from : -1;
     }
 
     static Optional<Container> kept(Container container, List<StoreRule> rules) {
@@ -71,6 +114,76 @@ public final class Stores {
             }
         }
         return from >= to ? Optional.empty() : Optional.of(new Kept(container, rules, from, to));
+    }
+
+    private record Watched(Container inner, Runnable changed) implements Container {
+
+        @Override
+        public int getContainerSize() {
+            return inner.getContainerSize();
+        }
+
+        @Override
+        public boolean isEmpty() {
+            return inner.isEmpty();
+        }
+
+        @Override
+        public ItemStack getItem(int slot) {
+            return inner.getItem(slot);
+        }
+
+        @Override
+        public ItemStack removeItem(int slot, int count) {
+            ItemStack taken = inner.removeItem(slot, count);
+            changed.run();
+            return taken;
+        }
+
+        @Override
+        public ItemStack removeItemNoUpdate(int slot) {
+            ItemStack taken = inner.removeItemNoUpdate(slot);
+            changed.run();
+            return taken;
+        }
+
+        @Override
+        public void setItem(int slot, ItemStack stack) {
+            inner.setItem(slot, stack);
+            changed.run();
+        }
+
+        @Override
+        public int getMaxStackSize() {
+            return inner.getMaxStackSize();
+        }
+
+        @Override
+        public int getMaxStackSize(ItemStack stack) {
+            return inner.getMaxStackSize(stack);
+        }
+
+        @Override
+        public void setChanged() {
+            inner.setChanged();
+            changed.run();
+        }
+
+        @Override
+        public boolean stillValid(Player player) {
+            return inner.stillValid(player);
+        }
+
+        @Override
+        public boolean canPlaceItem(int slot, ItemStack stack) {
+            return Containers.accepts(inner, slot, stack);
+        }
+
+        @Override
+        public void clearContent() {
+            inner.clearContent();
+            changed.run();
+        }
     }
 
     private record Kept(Container inner, List<StoreRule> rules, int from, int to) implements Container {

@@ -22,6 +22,7 @@ import io.github.izakyl.folkways.plugins.orders.OrdersContent;
 import net.minecraft.core.registries.BuiltInRegistries;
 import io.github.izakyl.folkways.core.api.terms.Goods;
 import io.github.izakyl.folkways.core.api.terms.ItemSpec;
+import io.github.izakyl.folkways.core.api.terms.Keepouts;
 import io.github.izakyl.folkways.core.api.terms.Stash;
 import io.github.izakyl.folkways.core.api.terms.StoreRule;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
@@ -64,6 +65,7 @@ import io.github.izakyl.folkways.cookery.racks.KitchenRacks;
 import io.github.izakyl.folkways.plugins.person.PersonBody;
 import io.github.izakyl.folkways.plugins.wares.WaresContent;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -122,11 +124,12 @@ public final class TaskToolsGameTests {
             front.setSetting(crafting.id(), "tool", new ColonySettings.Value.Items(List.of(
                 ItemFilter.item(BuiltInRegistries.ITEM.getKey(sickle)))));
             front.setSetting(farming.id(), "tool", new ColonySettings.Value.Items(List.of()));
-            helper.assertTrue(work.planned(rig.level).isPresent() && !work.ready(rig.level),
+            helper.assertTrue(work.planned(rig.level).isPresent() && !rig.ready(work),
                 "crafting's allowed sickle cannot be borrowed for a harvesting node");
             front.setSetting(farming.id(), "tool", new ColonySettings.Value.Items(List.of(
                 ItemFilter.item(BuiltInRegistries.ITEM.getKey(sickle)))));
-            helper.assertTrue(work.planned(rig.level).isEmpty() && work.ready(rig.level), "farming's own list allows the harvest");
+            helper.assertTrue(work.planned(rig.level).isEmpty() && rig.ready(work),
+                "farming's own list allows the harvest");
             rig.finish(work);
             helper.assertValueEqual(executed.get(), 1, "one farming action used the borrowed sickle");
             helper.assertValueEqual(Goods.countIn(rig.rack, Goods.specOf(sickle.getDefaultInstance())), 1L,
@@ -149,7 +152,7 @@ public final class TaskToolsGameTests {
             front.setSetting(farming, "tool", knife);
             front.setSetting(crafting, "tool", new ColonySettings.Value.Items(List.of()));
             helper.assertTrue(work.planned(rig.level).isPresent(), "farming's allowed knife cannot qualify crafting work");
-            helper.assertFalse(work.ready(rig.level), "no shared knife can be reserved for the forbidden vocation");
+            helper.assertFalse(rig.ready(work), "no shared knife can be reserved for the forbidden vocation");
             helper.assertTrue(((ToolWork) work).families().isEmpty(), "a disabled vocation requests no shared-tool replenishment");
             helper.assertTrue(rig.tools.pool.leases(rig.colony.colonyId()).isEmpty(), "refusal creates no physical lease");
             var spec = NodeSpec.of(UUID.randomUUID(), CookeryContent.ID, new WorkSite.AtBlock(rig.boardAt),
@@ -164,11 +167,12 @@ public final class TaskToolsGameTests {
             helper.assertTrue(Tools.canPrepare(rig.body.kind().id(), spec, List.of(),
                 io.github.izakyl.folkways.core.api.vocation.KitRules.snapshot(rig.colony.works())),
                 "planning may fetch a missing shared tool allowed for the step's vocation");
-            helper.assertTrue(work.planned(rig.level).isEmpty() && work.ready(rig.level), "crafting's own list permits borrowing");
+            helper.assertTrue(work.planned(rig.level).isEmpty() && rig.ready(work),
+                "crafting's own list permits borrowing");
             rig.step(work);
             helper.assertValueEqual(Goods.countIn(rig.body.pack(), KNIVES), 1L, "one physical knife was borrowed");
             front.setSetting(crafting, "tool", new ColonySettings.Value.Items(List.of()));
-            helper.assertTrue(work.ready(rig.level), "the already borrowed knife remains ready after disabling acquisition");
+            helper.assertTrue(rig.ready(work), "the already borrowed knife remains ready after disabling acquisition");
             rig.finish(work);
             helper.assertValueEqual(executions.get(), 1, "the native action uses its held loan after disabling acquisition");
             helper.assertValueEqual(Goods.countIn(rig.rack, KNIVES), 1L, "the original knife is back in shared storage");
@@ -182,7 +186,7 @@ public final class TaskToolsGameTests {
         try (Rig rig = new Rig(helper)) {
             rig.rack.setItem(0, rig.namedKnife());
             Node work = rig.simple(new AtomicInteger(), false);
-            helper.assertTrue(work.ready(rig.level), "the permitted knife can be reserved");
+            helper.assertTrue(rig.ready(work), "the permitted knife can be reserved");
             var within = (Workload.Within) work.spec().workload();
             Node borrow = ((Workload.Within.Turn.Piece) within.next(rig.level, rig.worker)).node();
             ColonyFront.of(rig.colony.works()).setSetting(io.github.izakyl.folkways.plugins.wares.WaresContent.CRAFTING,
@@ -211,7 +215,7 @@ public final class TaskToolsGameTests {
                 ItemFilter.item(BuiltInRegistries.ITEM.getKey(iron)))));
             var executions = new AtomicInteger();
             Node work = rig.simple(executions, false);
-            helper.assertTrue(work.ready(rig.level), "the original subset permits borrowing");
+            helper.assertTrue(rig.ready(work), "the original subset permits borrowing");
             var within = (Workload.Within) work.spec().workload();
             Node borrow = ((Workload.Within.Turn.Piece) within.next(rig.level, rig.worker)).node();
             front.setSetting(WaresContent.CRAFTING, "tool", new ColonySettings.Value.Items(List.of(
@@ -235,12 +239,280 @@ public final class TaskToolsGameTests {
     }
 
     @GameTest(template = "empty")
+    public static void snapshotSlotsStayStableAcrossCopiesAndRejectReplacement(GameTestHelper helper) {
+        try (Rig rig = new Rig(helper)) {
+            rig.rack.setItem(0, rig.namedKnife());
+            rig.observe();
+            var first = rig.tools.stock.read(rig.level, KNIVES);
+            var copied = rig.tools.stock.read(rig.level, KNIVES);
+            helper.assertValueEqual(first.sources().keySet(), copied.sources().keySet(),
+                "snapshot stack copies preserve physical slot tokens");
+            var source = first.sources().values().iterator().next();
+            rig.rack.setItem(0, rig.namedKnife());
+            rig.observe();
+            var replacement = rig.tools.stock.read(rig.level, KNIVES);
+            helper.assertFalse(replacement.sources().containsKey(source.id()),
+                "an identical looking replacement has a new physical incarnation");
+            helper.assertFalse(rig.tools.stock.valid(source), "a replacement rejects the old execution token");
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void unchangedRevisionsNeverReadContainersOrPacksAcrossToolPasses(GameTestHelper helper) {
+        try (Rig rig = new Rig(helper)) {
+            rig.rack.setItem(0, rig.namedKnife());
+            var packReads = new AtomicInteger();
+            var storeReads = new AtomicInteger();
+            try {
+                var field = io.github.izakyl.folkways.core.api.resident.body.Pack.class.getDeclaredField("container");
+                field.setAccessible(true);
+                field.set(rig.body.pack(), new net.minecraft.world.SimpleContainer(18) {
+                    public ItemStack getItem(int slot) {
+                        packReads.incrementAndGet();
+                        return super.getItem(slot);
+                    }
+                });
+            } catch (ReflectiveOperationException broken) {
+                throw new AssertionError(broken);
+            }
+            var colony = (io.github.izakyl.folkways.core.api.colony.Colony) java.lang.reflect.Proxy.newProxyInstance(
+                TaskTools.class.getClassLoader(),
+                new Class<?>[] { io.github.izakyl.folkways.core.api.colony.Colony.class }, (proxy, method, args) -> {
+                    if (method.getName().equals("store")) {
+                        storeReads.incrementAndGet();
+                    }
+                    return method.invoke(rig.colony.works(), args);
+                });
+            rig.observe();
+            TaskTools service = new TaskTools(colony, rig.level.getServer());
+            try {
+                List<Node> demands = new java.util.ArrayList<>();
+                for (int demand = 0; demand < 4; demand++) {
+                    NodeSpec spec = NodeSpec.of(UUID.randomUUID(), CookeryContent.ID,
+                        new WorkSite.AtBlock(rig.boardAt), Stances.WHEREVER, Workload.Once.of(1))
+                        .tools(new ToolUse(KNIFE, 0),
+                            new ToolUse(new ToolNeed.Tagged(TagMod.KITCHEN_SHOVEL), 0)).done();
+                    Node original = new Node() {
+                        public NodeSpec spec() { return spec; }
+
+                        public Outcome commit(ServerLevel level, Worker who) { return Outcome.done(); }
+                    };
+                    Node work = service.decorate(Grown.of(original)).nodes().getFirst();
+                    helper.assertTrue(work.planned(rig.level).isEmpty(), "each demand is adopted");
+                    demands.add(work);
+                }
+                var version = colony.inventory().snapshot().version();
+                int before = packReads.get();
+                for (int pass = 0; pass < 100; pass++) {
+                    demands.forEach(work -> work.ready(rig.level));
+                    service.stock.read(rig.level, KNIVES);
+                    service.stock.read(rig.level, ItemSpec.of(TagMod.KITCHEN_SHOVEL));
+                    service.stock.destinations(rig.level, rig.namedKnife());
+                    service.tick(rig.level.getServer());
+                }
+                helper.assertValueEqual(packReads.get(), before, "all planning passes perform zero live pack reads");
+                helper.assertValueEqual(storeReads.get(), 0, "all families and demands perform zero container opens");
+                helper.assertValueEqual(colony.inventory().snapshot().version(), version,
+                    "planning does not refresh or invalidate the published observations");
+            } finally {
+                service.closed(Closing.SHUTDOWN);
+            }
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void anIdenticalPackReplacementNeverInheritsThePhysicalLoan(GameTestHelper helper) {
+        try (Rig rig = new Rig(helper)) {
+            rig.rack.setItem(0, rig.namedKnife());
+            Node work = rig.simple(new AtomicInteger(), false);
+            rig.step(work);
+            var lease = rig.tools.pool.leases(rig.colony.colonyId()).getFirst();
+            ItemStack expected = rig.tools.tool(lease).orElseThrow();
+            int slot = rig.tools.carriedSlot(rig.body.pack(), lease, expected);
+            rig.body.pack().setItem(slot, rig.body.pack().getItem(slot).copy());
+            rig.observe();
+            helper.assertValueEqual(rig.tools.carriedSlot(rig.body.pack(), lease, expected), -1,
+                "an identical looking replacement cannot be used or returned under the old loan");
+            helper.assertTrue(rig.tools.stock.held(rig.colony.inventory().snapshot(), lease).isEmpty(),
+                "the observed replacement cannot promise the old loan's return");
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void borrowingKeepsAnIdenticalPersonalToolSeparate(GameTestHelper helper) {
+        try (Rig rig = new Rig(helper)) {
+            ItemStack personal = rig.namedKnife();
+            rig.body.pack().setItem(0, personal);
+            rig.rack.setItem(0, rig.namedKnife());
+            Node work = rig.simple(new AtomicInteger(), false);
+            rig.step(work);
+            var lease = rig.tools.pool.leases(rig.colony.colonyId()).getFirst();
+            int slot = rig.tools.carriedSlot(rig.body.pack(), lease, rig.tools.tool(lease).orElseThrow());
+            helper.assertTrue(slot > 0, "the loan names the slot that actually received the borrowed item");
+            helper.assertTrue(rig.body.pack().getItem(0) == personal, "the existing personal tool stays in place");
+            rig.finish(work);
+            helper.assertTrue(rig.body.pack().getItem(0) == personal, "returning the loan preserves the personal tool");
+            helper.assertValueEqual(Goods.countIn(rig.rack, KNIVES), 1L, "the borrowed tool returns to its rack");
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void aStackableToolObservationCountsOneLoanUnit(GameTestHelper helper) {
+        try (Rig rig = new Rig(helper)) {
+            rig.chest.setItem(0, new ItemStack(Items.FIRE_CHARGE, 8));
+            rig.observe();
+            var stock = rig.tools.stock.read(rig.level, ItemSpec.of(Items.FIRE_CHARGE));
+            helper.assertValueEqual(stock.inventory().tools().size(), 1, "one slot supplies one loan token");
+            helper.assertValueEqual(stock.inventory().tools().getFirst().stack().getCount(), 1,
+                "a stackable tool is represented by one unit");
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void anUnloadedBorrowerRebindsItsSavedPackSlotOnRecovery(GameTestHelper helper) {
+        try (Rig rig = new Rig(helper)) {
+            rig.rack.setItem(0, rig.namedKnife());
+            Node work = rig.simple(new AtomicInteger(), false);
+            rig.step(work);
+            var lease = rig.tools.pool.leases(rig.colony.colonyId()).getFirst();
+            ItemStack expected = rig.tools.tool(lease).orElseThrow();
+            var saved = new net.minecraft.nbt.CompoundTag();
+            rig.body.mob().saveWithoutId(saved);
+            rig.body.mob().remove(net.minecraft.world.entity.Entity.RemovalReason.UNLOADED_TO_CHUNK);
+            rig.colony.inventory().unloaded(lease.resident());
+            var restored = PersonBody.RESIDENT.get().create(rig.level);
+            restored.load(saved);
+            helper.assertTrue(rig.level.addFreshEntity(restored), "the saved borrower reloads");
+            try {
+                rig.observe();
+                int slot = rig.tools.carriedSlot(restored.pack(), lease, expected);
+                helper.assertTrue(slot >= 0, "the saved physical slot is rebound after the resident reloads");
+                helper.assertTrue(ItemStack.isSameItemSameComponents(restored.pack().getItem(slot), expected),
+                    "recovery still names the original saved tool");
+            } finally {
+                restored.discard();
+            }
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void clothingReadsNeverReconcileMarkersOrClaimAnIdenticalReplacement(GameTestHelper helper) {
+        try (Rig rig = new Rig(helper)) {
+            ItemStack hat = new ItemStack(ModItems.STRAW_HAT.get());
+            ItemSpec family = Goods.specOf(hat);
+            rig.chest.setItem(0, hat);
+            rig.observe();
+            var stock = rig.tools.stock.read(rig.level, family);
+            UUID task = UUID.randomUUID();
+            rig.tools.pool.request(rig.colony.colonyId(), task, family, stock.inventory());
+            var lease = rig.tools.pool.reserve(rig.colony.colonyId(), task, family, rig.body.id(),
+                stock.inventory()).orElseThrow();
+            var borrow = new ToolAction.Borrow(rig.tools, lease, stock.sources().get(lease.tool()), Optional.empty());
+            rig.stand(borrow);
+            helper.assertTrue(Commit.run(rig.level, borrow, rig.worker) instanceof Outcome.Done,
+                "the clothing loan physically leaves storage");
+            var head = net.minecraft.world.entity.EquipmentSlot.HEAD;
+            helper.assertTrue(LoanClothing.equip(rig.tools, rig.worker, Map.of(head, lease)),
+                "the exact borrowed hat occupies the native slot");
+            rig.body.mob().setItemSlot(head, rig.body.mob().getItemBySlot(head).copy());
+            var markers = rig.body.mob().getPersistentData().copy();
+            helper.assertTrue(LoanClothing.held(rig.tools, rig.body.mob(), lease).isEmpty(),
+                "an identical replacement cannot inherit native clothing ownership");
+            helper.assertValueEqual(rig.body.mob().getPersistentData(), markers,
+                "reading ownership does not clear or modify markers");
+            rig.observe();
+            helper.assertTrue(LoanClothing.recover(rig.tools, lease, rig.body), "execution reconciles a stale marker");
+            helper.assertFalse(LoanClothing.borrowedSlot(rig.body.mob(), head),
+                "recovery clears the stale ownership marker");
+            helper.assertTrue(rig.body.mob().getItemBySlot(head).is(ModItems.STRAW_HAT.get()),
+                "recovery preserves the player's identical replacement");
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void legacyLoansAcquireTheirResidentSlotOnlyDuringRecovery(GameTestHelper helper) {
+        try (Rig rig = new Rig(helper)) {
+            rig.rack.setItem(0, rig.namedKnife());
+            Node work = rig.simple(new AtomicInteger(), false);
+            rig.step(work);
+            work.ended(rig.level, Ending.REVOKED);
+            rig.tools.closed(Closing.SHUTDOWN);
+            var saved = rig.colony.works().kept(TaskTools.ID);
+            var items = saved.getList("items", net.minecraft.nbt.Tag.TAG_COMPOUND);
+            for (int index = 0; index < items.size(); index++) {
+                for (String field : List.of("slot", "equipment", "incarnation", "resident", "epoch")) {
+                    items.getCompound(index).remove(field);
+                }
+            }
+            rig.colony.works().keep(TaskTools.ID, saved);
+            TaskTools restored = new TaskTools(rig.colony.works(), rig.level.getServer());
+            try {
+                var recovery = restored.goals(rig.colony.works().view(rig.level));
+                helper.assertValueEqual(recovery.size(), 1, "the old persisted loan remains recoverable");
+                rig.finish(recovery.getFirst().nodes().getFirst());
+                helper.assertValueEqual(Goods.countIn(rig.rack, KNIVES), 1L,
+                    "execution migrates and returns the original saved physical loan");
+                helper.assertTrue(rig.body.pack().isEmpty(), "migration never creates another tool");
+            } finally {
+                restored.closed(Closing.SHUTDOWN);
+            }
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void pendingCoverageCannotManufactureTools(GameTestHelper helper) {
+        try (Rig rig = new Rig(helper)) {
+            rig.rack.setItem(0, rig.namedKnife());
+            rig.colony.inventory().changed(Stash.at(rig.rackAt));
+            var pending = rig.tools.stock.read(rig.level, KNIVES);
+            helper.assertFalse(pending.inventory().complete(), "the dirty store awaits its core observation");
+            helper.assertTrue(rig.tools.pool.supply(rig.colony.colonyId(), KNIVES, pending.inventory())
+                .replenishment().isEmpty(), "pending coverage cannot establish missing tools");
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void ruleRemappingRejectsTheReservedPhysicalSlot(GameTestHelper helper) {
+        try (Rig rig = new Rig(helper)) {
+            rig.chest.setItem(1, rig.namedKnife());
+            rig.observe();
+            var stock = rig.tools.stock.read(rig.level, KNIVES);
+            var source = stock.sources().values().iterator().next();
+            UUID task = UUID.randomUUID();
+            rig.tools.pool.request(rig.colony.colonyId(), task, KNIVES, stock.inventory());
+            var lease = rig.tools.pool.reserve(rig.colony.colonyId(), task, KNIVES, rig.body.id(),
+                stock.inventory()).orElseThrow();
+            var borrow = new ToolAction.Borrow(rig.tools, lease, source, Optional.empty());
+            rig.colony.works().rule(CookeryContent.ID, rig.level.dimension(), List.of(
+                new StoreRule.Slots(rig.chestAt, 1, 26)));
+            rig.observe();
+            helper.assertFalse(rig.tools.stock.valid(source), "a renumbered accessible view rejects the old token");
+            rig.stand(borrow);
+            helper.assertTrue(Commit.run(rig.level, borrow, rig.worker) instanceof Outcome.Failed,
+                "execution never applies the old accessible index to a new physical slot");
+            helper.assertTrue(rig.body.pack().isEmpty(), "a stale mapping cannot inject a loan");
+            helper.assertTrue(rig.chest.getItem(1).is(TagMod.KITCHEN_KNIFE),
+                "the rejected reservation preserves the physical tool");
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
     public static void sharedToolStockRespectsIndependentTakeAndStoreAccess(GameTestHelper helper) {
         try (Rig rig = new Rig(helper)) {
             rig.rack.setItem(0, rig.namedKnife());
             rig.colony.works().rule(CookeryContent.ID, rig.level.dimension(), List.of(
                 new StoreRule.Access(rig.rackAt, false, true)));
-            var blocked = rig.tools.stock.read(rig.level, KNIVES);
+            var blocked = rig.stock(KNIVES);
             helper.assertTrue(blocked.sources().isEmpty(), "a rack with take disabled offers no physical borrowing source");
             helper.assertTrue(blocked.inventory().tools().stream().allMatch(tool ->
                 tool.whereabouts() == KitchenTools.Whereabouts.UNREACHABLE), "the real inaccessible tool remains observed");
@@ -248,7 +520,7 @@ public final class TaskToolsGameTests {
                 "a real tool behind disabled take access is not duplicated by automatic replenishment");
             rig.colony.works().rule(CookeryContent.ID, rig.level.dimension(), List.of(
                 new StoreRule.Access(rig.rackAt, true, false), new StoreRule.Access(rig.chestAt, false, false)));
-            helper.assertValueEqual(rig.tools.stock.read(rig.level, KNIVES).sources().size(), 1,
+            helper.assertValueEqual(rig.stock(KNIVES).sources().size(), 1,
                 "store access does not prevent borrowing when take access remains enabled");
             helper.assertTrue(rig.tools.stock.destinations(rig.level, rig.namedKnife()).isEmpty(),
                 "a destination with store disabled cannot receive returns or automatic replenishment");
@@ -320,7 +592,8 @@ public final class TaskToolsGameTests {
                 Grown ignition = station.recovery(rig.colony.colonyId(), rig.level, rig.boardAt,
                     Stances.at(rig.level, rig.boardCell.south()), rig.bookings, () -> { }).getFirst();
                 Node work = rig.tools.decorate(ignition).nodes().getFirst();
-                helper.assertTrue(work.planned(rig.level).isEmpty() && work.ready(rig.level), "a real stove borrows its sole actual ignition tool");
+                helper.assertTrue(work.planned(rig.level).isEmpty() && rig.ready(work),
+                    "a real stove borrows its sole actual ignition tool");
                 helper.assertFalse(rig.step(work), "the first physical step borrows the ignition item from storage");
                 helper.assertFalse(rig.step(work), "the next physical step performs native stove ignition once");
                 helper.assertTrue(rig.level.getBlockState(rig.boardCell).getValue(
@@ -330,7 +603,8 @@ public final class TaskToolsGameTests {
                     com.github.ysbbbbbb.kaleidoscopecookery.block.kitchen.StoveBlock.LIT, false));
                 rig.level.setBlockAndUpdate(rig.boardCell.above(), Blocks.WATER.defaultBlockState());
                 helper.assertFalse(ignition.nodes().getFirst().ready(rig.level), "the cold wet native stove cannot be ignited again yet");
-                helper.assertTrue(work.ready(rig.level), "pending completed work may resume physical returns even when original ignition is no longer ready");
+                helper.assertTrue(rig.ready(work),
+                    "pending completed work may resume returns even when ignition is no longer ready");
                 rig.finish(work);
                 helper.assertFalse(rig.level.getBlockState(rig.boardCell).getValue(
                     com.github.ysbbbbbb.kaleidoscopecookery.block.kitchen.StoveBlock.LIT), "finishing returns never replays native ignition");
@@ -455,7 +729,7 @@ public final class TaskToolsGameTests {
             helper.assertValueEqual(Goods.countIn(rig.body.pack(), KNIVES), 0L, "the first task physically returns its knife");
             helper.assertTrue(rig.rack.getItem(0).getHoverName().getString().equals("Only shared knife"),
                 "the real rack receives the original named knife");
-            helper.assertTrue(second.ready(rig.level), "the second task can now borrow the same physical knife");
+            helper.assertTrue(rig.ready(second), "the second task can now borrow the same physical knife");
             rig.finish(second);
             helper.assertValueEqual(Goods.countIn(rig.rack, KNIVES) + Goods.countIn(rig.chest, KNIVES)
                 + Goods.countIn(rig.body.pack(), KNIVES), 1L, "two operations conserve exactly one physical knife");
@@ -518,7 +792,7 @@ public final class TaskToolsGameTests {
             });
             Node first = rig.simple(new AtomicInteger(), false);
             Node second = rig.simple(new AtomicInteger(), false);
-            helper.assertTrue(!first.ready(rig.level) && !second.ready(rig.level),
+            helper.assertTrue(!rig.ready(first) && !rig.ready(second),
                 "a tool-less food task never occupies the sole crafting worker inside Borrow");
             for (int tick = 0; tick < 60; tick++) {
                 rig.tools.tick(rig.level.getServer());
@@ -572,16 +846,16 @@ public final class TaskToolsGameTests {
             Node first = rig.simple(new AtomicInteger(), false);
             Node second = rig.simple(new AtomicInteger(), false);
             rig.step(first);
-            helper.assertTrue(!second.ready(rig.level), "a borrowed knife cannot be borrowed by another task");
+            helper.assertTrue(!rig.ready(second), "a borrowed knife cannot be borrowed by another task");
             var state = rig.tools.pool.request(rig.colony.colonyId(), second.id(), ((ToolWork) second).families().getFirst(),
-                rig.tools.stock.read(rig.level, KNIVES).inventory());
+                rig.stock(KNIVES).inventory());
             helper.assertTrue(state.replenishment().isEmpty(), "a busy real knife never triggers a second manufacture");
             rig.rack.setItem(0, new ItemStack(ModItems.KITCHEN_SHOVEL.get()));
             rig.rack.setItem(1, new ItemStack(ModItems.SICKLE.get()));
             rig.finish(first);
             helper.assertValueEqual(Goods.countIn(rig.chest, KNIVES), 1L, "a full native rack returns the original knife to an ordinary store");
             helper.assertValueEqual(Goods.countIn(rig.body.pack(), KNIVES), 0L, "fallback really removes the borrowed pack stack");
-            helper.assertTrue(second.ready(rig.level), "the returned fallback knife becomes borrowable again");
+            helper.assertTrue(rig.ready(second), "the returned fallback knife becomes borrowable again");
         }
         helper.succeed();
     }
@@ -621,7 +895,7 @@ public final class TaskToolsGameTests {
             rig.finish(recovery);
             Node next = rig.simple(new AtomicInteger(), false);
             var state = rig.tools.pool.request(rig.colony.colonyId(), next.id(), ((ToolWork) next).families().getFirst(),
-                rig.tools.stock.read(rig.level, KNIVES).inventory());
+                rig.stock(KNIVES).inventory());
             helper.assertTrue(state.status() == KitchenTools.Status.BUSY && state.replenishment().isEmpty(),
                 "the observed physical drop is unavailable stock, never proof that the tool was destroyed");
             helper.assertValueEqual(drop.getItem().getCount(), 1, "waiting does not consume or copy the real dropped knife");
@@ -666,11 +940,12 @@ public final class TaskToolsGameTests {
             Node downstream = rig.simple(downstreamDone, false);
             Node upstream = rig.simple(upstreamDone, false);
             rig.tools.tick(rig.level.getServer());
-            helper.assertTrue(upstream.ready(rig.level),
+            helper.assertTrue(rig.ready(upstream),
                 "an adopted downstream task and the supply scan do not reserve a queue position before food prerequisites finish");
             rig.finish(upstream);
             helper.assertValueEqual(upstreamDone.get(), 1, "the actual upstream tool action completes first");
-            helper.assertTrue(downstream.ready(rig.level), "after the producer returns its real knife, its consumer can borrow it");
+            helper.assertTrue(rig.ready(downstream),
+                "after the producer returns its real knife, its consumer can borrow it");
             rig.finish(downstream);
             helper.assertValueEqual(downstreamDone.get(), 1, "the actual dependent tool action then completes once");
             helper.assertValueEqual(Goods.countIn(rig.rack, KNIVES), 1L, "reverse adoption still uses exactly one returned native knife");
@@ -693,9 +968,9 @@ public final class TaskToolsGameTests {
             helper.assertValueEqual(Goods.countIn(rig.rack, KNIVES) + Goods.countIn(rig.chest, KNIVES)
                 + Goods.countIn(rig.body.pack(), KNIVES), 0L, "native destruction does not return a fresh replacement");
             Node next = rig.simple(new AtomicInteger(), false);
-            helper.assertTrue(!next.ready(rig.level), "the next task waits outside the worker until replacement exists");
+            helper.assertTrue(!rig.ready(next), "the next task waits outside the worker until replacement exists");
             var state = rig.tools.pool.request(rig.colony.colonyId(), next.id(), ((ToolWork) next).families().getFirst(),
-                rig.tools.stock.read(rig.level, KNIVES).inventory());
+                rig.stock(KNIVES).inventory());
             helper.assertValueEqual(state.replenishment().orElseThrow().count(), 1L, "only a confirmed lost tool permits one replacement");
         }
         helper.succeed();
@@ -773,6 +1048,7 @@ public final class TaskToolsGameTests {
                     Goods.matches(loans.other.pack().getItem(index), KNIVES)).findFirst().orElseThrow();
                 ItemStack stolen = loans.other.pack().removeItem(slot, 1);
                 helper.assertTrue(!stolen.isEmpty(), "the player really takes an existing borrowed tool");
+                rig.observe();
                 helper.assertValueEqual(OrderReturns.count(rig.colony.works(), rig.rackAt, KNIVES), 1L,
                     "an item absent from its loaded physical borrower cannot still promise a return");
                 loans.refresh();
@@ -835,6 +1111,7 @@ public final class TaskToolsGameTests {
                 "the actual front action creates the player order");
         }
         void refresh() throws Exception {
+            rig.observe();
             Object orders = rig.colony.works().service(OrdersContent.ID, Object.class).orElseThrow();
             var refresh = orders.getClass().getDeclaredMethod("refresh", net.minecraft.server.MinecraftServer.class);
             refresh.setAccessible(true); refresh.invoke(orders, rig.level.getServer());
@@ -845,7 +1122,7 @@ public final class TaskToolsGameTests {
             borrow(first, rig.worker); borrow(next, second);
         }
         void borrow(Node work, Worker who) {
-            rig.helper.assertTrue(work.ready(rig.level), "an actual additional knife permits the next borrowing turn");
+            rig.helper.assertTrue(rig.ready(work), "an actual additional knife permits the next borrowing turn");
             var turn = ((Workload.Within)work.spec().workload()).next(rig.level, who);
             rig.helper.assertTrue(turn instanceof Workload.Within.Turn.Piece piece && piece.node() instanceof ToolAction.Borrow,
                 "the first real preparation is a physical borrow");
@@ -853,8 +1130,10 @@ public final class TaskToolsGameTests {
             stand(piece, who.body());
             rig.helper.assertTrue(Commit.run(rig.level, piece, who) instanceof Outcome.Done, "the real source transfers one knife into this borrower's pack");
             ((Workload.Within)work.spec().workload()).ended(rig.level, piece, Ending.DONE);
+            rig.observe();
         }
         void returnOne(TaskTools service, Body borrower) {
+            rig.observe();
             var lease = service.pool.leases(rig.colony.colonyId()).stream().filter(item -> item.resident().equals(borrower.id())).findFirst().orElseThrow();
             var target = service.destination(rig.level, lease, service.tool(lease).orElseThrow()).orElseThrow();
             var returning = new ToolAction.Return(service, lease, target);
@@ -927,6 +1206,20 @@ public final class TaskToolsGameTests {
             };
         }
 
+        void observe() {
+            io.github.izakyl.folkways.cookery.InventoryObservations.publish(colony, level);
+        }
+
+        boolean ready(Node work) {
+            observe();
+            return work.ready(level);
+        }
+
+        ToolStock.Snapshot stock(ItemSpec family) {
+            observe();
+            return tools.stock.read(level, family);
+        }
+
         ItemStack namedKnife() {
             ItemStack knife = new ItemStack(ModItems.IRON_KITCHEN_KNIFE.get());
             knife.setDamageValue(23);
@@ -940,6 +1233,7 @@ public final class TaskToolsGameTests {
         }
 
         Node board() {
+            observe();
             Produce intent = Produce.of(CookeryContent.ID, new WorkSite.AtBlock(boardAt),
                 Goods.specOf(ModItems.RAW_CUT_SMALL_MEATS.get().getDefaultInstance()), 1, Produce.UNBOUNDED);
             Refinement.Change change = tools.decorate(workshop()).options(intent, Grown.of(intent)).stream()
@@ -962,6 +1256,7 @@ public final class TaskToolsGameTests {
 
         Node simple(AtomicInteger executions, boolean breaks,
                 io.github.izakyl.folkways.core.api.vocation.Vocation vocation, ToolNeed need) {
+            observe();
             NodeSpec spec = NodeSpec.of(UUID.randomUUID(), CookeryContent.ID, new WorkSite.AtBlock(boardAt),
                 Stances.at(level, boardCell.south()), Workload.Once.of(1))
                 .vocation(vocation).tools(new ToolUse(need, 0))
@@ -989,8 +1284,10 @@ public final class TaskToolsGameTests {
         }
 
         boolean step(Node work) {
+            observe();
             Workload.Within within = (Workload.Within) work.spec().workload();
             var turn = within.next(level, worker);
+            if (turn instanceof Workload.Within.Turn.Wait) { return false; }
             if (turn instanceof Workload.Within.Turn.Leave) {
                 helper.assertTrue(work.commit(level, worker) instanceof Outcome.Done, "the completed parent settles without replaying its action");
                 work.released(level, worker, Ending.DONE);
@@ -1012,6 +1309,7 @@ public final class TaskToolsGameTests {
             piece.released(level, worker, Ending.DONE);
             piece.ended(level, Ending.DONE);
             within.ended(level, piece, Ending.DONE);
+            observe();
             return false;
         }
 

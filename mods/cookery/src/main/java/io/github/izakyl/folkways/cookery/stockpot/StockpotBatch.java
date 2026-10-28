@@ -78,12 +78,12 @@ record StockpotBatch(UUID colony, UUID id, StockpotPlan plan, CompoundTag inputs
             return false;
         }
         if (pot.getStatus() == IStockpot.PUT_INGREDIENT) {
-            return inputs.equals(inputs(pot, level));
+            return matchesInputs(pot, level);
         }
         if (pot.getStatus() != IStockpot.COOKING && pot.getStatus() != IStockpot.FINISHED) {
             return false;
         }
-        if (pot.getStatus() == IStockpot.COOKING && !inputs.equals(inputs(pot, level))) {
+        if (pot.getStatus() == IStockpot.COOKING && !matchesInputs(pot, level)) {
             return false;
         }
         CompoundTag current = pot.saveCustomOnly(level.registryAccess());
@@ -104,5 +104,16 @@ record StockpotBatch(UUID colony, UUID id, StockpotPlan plan, CompoundTag inputs
 
     private static CompoundTag inputs(StockpotBlockEntity pot, ServerLevel level) {
         return ContainerHelper.saveAllItems(new CompoundTag(), pot.getInputs(), level.registryAccess());
+    }
+
+    private boolean matchesInputs(StockpotBlockEntity pot, ServerLevel level) {
+        NonNullList<ItemStack> saved = NonNullList.withSize(9, ItemStack.EMPTY);
+        ContainerHelper.loadAllItems(inputs, saved, level.registryAccess());
+        for (int slot = 0; slot < saved.size(); slot++) {
+            if (!ItemStack.matches(saved.get(slot), pot.getInputs().get(slot))) {
+                return false;
+            }
+        }
+        return true;
     }
 }

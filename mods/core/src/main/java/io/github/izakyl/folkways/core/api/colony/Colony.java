@@ -1,6 +1,9 @@
 package io.github.izakyl.folkways.core.api.colony;
 
 import io.github.izakyl.folkways.core.api.resident.Resident;
+import io.github.izakyl.folkways.core.api.inventory.ColonyInventory;
+import io.github.izakyl.folkways.core.api.inventory.InventoryFeedback;
+import io.github.izakyl.folkways.core.api.inventory.InventorySnapshot;
 import io.github.izakyl.folkways.core.api.resident.body.Body;
 import io.github.izakyl.folkways.core.api.terms.StoreRule;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
@@ -26,6 +29,15 @@ import net.minecraft.world.level.Level;
 public interface Colony {
 
     UUID id();
+
+    default ColonyInventory inventory() {
+        InventorySnapshot empty = InventorySnapshot.empty(id());
+        return () -> empty;
+    }
+
+    default InventoryFeedback inventoryFeedback() {
+        return InventoryFeedback.NONE;
+    }
 
     void publish(ResourceLocation owner, ResourceKey<Level> dimension, Collection<Workshop> workshops);
 

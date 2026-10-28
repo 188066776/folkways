@@ -2,6 +2,7 @@ package io.github.izakyl.folkways.plugins.build;
 
 import io.github.izakyl.folkways.core.api.colony.Colony;
 import io.github.izakyl.folkways.core.api.ground.BlockChanges;
+import io.github.izakyl.folkways.core.api.inventory.InventorySnapshot;
 import io.github.izakyl.folkways.core.api.terms.Closures;
 import io.github.izakyl.folkways.core.api.terms.Goods;
 import io.github.izakyl.folkways.core.api.terms.ItemSpec;
@@ -47,7 +48,6 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.Container;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
@@ -75,6 +75,16 @@ final class BuildSite {
 
         default Optional<Colony> colony() {
             return Optional.empty();
+        }
+
+        default Optional<List<ItemStack>> pack(Worker who) {
+            InventorySnapshot.Resident resident = colony().map(one ->
+                one.inventory().snapshot().residents().get(who.resident().id())).orElse(null);
+            if (resident == null || resident.state() != InventorySnapshot.State.OBSERVED) {
+                colony().ifPresent(one -> one.inventory().ensureObservedResident(who.resident().id()));
+                return Optional.empty();
+            }
+            return Optional.of(resident.pack().stream().map(slot -> slot.stackCopy()).toList());
         }
 
         void submit(ResourceKey<Level> dimension, Grown work, BiConsumer<UUID, Ending> ended);
@@ -694,12 +704,26 @@ final class BuildSite {
         stay.asked = now;
         boolean coming = false;
         boolean full = false;
+        boolean unknown = false;
         List<Piece> choices = new ArrayList<>();
         for (Piece piece : live.values()) {
-            if (piece.doing != null || piece.work().step().isEmpty() || !supplied(who, piece)) {
+            if (piece.doing != null || piece.work().step().isEmpty()) {
                 continue;
             }
-            if (!roomFor(who, piece)) {
+            Optional<Boolean> hasGoods = supplied(who, piece);
+            if (hasGoods.isEmpty()) {
+                unknown = true;
+                continue;
+            }
+            if (!hasGoods.get()) {
+                continue;
+            }
+            Optional<Boolean> room = roomFor(who, piece);
+            if (room.isEmpty()) {
+                unknown = true;
+                continue;
+            }
+            if (!room.get()) {
                 full = true;
                 continue;
             }
@@ -732,6 +756,9 @@ final class BuildSite {
             }
             look(body, chosen);
             return out(stay, level, chosen);
+        }
+        if (unknown) {
+            return Workload.Within.WAIT;
         }
         if (!coming || full) {
             return Workload.Within.LEAVE;
@@ -998,7 +1025,7 @@ final class BuildSite {
             up++;
             resting += now < piece.restUntil ? 1 : 0;
             unstood += piece.shortOf > 0 ? 1 : 0;
-            if (present.stream().noneMatch(who -> supplied(who, piece))) {
+            if (present.stream().allMatch(who -> supplied(who, piece).equals(Optional.of(false)))) {
                 unheld++;
                 piece.node().spec().needs().forEach(need -> wanting.merge(String.valueOf(need.spec()), 1, Integer::sum));
             }
@@ -1029,7 +1056,7 @@ final class BuildSite {
         boolean freed = false;
         for (Piece piece : live.values()) {
             if (piece.doing != null || !up(piece) || coming.contains(piece.node().id())
-                    || present.stream().anyMatch(who -> supplied(who, piece))) {
+                    || present.stream().anyMatch(who -> supplied(who, piece).orElse(true))) {
                 piece.starvedSince = Long.MIN_VALUE;
                 continue;
             }
@@ -1277,30 +1304,32 @@ final class BuildSite {
 
     // Whether the pack takes what the piece leaves. A piece that spends goods frees room in the doing, so it is let
     // be: the worker brought those goods in for it, and turned away it would carry them off again.
-    private static boolean roomFor(Worker who, Piece piece) {
+    private Optional<Boolean> roomFor(Worker who, Piece piece) {
         NodeSpec spec = piece.node().spec();
-        return spec.leaves().isEmpty() || !spec.needs().isEmpty() || Leaves.fit(who.pack(), spec.leaves());
+        if (spec.leaves().isEmpty() || !spec.needs().isEmpty()) {
+            return Optional.of(true);
+        }
+        return asks.pack(who).map(pack -> Leaves.cells(spec.leaves())
+            <= pack.stream().filter(ItemStack::isEmpty).count());
     }
 
     // Whether the worker holds what the piece takes, in its pack.
-    private static boolean supplied(Worker who, Piece piece) {
+    private Optional<Boolean> supplied(Worker who, Piece piece) {
+        if (piece.node().spec().needs().isEmpty()) {
+            return Optional.of(true);
+        }
+        Optional<List<ItemStack>> pack = asks.pack(who);
+        if (pack.isEmpty()) {
+            return Optional.empty();
+        }
         for (Need need : piece.node().spec().needs()) {
-            if (count(who.pack(), need.spec()) < need.count()) {
-                return false;
+            long count = pack.get().stream().filter(stack -> Goods.matches(stack, need.spec()))
+                .mapToLong(ItemStack::getCount).sum();
+            if (count < need.count()) {
+                return Optional.of(false);
             }
         }
-        return true;
-    }
-
-    private static long count(Container held, ItemSpec spec) {
-        long count = 0;
-        for (int slot = 0; slot < held.getContainerSize(); slot++) {
-            ItemStack stack = held.getItem(slot);
-            if (!stack.isEmpty() && Goods.matches(stack, spec)) {
-                count += stack.getCount();
-            }
-        }
-        return count;
+        return Optional.of(true);
     }
 
     // Remaining physical prerequisite depth, walked without recursion for tall builds. A cycle is defensive

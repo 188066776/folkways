@@ -62,6 +62,7 @@ public final class Endorsements {
                 yield Attempt.went();
             }
             case Endorsed.Refused refused -> new Attempt.Refused(refused.why());
+            case Endorsed.Pending ignored -> new Attempt.Pending();
         };
     }
 

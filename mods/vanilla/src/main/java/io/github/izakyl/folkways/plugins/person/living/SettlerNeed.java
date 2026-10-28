@@ -6,13 +6,17 @@ import java.util.Optional;
 
 // What one more settler asks the colony for, and how much of it is there.
 public record SettlerNeed(LivingNeed kind, int have, int each, Per per,
-                          Optional<ItemSpec> counts) {
+                          Optional<ItemSpec> counts, boolean complete) {
 
     public enum Per {
 
         SETTLER,
 
         RESIDENT
+    }
+
+    public SettlerNeed(LivingNeed kind, int have, int each, Per per, Optional<ItemSpec> counts) {
+        this(kind, have, each, per, counts, true);
     }
 
     public SettlerNeed(LivingNeed kind, int have, int each) {
@@ -24,11 +28,15 @@ public record SettlerNeed(LivingNeed kind, int have, int each, Per per,
     }
 
     public SettlerNeed filled(long held) {
-        return new SettlerNeed(kind, (int) Math.min(held, Integer.MAX_VALUE), each, per, counts);
+        return filled(held, complete);
+    }
+
+    public SettlerNeed filled(long held, boolean complete) {
+        return new SettlerNeed(kind, (int) Math.min(held, Integer.MAX_VALUE), each, per, counts, complete);
     }
 
     public SettlerNeed plus(int more) {
-        return new SettlerNeed(kind, have + more, each, per, counts);
+        return new SettlerNeed(kind, have + more, each, per, counts, complete);
     }
 
     public int want(int residents) {
@@ -36,7 +44,7 @@ public record SettlerNeed(LivingNeed kind, int have, int each, Per per,
     }
 
     public boolean met(int residents) {
-        return have >= want(residents);
+        return complete && have >= want(residents);
     }
 
     public Notice asRefusal(int residents) {

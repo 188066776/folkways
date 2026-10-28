@@ -29,10 +29,12 @@ final class ToolReturn implements Node, Workload.Within {
         this.service = service;
         this.lease = lease;
         spec = NodeSpec.of(lease.id(), CookeryContent.ID, WorkSite.on(body.mob()), Stances.WHEREVER, this)
-            .effort(WorkEffort.NONE).leaves(Leaves.room(1)).doing(CookeryContent.PREPARING, lease.request().tools()).done();
+            .effort(WorkEffort.NONE).leaves(Leaves.room(1)).doing(CookeryContent.PREPARING,
+                lease.request().tools()).done();
     }
 
     public NodeSpec spec() { return spec; }
+
     public Optional<UUID> worker() { return Optional.of(lease.resident()); }
 
     @Override
@@ -40,11 +42,14 @@ final class ToolReturn implements Node, Workload.Within {
         if (complete) {
             return LEAVE;
         }
+        if (service.stock.waitingForResident(lease)) { return WAIT; }
         var body = service.stock.body(lease.resident());
-        if (body.isPresent() && !LoanClothing.recover(service, lease, body.get())) return WAIT;
+        if (body.isPresent() && !LoanClothing.recover(service, lease, body.get())) { return WAIT; }
+        if (service.stock.waitingForResident(lease)) { return WAIT; }
         int slot = service.carriedSlot(who.pack(), lease, service.tool(lease).orElse(ItemStack.EMPTY));
+        if (service.stock.waitingForResident(lease)) { return WAIT; }
         if (slot < 0) {
-            service.lost(lease);
+            service.missing(lease);
             complete = true;
             return LEAVE;
         }

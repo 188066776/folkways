@@ -1,9 +1,8 @@
 package io.github.izakyl.folkways.plugins.compost;
 
 import io.github.izakyl.folkways.core.api.colony.Colony;
-import io.github.izakyl.folkways.core.api.resident.body.Bodies;
-import io.github.izakyl.folkways.core.api.resident.body.Body;
-import io.github.izakyl.folkways.core.api.terms.Containers;
+import io.github.izakyl.folkways.core.api.inventory.InventorySnapshot;
+import io.github.izakyl.folkways.core.api.inventory.SlotSnapshot;
 import io.github.izakyl.folkways.core.api.terms.Goods;
 import io.github.izakyl.folkways.core.api.terms.ItemSpec;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
@@ -17,20 +16,20 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.stream.IntStream;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.Container;
 import net.minecraft.world.item.Item;
-import net.minecraft.world.level.block.ChestBlock;
-import net.minecraft.world.level.block.state.properties.ChestType;
 
 /** Server-thread bridge from real colony inventory, current plan claims and persisted player orders. */
 public final class SeedSupport {
     private final Colony colony;
     private final MinecraftServer server;
     private final SeedBudget budget;
+    private record PlanningKey(InventorySnapshot.Version inventory, List<ReservedInput> claims,
+                               List<CropSeeds.Sowing> sowing, List<Orders.Target> targets) { }
+    private PlanningKey read;
+    private SeedBudget.Snapshot planned;
 
     public SeedSupport(Colony colony, MinecraftServer server) {
         this.colony = colony;
@@ -40,102 +39,104 @@ public final class SeedSupport {
     }
 
     public SeedBudget budget(ServerLevel level) { return budget; }
+
     public Set<Item> catalogue() { return CropSeeds.catalogue(server.overworld(), BlockPos.ZERO); }
 
-    private Map<UUID, Body> loadedBodies() {
-        Map<UUID, Body> found = new LinkedHashMap<>();
-        for (var resident : colony.residents()) {
-            for (ServerLevel level : server.getAllLevels()) {
-                var entity = level.getEntity(resident.id());
-                if (entity != null) Bodies.of(entity).ifPresent(body -> found.putIfAbsent(resident.id(), body));
-            }
-        }
-        return found;
-    }
-
     public SeedBudget.Snapshot snapshot() {
-        boolean complete = true;
+        InventorySnapshot inventory = colony.inventory().snapshot();
+        if (!inventory.coverage().complete()) {
+            colony.inventory().ensureObserved();
+        }
+        List<ReservedInput> reserved = new ArrayList<>();
+        List<CropSeeds.Sowing> sowing = new ArrayList<>();
+        for (ServerLevel level : server.getAllLevels()) {
+            reserved.addAll(colony.reservedInputs(level));
+            sowing.addAll(CropSeeds.sowing(colony, level));
+        }
+        List<Orders.Target> orders = Orders.targets(colony);
+        PlanningKey key = new PlanningKey(inventory.version(), List.copyOf(reserved), List.copyOf(sowing), orders);
+        if (key.equals(read)) { return planned; }
+        boolean complete = !inventory.coverage().membershipPending();
         Map<WorldPos, SeedBudget.Stock> stores = new LinkedHashMap<>();
         List<SeedBudget.Stock> stocks = new ArrayList<>();
-        List<ReservedInput> reserved = new ArrayList<>();
         List<SeedBudget.FutureNeed> future = new ArrayList<>();
         for (ServerLevel level : server.getAllLevels()) {
             for (WorldPos offered : colony.storesIn(level.dimension())) {
-                if (!loadedStore(level, offered)) { complete = false; continue; }
-                WorldPos canonical = canonical(level, offered);
-                if (stores.containsKey(canonical)) continue;
-                WorldPos readable = colony.storesIn(level.dimension()).contains(canonical) ? canonical : offered;
-                Optional<Container> store = colony.store(level, readable);
-                if (store.isPresent()) stores.put(canonical, stock("store/" + canonical, SeedBudget.Location.store(canonical), store.get()));
+                var store = inventory.store(offered);
+                if (store.isEmpty()) { complete = false; continue; }
+                var observed = store.get();
+                if (observed.state() != InventorySnapshot.State.OBSERVED) { complete = false; }
+                WorldPos at = observed.stash().pos();
+                stores.putIfAbsent(at, new SeedBudget.Stock("store/" + at, SeedBudget.Location.store(at),
+                    observed.slots().stream().filter(slot -> slot.accessibleSlot().isPresent())
+                        .map(SlotSnapshot::stackCopy).toList()));
             }
-            reserved.addAll(colony.reservedInputs(level));
         }
-        stocks.addAll(stores.values());
-        Map<UUID, Body> bodies = loadedBodies();
-        if (bodies.size() != colony.residents().size()) complete = false;
-        bodies.forEach((id, body) -> stocks.add(stock("pack/" + id, SeedBudget.Location.pack(id), body.pack())));
+        for (var resident : colony.residents()) {
+            var pack = inventory.residents().get(resident.id());
+            if (pack == null) { complete = false; continue; }
+            if (pack.state() != InventorySnapshot.State.OBSERVED) { complete = false; }
+            stocks.add(new SeedBudget.Stock("pack/" + resident.id(), SeedBudget.Location.pack(resident.id()),
+                pack.pack().stream().map(SlotSnapshot::stackCopy).toList()));
+        }
+        stocks.addAll(0, stores.values());
         // Repeated stage/dimension observations are one promise. The core has already summed distinct
         // draws within a placement; different producer lineages must remain distinct until that point.
         record InputKey(UUID node, Optional<WorldPos> store, Optional<UUID> resident, ItemSpec goods,
                         Optional<UUID> producer) { }
         Map<InputKey, ReservedInput> distinct = new LinkedHashMap<>();
         for (ReservedInput input : reserved) {
-            distinct.merge(new InputKey(input.node(), input.store(), input.resident(), input.goods(), input.producer()), input,
+            distinct.merge(new InputKey(input.node(), input.store(), input.resident(), input.goods(), input.producer()),
+                input,
                 (before, next) -> before.count() >= next.count() ? before : next);
         }
         record ClaimKey(UUID node, SeedBudget.Location at, ItemSpec goods) { }
         Map<ClaimKey, Long> physical = new LinkedHashMap<>();
         for (ReservedInput input : distinct.values()) {
             // A future hand-off covers a planned sowing demand, but cannot consume unrelated warehouse stock.
-            if (input.pending()) continue;
+            if (input.pending()) { continue; }
             SeedBudget.Location at = SeedBudget.Location.UNKNOWN;
             if (input.store().isPresent()) {
                 WorldPos where = input.store().get();
-                Optional<ServerLevel> level = where.level(server);
-                if (level.isEmpty() || !loadedStore(level.get(), where)) complete = false;
-                else at = SeedBudget.Location.store(canonical(level.get(), where));
+                var store = inventory.store(where);
+                if (store.isEmpty() || store.get().state() != InventorySnapshot.State.OBSERVED) {
+                    complete = false;
+                }
+                at = SeedBudget.Location.store(store.map(value -> value.stash().pos()).orElse(where));
             } else if (input.resident().isPresent()) {
                 at = SeedBudget.Location.pack(input.resident().get());
-                if (!bodies.containsKey(input.resident().get())) complete = false;
+                var resident = inventory.residents().get(input.resident().get());
+                if (resident == null || resident.state() != InventorySnapshot.State.OBSERVED) {
+                    complete = false;
+                }
             }
             physical.merge(new ClaimKey(input.node(), at, input.goods()), input.count(), Math::addExact);
         }
         List<SeedBudget.Claim> claims = physical.entrySet().stream().map(entry ->
-            new SeedBudget.Claim(entry.getKey().node(), entry.getKey().at(), entry.getKey().goods(), entry.getValue())).toList();
-        for (ServerLevel level : server.getAllLevels()) {
-            for (CropSeeds.Sowing sowing : CropSeeds.sowing(colony, level)) {
-                // One sowing's repeated stage observations are not additional demands. Clamp at this
-                // job's actual requested count, including an unknown-location plan claim only once.
-                long covered = distinct.values().stream().filter(input -> input.node().equals(sowing.node()) && Goods.overlap(input.goods(), sowing.seed()))
-                    .mapToLong(ReservedInput::count).sum();
-                long left = Math.max(0, sowing.count() - covered);
-                if (left > 0) future.add(new SeedBudget.FutureNeed("sowing/" + sowing.node(), sowing.seed(), left));
-            }
+            new SeedBudget.Claim(entry.getKey().node(), entry.getKey().at(), entry.getKey().goods(),
+                entry.getValue())).toList();
+        for (CropSeeds.Sowing demand : sowing) {
+            // Repeated stages of one sowing do not add demands or count unknown claims twice.
+            long covered = distinct.values().stream().filter(input -> input.node().equals(demand.node())
+                && Goods.overlap(input.goods(), demand.seed())).mapToLong(ReservedInput::count).sum();
+            long left = Math.max(0, demand.count() - covered);
+            if (left > 0) { future.add(new SeedBudget.FutureNeed("sowing/" + demand.node(), demand.seed(), left)); }
         }
         List<SeedBudget.StockTarget> targets = new ArrayList<>();
-        for (Orders.Target target : Orders.targets(colony)) {
-            Optional<ServerLevel> level = target.into().level(server);
-            if (level.isEmpty() || !loadedStore(level.get(), target.into())) complete = false;
-            WorldPos where = level.isPresent() && level.get().isLoaded(target.into().block(level.get()))
-                ? canonical(level.get(), target.into()) : target.into();
-            targets.add(new SeedBudget.StockTarget("order/" + where + "/" + target.goods().describe(), target.goods(), target.high()));
+        for (Orders.Target target : orders) {
+            WorldPos where;
+            var targetStore = inventory.store(target.into());
+            if (targetStore.isEmpty() || targetStore.get().state() != InventorySnapshot.State.OBSERVED) {
+                complete = false;
+            }
+            where = targetStore.map(value -> value.stash().pos()).orElse(target.into());
+            targets.add(new SeedBudget.StockTarget("order/" + where + "/" + target.goods().describe(),
+                target.goods(), target.high()));
         }
-        return new SeedBudget.Snapshot(stocks, claims, future, Map.of(), targets, complete);
+        SeedBudget.Snapshot result = new SeedBudget.Snapshot(stocks, claims, future, Map.of(), targets, complete);
+        read = key;
+        planned = result;
+        return result;
     }
 
-    private static SeedBudget.Stock stock(String identity, SeedBudget.Location at, Container contents) {
-        return new SeedBudget.Stock(identity, at, IntStream.range(0, contents.getContainerSize()).mapToObj(contents::getItem).toList());
-    }
-
-    private static boolean loadedStore(ServerLevel level, WorldPos where) {
-        if (!where.in(level) || !level.isLoaded(where.block(level))) return false;
-        BlockPos at = where.block(level);
-        var state = level.getBlockState(at);
-        return !(state.getBlock() instanceof ChestBlock) || state.getValue(ChestBlock.TYPE) == ChestType.SINGLE
-            || level.isLoaded(at.relative(ChestBlock.getConnectedDirection(state)));
-    }
-
-    private static WorldPos canonical(ServerLevel level, WorldPos where) {
-        return WorldPos.of(level, Containers.anchor(level, where.block(level)));
-    }
 }

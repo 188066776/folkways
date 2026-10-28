@@ -17,6 +17,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
+import java.util.TreeSet;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import net.minecraft.core.BlockPos;
@@ -39,6 +41,13 @@ final class Survey {
         Comparator.comparingInt((BlockPos cell) -> cell.getY())
             .thenComparingInt(BlockPos::getX)
             .thenComparingInt(BlockPos::getZ);
+
+    record Drop(WorldPos at, Optional<Stances> stances) { }
+
+    static final class Drops {
+        final Map<UUID, Drop> known = new HashMap<>();
+        final Set<UUID> order = new TreeSet<>();
+    }
 
     private boolean discovering;
 
@@ -134,6 +143,10 @@ final class Survey {
     // A stack lies in the box when the cell it lies in is one of the box's, wherever the box stands: aboard a ship,
     // a stack lies in the world over the deck, never among the cells the ship is kept in.
     List<Job> haul(Function<BlockPos, WorldPos> address) {
+        return haul(address, new Drops());
+    }
+
+    List<Job> haul(Function<BlockPos, WorldPos> address, Drops cache) {
         Set<WorldPos> held = new HashSet<>();
         AABB box = null;
         for (BlockPos cell : cells) {
@@ -146,17 +159,32 @@ final class Survey {
             }
         }
         if (box == null) {
+            cache.known.clear();
+            cache.order.clear();
             return List.of();
         }
         List<ItemEntity> lying = level.getEntitiesOfClass(ItemEntity.class, box.inflate(1.5D),
             drop -> drop.isAlive() && !drop.getItem().isEmpty() && held.contains(WorldSpaces.at(drop)));
-        lying.sort(Comparator.comparing(ItemEntity::getUUID));
+        Map<UUID, ItemEntity> found = new HashMap<>();
+        lying.forEach(drop -> found.put(drop.getUUID(), drop));
+        cache.known.keySet().retainAll(found.keySet());
+        cache.order.retainAll(found.keySet());
+        cache.order.addAll(found.keySet());
         List<Job> jobs = new ArrayList<>();
-        for (ItemEntity drop : lying) {
+        for (UUID id : cache.order) {
+            ItemEntity drop = found.get(id);
             WorldPos at = WorldSpaces.at(drop);
             BlockPos cell = at.block(level);
-            Optional<Stances> where = discovering ? Optional.of(Stances.WHEREVER)
-                : Stances.of(level, Reach.workableCells(level, cell));
+            Drop cached = cache.known.get(drop.getUUID());
+            Optional<Stances> where;
+            if (discovering) {
+                where = Optional.of(Stances.WHEREVER);
+            } else if (cached != null && cached.at().equals(at)) {
+                where = cached.stances();
+            } else {
+                where = Stances.of(level, Reach.workableCells(level, cell));
+                cache.known.put(drop.getUUID(), new Drop(at, where));
+            }
             where.ifPresent(footings -> jobs.add(new Job(
                 "item:" + drop.getUUID(), new WorkSite.AtEntity(drop.getUUID(), at), cell, List.of(cell), List.of(),
                 footings)));

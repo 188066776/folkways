@@ -70,10 +70,13 @@ public final class Labor {
         }
         simulationTicks++;
         ColonyMemberWrites.reconcile(server);
+        long enteredAt = Util.getNanos();
+        TravelBudget.beginTick(server, graphs);
         if (!(server instanceof GameTestServer)) {
             work(server);
         }
         pulse(server);
+        TravelBudget.endTick(server, enteredAt, Util.getNanos() - enteredAt);
     }
 
     private void pulse(MinecraftServer server) {
@@ -85,8 +88,6 @@ public final class Labor {
     private void work(MinecraftServer server) {
         ColonyRegistry registry = ColonyRegistry.get(server);
         boolean heartbeat = simulationTicks % (BEAT_TICKS * FolkwaysConfig.heartbeatCycles()) == 0;
-        long enteredAt = Util.getNanos();
-        TravelBudget.beginTick(server, graphs);
         int asking = 0;
         for (ServerLevel level : server.getAllLevels()) {
             for (ColonyData colony : registry.colonies()) {
@@ -108,7 +109,6 @@ public final class Labor {
             }
         }
         graphs = asking;
-        TravelBudget.endTick(server, enteredAt, Util.getNanos() - enteredAt);
         sites.keySet().removeIf(site -> {
             if (registry.find(site.colony()).isPresent()) {
                 return false;

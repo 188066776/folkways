@@ -149,7 +149,7 @@ public final class MetricsPage implements Draw {
     }
 
     private ColonyMetrics reading(Player player) {
-        if (reading != null) {
+        if (reading != null && reading.complete()) {
             return reading;
         }
         Optional<Colony> colony = Pages.colonyOf(player);
@@ -176,6 +176,7 @@ public final class MetricsPage implements Draw {
         }
         tag.put(STOCK, rows);
         tag.putBoolean("filtered", filtering);
+        tag.putBoolean("pending", !held.complete());
         return tag;
     }
 
@@ -256,8 +257,10 @@ public final class MetricsPage implements Draw {
             ? compound.getList(STOCK, Tag.TAG_COMPOUND)
             : new ListTag();
         empty.setDisplay(rows.isEmpty());
-        empty.setText(Component.translatable(tag instanceof CompoundTag data && data.getBoolean("filtered")
-            ? "folkways.metrics.unmatched" : "folkways.metrics.empty"));
+        boolean pending = tag instanceof CompoundTag data && data.getBoolean("pending");
+        empty.setText(Component.translatable(pending ? "folkways.settlers.checking_stock"
+            : tag instanceof CompoundTag data && data.getBoolean("filtered")
+                ? "folkways.metrics.unmatched" : "folkways.metrics.empty"));
         for (int slot = 0; slot < ROW_SLOTS; slot++) {
             boolean shown = slot < rows.size();
             UIElement cell = slots.get(slot);

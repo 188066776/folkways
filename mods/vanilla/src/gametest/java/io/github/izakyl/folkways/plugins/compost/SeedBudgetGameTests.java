@@ -33,29 +33,19 @@ public final class SeedBudgetGameTests {
     public static void register(RegisterGameTestsEvent event) { event.register(SeedBudgetGameTests.class); }
 
     @GameTest(template = "empty")
-    public static void exactStockTargetsProtectOnlyTheirActualComponentVariant(GameTestHelper helper) {
+    public static void exactStockTargetsProtectTheirComponentVariantDuringPlanning(GameTestHelper helper) {
         ItemStack kept = new ItemStack(Items.WHEAT_SEEDS);
         var data = new CompoundTag();
         data.putString("variety", "kept");
         kept.set(DataComponents.CUSTOM_DATA, CustomData.of(data));
         var location = SeedBudget.Location.pack(UUID.randomUUID());
-        var snapshot =
-            new SeedBudget.Snapshot(
-            List.of(
-            new SeedBudget.Stock(
-            "store", location, List.of(new ItemStack(Items.WHEAT_SEEDS, 100)))),
-            List.of(),
-            List.of(),
-            Map.of(),
-            List.of(new SeedBudget.StockTarget("special seeds", Goods.specOf(kept), 1)),
+        var snapshot = new SeedBudget.Snapshot(
+            List.of(new SeedBudget.Stock("store", location, List.of(new ItemStack(Items.WHEAT_SEEDS, 100), kept))),
+            List.of(), List.of(), Map.of(), List.of(new SeedBudget.StockTarget("special", Goods.specOf(kept), 1)),
             true);
         var budget = new SeedBudget(() -> snapshot, () -> Set.of(Items.WHEAT_SEEDS), item -> 0);
-        helper.assertTrue(
-            !budget.permits(UUID.randomUUID(), kept),
-            "surplus of another component variant cannot make reserved escrow compostable");
-        helper.assertTrue(
-            budget.permits(UUID.randomUUID(), new ItemStack(Items.WHEAT_SEEDS)),
-            "the exact target does not reserve ordinary seeds of the same item");
+        helper.assertValueEqual(budget.tally(Items.WHEAT_SEEDS).compostable(), 100L,
+            "planning protects the exact target while allowing ordinary seeds");
         helper.succeed();
     }
 
@@ -102,25 +92,6 @@ public final class SeedBudgetGameTests {
     }
 
     @GameTest(template = "empty")
-    public static void commitRechecksEscrowAndProtectsSeedsClaimedSincePlanning(GameTestHelper helper) {
-        UUID current = UUID.randomUUID();
-        var location = SeedBudget.Location.pack(UUID.randomUUID());
-        var goods = Goods.specOf(Items.WHEAT_SEEDS.getDefaultInstance());
-        var snapshots = new AtomicReference<>(new SeedBudget.Snapshot(List.of(stock("actual pack", location, 64)),
-            List.of(new SeedBudget.Claim(current, location, goods, 1)), List.of(), Map.of()));
-        var budget = new SeedBudget(snapshots::get, () -> Set.of(Items.WHEAT_SEEDS));
-        helper.assertTrue(budget.permits(current, new ItemStack(Items.WHEAT_SEEDS)),
-            "one physically drawn escrow plus sixty-four stored seeds gives exactly one spendable seed");
-        snapshots.set(new SeedBudget.Snapshot(List.of(stock("actual pack", location, 64)),
-            List.of(new SeedBudget.Claim(UUID.randomUUID(), location, goods, 1)), List.of(), Map.of()));
-        helper.assertTrue(!budget.permits(current, new ItemStack(Items.WHEAT_SEEDS)),
-            "a new sowing claim consumes that final allowance before compost commits");
-        snapshots.set(new SeedBudget.Snapshot(List.of(stock("actual pack", location, 63)), List.of(), List.of(), Map.of()));
-        helper.assertTrue(!budget.permits(current, new ItemStack(Items.WHEAT_SEEDS)), "the final reserve seed is never spent");
-        helper.succeed();
-    }
-
-    @GameTest(template = "empty")
     public static void distinctTargetsAddButRepeatedMetadataDoesNot(GameTestHelper helper) {
         var goods = Goods.specOf(Items.WHEAT_SEEDS.getDefaultInstance());
         var first = new SeedBudget.StockTarget("first pantry", goods, 80);
@@ -140,7 +111,6 @@ public final class SeedBudgetGameTests {
         helper.assertValueEqual(budget.tally(Items.WHEAT_SEEDS).physical(), 100L, "loaded physical seeds remain visible");
         helper.assertValueEqual(budget.tally(Items.WHEAT_SEEDS).compostable(), 0L, "unloaded inventory is never assumed disposable");
         helper.assertTrue(budget.reserves().isEmpty(), "no speculative seed request is made from an incomplete snapshot");
-        helper.assertTrue(!budget.permits(UUID.randomUUID(), new ItemStack(Items.WHEAT_SEEDS)), "escrow cannot bypass unknown stock protection");
         helper.succeed();
     }
 
@@ -183,28 +153,18 @@ public final class SeedBudgetGameTests {
         var budget = new SeedBudget(() -> snapshot, () -> Set.of(Items.WHEAT_SEEDS), ignored -> 0);
         helper.assertValueEqual(budget.tally(Items.WHEAT_SEEDS).compostable(), 55L,
             "zero retention still leaves ten claimed, five future sowing and thirty ordered seeds intact");
-        var afterDraw = new SeedBudget.Snapshot(List.of(stock("seed store", location, 44)),
-            snapshot.claims(), snapshot.future(), snapshot.maintainTargets());
-        var drawnBudget = new SeedBudget(() -> afterDraw, () -> Set.of(Items.WHEAT_SEEDS), ignored -> 0);
-        helper.assertTrue(!drawnBudget.permits(UUID.randomUUID(), new ItemStack(Items.WHEAT_SEEDS, 56)),
-            "escrow cannot consume protected sowing and player orders even with zero baseline");
         helper.succeed();
     }
 
     @GameTest(template = "empty")
-    public static void increasedRetentionRejectsPreviouslyAffordableEscrow(GameTestHelper helper) {
+    public static void increasedRetentionUpdatesPlanningReserve(GameTestHelper helper) {
         var location = SeedBudget.Location.pack(UUID.randomUUID());
         // Eighty-five seeds existed before logistics drew a twenty-one-seed compost batch.
         var snapshot = new SeedBudget.Snapshot(List.of(stock("remaining pack", location, 64)),
             List.of(), List.of(), Map.of());
         var keep = new AtomicInteger(64);
         var budget = new SeedBudget(() -> snapshot, () -> Set.of(Items.WHEAT_SEEDS), ignored -> keep.get());
-        UUID action = UUID.randomUUID();
-        helper.assertTrue(budget.permits(action, new ItemStack(Items.WHEAT_SEEDS, 21)),
-            "the original sixty-four reserve allows the physically drawn batch");
         keep.set(65);
-        helper.assertTrue(!budget.permits(action, new ItemStack(Items.WHEAT_SEEDS, 21)),
-            "a fresh larger reserve blocks the stale batch before destructive commit");
         helper.assertValueEqual(budget.reserves().getFirst().count(), 65L,
             "reserve requests use the same configured count as the compost allowance");
         helper.assertValueEqual(budget.reserves().getFirst().missing(), 1L,

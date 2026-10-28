@@ -70,6 +70,7 @@ public final class DiningAvailabilityGameTests {
         try (var fixture = new AvailabilityFixture()) {
             DiningTables.register(ResourceLocation.fromNamespaceAndPath("folkways", "test_available_table"),
                 new DiningTables.Table() {
+                    public boolean stable() { return true; }
                     public boolean matches(ServerLevel level, BlockPos at) {
                         return level.getBlockState(at).is(Blocks.DIAMOND_BLOCK);
                     }
@@ -110,6 +111,7 @@ public final class DiningAvailabilityGameTests {
         try (var fixture = new AvailabilityFixture()) {
             DiningTables.register(ResourceLocation.fromNamespaceAndPath("folkways", "test_table_sample"),
                 new DiningTables.Table() {
+                    public boolean stable() { return true; }
                     public boolean matches(ServerLevel level, BlockPos at) {
                         return level.getBlockState(at).is(Blocks.DIAMOND_BLOCK);
                     }

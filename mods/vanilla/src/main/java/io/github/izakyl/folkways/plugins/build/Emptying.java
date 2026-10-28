@@ -2,8 +2,10 @@ package io.github.izakyl.folkways.plugins.build;
 
 import io.github.izakyl.folkways.core.api.colony.Colony;
 import io.github.izakyl.folkways.core.api.colony.Release;
+import io.github.izakyl.folkways.core.api.inventory.InventorySnapshot;
+import io.github.izakyl.folkways.core.api.inventory.SlotSnapshot;
 import io.github.izakyl.folkways.core.api.terms.Containers;
-import io.github.izakyl.folkways.core.api.terms.Reach;
+import io.github.izakyl.folkways.core.api.terms.Stand;
 import io.github.izakyl.folkways.core.api.terms.StoreRule;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
 import io.github.izakyl.folkways.core.api.work.Delivery;
@@ -21,7 +23,6 @@ import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
-import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.ChestBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -77,13 +78,19 @@ final class Emptying {
             hold(level, cell);
         }
         rule();
+        colony.ifPresent(one -> one.inventory().observe(owner, level, held.keySet()));
+        InventorySnapshot snapshot = colony.map(one -> one.inventory().snapshot()).orElse(null);
+        if (snapshot != null && !snapshot.coverage().complete()) {
+            colony.orElseThrow().inventory().ensureObserved();
+        }
         for (BlockPos cell : cells.keySet()) {
             WorldPos at = WorldPos.of(level, Containers.anchor(level, cell));
             Trip trip = taking.get(at);
             if (trip != null) {
-                Container store = colony.flatMap(one -> one.store(level, trip.into())).orElse(null);
-                return Optional.of(store == null || !StoreRule.stores(colony.get().storeRules(trip.into()))
-                    || !fits(store, trip.stack()) ? BuildRefusal.NO_ROOM_TO_EMPTY : BuildRefusal.EMPTYING_CONTAINER);
+                InventorySnapshot.Store store = snapshot == null ? null : snapshot.store(trip.into()).orElse(null);
+                return Optional.of(store != null && store.state() == InventorySnapshot.State.OBSERVED
+                    && (!StoreRule.stores(store.rules()) || !fits(store, trip.stack()))
+                    ? BuildRefusal.NO_ROOM_TO_EMPTY : BuildRefusal.EMPTYING_CONTAINER);
             }
             List<View> views = views(level, cell);
             boolean full = false;
@@ -95,27 +102,37 @@ final class Emptying {
                     }
                     full = true;
                     // One ordinary stack per carry also fits a resident's smallest pack.
-                    ItemStack load = view.items().extractItem(slot, Math.min(stack.getCount(), stack.getMaxStackSize()), true);
+                    ItemStack load = view.items().extractItem(slot,
+                        Math.min(stack.getCount(), stack.getMaxStackSize()), true);
                     if (load.isEmpty()) {
                         continue;
                     }
-                    Optional<Stances> loading = Stances.of(level, Reach.workableCells(level, cell));
-                    if (loading.isEmpty()) {
-                        return Optional.of(BuildRefusal.NO_STANCE);
-                    }
                     if (colony.isEmpty()) {
                         return Optional.of(BuildRefusal.NO_ROOM_TO_EMPTY);
+                    }
+                    InventorySnapshot.Store observedSource = snapshot.store(WorldPos.of(level, cell)).orElse(null);
+                    if (observedSource == null
+                        || observedSource.approach().state() != InventorySnapshot.State.OBSERVED) {
+                        return Optional.of(BuildRefusal.EMPTYING_CONTAINER);
+                    }
+                    Optional<Stances> loading = Stances.of(observedSource.approach().stands().stream()
+                        .map(Stand::cell).toList());
+                    if (loading.isEmpty()) {
+                        return Optional.of(BuildRefusal.NO_STANCE);
                     }
                     for (WorldPos into : colony.get().storesIn(level.dimension())) {
                         if (held.containsKey(into) || !into.in(level) || !level.isLoaded(into.block(level))
                             || !StoreRule.stores(colony.get().storeRules(into))) {
                             continue;
                         }
-                        Container store = colony.get().store(level, into).orElse(null);
-                        if (store == null || !fits(store, load)) {
+                        InventorySnapshot.Store store = snapshot.store(into).orElse(null);
+                        if (store == null || store.aliases().stream().anyMatch(held::containsKey)
+                            || store.state() != InventorySnapshot.State.OBSERVED || !fits(store, load)
+                            || store.approach().state() != InventorySnapshot.State.OBSERVED) {
                             continue;
                         }
-                        Optional<Stances> unloading = Stances.of(level, Reach.workableCells(level, into.block(level)));
+                        Optional<Stances> unloading = Stances.of(store.approach().stands().stream()
+                            .map(Stand::cell).toList());
                         if (unloading.isEmpty()) {
                             continue;
                         }
@@ -125,11 +142,16 @@ final class Emptying {
                             view.side(), slot, load, level.getBlockState(cell), level.getBlockEntity(cell));
                         asks.submit(level.dimension(), Grown.of(Delivery.from(id, BuildContent.ID, source, into,
                             unloading.get(), count -> { })), (node, how) -> {
-                                if (node.equals(id)) ended.add(id);
+                                if (node.equals(id)) { ended.add(id); }
                             });
                         return Optional.of(BuildRefusal.EMPTYING_CONTAINER);
                     }
-                    return Optional.of(BuildRefusal.NO_ROOM_TO_EMPTY);
+                    boolean pending = snapshot.coverage().membershipPending()
+                        || colony.get().storesIn(level.dimension()).stream().filter(into -> !held.containsKey(into))
+                            .map(snapshot::store).anyMatch(store -> store.isEmpty()
+                                || store.get().state() != InventorySnapshot.State.OBSERVED
+                                || store.get().approach().state() != InventorySnapshot.State.OBSERVED);
+                    return Optional.of(pending ? BuildRefusal.EMPTYING_CONTAINER : BuildRefusal.NO_ROOM_TO_EMPTY);
                 }
             }
             BlockEntity entity = level.getBlockEntity(cell);
@@ -165,7 +187,7 @@ final class Emptying {
     }
 
     private void rule() {
-        if (level == null) return;
+        if (level == null) { return; }
         colony.ifPresent(one -> {
             one.withhold(owner, level.dimension(), held.keySet());
             one.rule(owner, level.dimension(), held.keySet().stream()
@@ -188,7 +210,8 @@ final class Emptying {
                 && level.getBlockEntity(cell) == entry.getValue().entity()) {
                 return false;
             }
-            colony.ifPresent(one -> entry.getValue().holding().ifPresent(holding -> one.release(holding, Release.GONE)));
+            colony.ifPresent(one -> entry.getValue().holding()
+                .ifPresent(holding -> one.release(holding, Release.GONE)));
             return true;
         });
         rule();
@@ -199,35 +222,43 @@ final class Emptying {
         taking.clear();
         held.clear();
         rule();
+        if (level != null) {
+            colony.ifPresent(one -> one.inventory().observe(owner, level, List.of()));
+        }
     }
 
     private static boolean unreadable(ServerLevel level, BlockPos cell, BlockEntity entity, List<View> views) {
-        if (entity instanceof Container container) return !container.isEmpty();
+        if (entity instanceof Container container) { return !container.isEmpty(); }
         // An inventory screen without exposed slots cannot be proved empty.
         return entity != null && views.isEmpty() && level.getBlockState(cell).getMenuProvider(level, cell) != null;
     }
 
     private static List<View> views(ServerLevel level, BlockPos cell) {
         IItemHandler items = level.getCapability(Capabilities.ItemHandler.BLOCK, cell, null);
-        if (items != null) return List.of(new View(items, Optional.empty()));
+        if (items != null) { return List.of(new View(items, Optional.empty())); }
         List<View> found = new ArrayList<>();
         for (Direction side : Direction.values()) {
             items = level.getCapability(Capabilities.ItemHandler.BLOCK, cell, side);
-            if (items != null) found.add(new View(items, Optional.of(side)));
+            if (items != null) { found.add(new View(items, Optional.of(side))); }
         }
         return found;
     }
 
-    private static boolean fits(Container store, ItemStack stack) {
-        SimpleContainer copy = new SimpleContainer(store.getContainerSize()) {
-            @Override public boolean canPlaceItem(int slot, ItemStack goods) {
-                return Containers.accepts(store, slot, goods);
-            }
-            @Override public int getMaxStackSize() { return store.getMaxStackSize(); }
-        };
-        for (int slot = 0; slot < store.getContainerSize(); slot++) {
-            copy.setItem(slot, store.getItem(slot).copy());
+    private static boolean fits(InventorySnapshot.Store store, ItemStack stack) {
+        if (store.refused().contains(stack.getItem()) || !StoreRule.admits(store.rules(), stack)) {
+            return false;
         }
-        return Containers.insert(copy, stack).isEmpty();
+        int room = 0;
+        for (SlotSnapshot slot : store.slots()) {
+            ItemStack held = slot.stackCopy();
+            if (slot.accessibleSlot().isPresent() && (held.isEmpty()
+                || ItemStack.isSameItemSameComponents(held, stack))) {
+                room += Math.max(0, Math.min(slot.stackLimit(), stack.getMaxStackSize()) - held.getCount());
+                if (room >= stack.getCount()) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 }

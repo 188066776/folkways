@@ -1,7 +1,10 @@
 package io.github.izakyl.folkways.plugins.combat.weapon;
 
 import io.github.izakyl.folkways.core.api.colony.Colony;
+import io.github.izakyl.folkways.core.api.inventory.InventorySnapshot;
 import io.github.izakyl.folkways.core.api.terms.Containers;
+import io.github.izakyl.folkways.core.api.terms.Stash;
+import io.github.izakyl.folkways.core.api.terms.StoreRule;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
 import io.github.izakyl.folkways.core.api.terms.WorldSpaces;
 import io.github.izakyl.folkways.plugins.person.ResidentEntity;
@@ -17,12 +20,18 @@ import net.minecraft.world.item.ItemStack;
 
 /** A stock preview, never a reservation. Loaded members consume preview units once in roster order. */
 public record ProfileShortages(
-    int assigned, int incomplete, int unloaded, Map<UUID, Integer> missing, Map<UUID, Integer> unavailableStock) {
+    int assigned, int incomplete, int unloaded, Map<UUID, Integer> missing, Map<UUID, Integer> unavailableStock,
+    boolean complete) {
     public static ProfileShortages read(Colony colony, LoadoutProfile profile, MinecraftServer server) {
         PatrolSupplies supplies = PatrolSupplies.of(colony);
         Map<UUID, Integer> missing = new LinkedHashMap<>();
         Map<UUID, Integer> unavailable = new LinkedHashMap<>();
-        Map<WorldPos, SimpleContainer> stock = new LinkedHashMap<>();
+        Map<Stash, SimpleContainer> stock = new LinkedHashMap<>();
+        InventorySnapshot snapshot = colony.inventory().snapshot();
+        if (!snapshot.coverage().complete()) {
+            colony.inventory().ensureObserved();
+        }
+        boolean complete = !snapshot.coverage().membershipPending();
         int incomplete = 0, unloaded = 0;
         List<UUID> members = supplies.profiles().residents(profile.id());
         for (UUID member : members) {
@@ -34,25 +43,36 @@ public record ProfileShortages(
                 }
             }
             if (body == null) {
+                colony.inventory().ensureObservedResident(member);
+                complete = false;
                 unloaded++;
                 continue;
             }
             ResidentEntity person = body;
-            Map<UUID, Integer> deficits = supplies.deficits(body, profile);
+            InventorySnapshot.Resident resident = snapshot.residents().get(member);
+            if (resident == null || resident.state() != InventorySnapshot.State.OBSERVED) {
+                colony.inventory().ensureObservedResident(member);
+                complete = false;
+                continue;
+            }
+            Map<UUID, Integer> deficits = supplies.observedDeficits(body, profile, resident);
             boolean blocked =
                 profile.entries().stream()
                 .filter(entry -> entry.slot().isPresent())
                 .anyMatch(
                 entry ->
-                    !person.getItemBySlot(entry.slot().orElseThrow()).isEmpty()
-                        && !entry.matches(
-                        person.getItemBySlot(entry.slot().orElseThrow())));
+                    resident.equipment().containsKey(entry.slot().orElseThrow())
+                        && !resident.equipment().get(entry.slot().orElseThrow()).stackCopy().isEmpty()
+                        && !entry.matches(resident.equipment().get(entry.slot().orElseThrow()).stackCopy()));
             if (blocked
                 || deficits.values().stream().anyMatch(count -> count > 0)
                 || profile.entries().isEmpty() && profile.legacy().isPresent()) {
                 incomplete++;
             }
             ServerLevel level = (ServerLevel) body.level();
+            if (supplies.unresolvedReservations(level, snapshot)) {
+                complete = false;
+            }
             List<WorldPos> nearby =
                 colony.storesIn(level.dimension()).stream()
                 .filter(
@@ -79,13 +99,19 @@ public record ProfileShortages(
                     if (left == 0) {
                         break;
                     }
-                    var sourceStock = supplies.source(level, source);
-                    if (sourceStock.isEmpty()) {
+                    var sourceStock = snapshot.store(source);
+                    if (sourceStock.isEmpty() || sourceStock.get().state() != InventorySnapshot.State.OBSERVED) {
+                        colony.inventory().ensureObserved(Stash.at(source));
+                        complete = false;
                         continue;
                     }
-                    WorldPos anchor = WorldPos.of(level, Containers.anchor(level, source.block(level)));
-                    stock.computeIfAbsent(anchor, ignored -> supplies.unreserved(level, source, sourceStock.get()));
-                    SimpleContainer available = stock.get(anchor);
+                    if (!StoreRule.takes(sourceStock.get().rules())) {
+                        continue;
+                    }
+                    var store = sourceStock.get();
+                    stock.computeIfAbsent(store.stash(),
+                        ignored -> supplies.observedUnreserved(level, snapshot, store));
+                    SimpleContainer available = stock.get(store.stash());
                     while (left > 0) {
                         ItemStack taken = Containers.extract(available, entry::matches, left);
                         if (taken.isEmpty()) {
@@ -97,6 +123,7 @@ public record ProfileShortages(
                 unavailable.merge(entry.id(), left, Integer::sum);
             }
         }
-        return new ProfileShortages(members.size(), incomplete, unloaded, Map.copyOf(missing), Map.copyOf(unavailable));
+        return new ProfileShortages(members.size(), incomplete, unloaded, Map.copyOf(missing),
+            Map.copyOf(unavailable), complete);
     }
 }

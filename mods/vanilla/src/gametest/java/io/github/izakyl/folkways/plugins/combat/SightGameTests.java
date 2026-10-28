@@ -70,7 +70,7 @@ public final class SightGameTests {
         helper.assertTrue(SpottedTargets.maximumSight(f.observer) == 112,
             "the optical scan and sentry ring bound stays below the 128-block hard cap");
         f.observer.pack().clearContent();
-        helper.assertTrue(SpottedTargets.maximumSight(f.observer) == 56, "missing optics immediately shrink the bound");
+        helper.assertTrue(SpottedTargets.maximumSight(f.observer) == 112, "assigned optics retain the bound");
         helper.succeed();
     }
 

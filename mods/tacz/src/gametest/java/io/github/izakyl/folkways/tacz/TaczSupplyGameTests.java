@@ -163,6 +163,7 @@ public final class TaczSupplyGameTests {
             "threshold equality does not collect");
         ItemStack carried = body.pack().getItem(0);
         ((IGun) carried.getItem()).setCurrentAmmoCount(carried, 7);
+        body.pack().setChanged();
         helper.assertValueEqual(
             scene.supplies.urges(TaczWeaponGameTests.worker(body), Optional.empty(), Long.MIN_VALUE, 0).size(),
             1,

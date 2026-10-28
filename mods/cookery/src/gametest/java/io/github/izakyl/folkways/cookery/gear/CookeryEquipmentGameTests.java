@@ -93,23 +93,40 @@ public final class CookeryEquipmentGameTests {
     }
 
     @GameTest(template = "empty")
+    public static void clothingWaitsForTheResidentObservation(GameTestHelper helper) {
+        try (var rig = new Rig(helper)) {
+            rig.body.setItemSlot(EquipmentSlot.HEAD, new ItemStack(ModItems.STRAW_HAT.get()));
+            rig.colony.inventory().changedResident(rig.body.id());
+            Node task = rig.tools.decorate(Grown.of(rig.seed(rig.body))).nodes().getFirst();
+            helper.assertTrue(task.planned(rig.level).isEmpty(), "the clothing task is adopted");
+            helper.assertFalse(task.ready(rig.level), "unknown equipment cannot be treated as an empty slot");
+            rig.observe();
+            helper.assertTrue(task.ready(rig.level), "the observed personal hat satisfies the clothing request");
+            rig.finish(task, rig.body);
+            helper.assertTrue(rig.body.getItemBySlot(EquipmentSlot.HEAD).is(ModItems.STRAW_HAT.get()),
+                "the observed personal hat remains with its owner");
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
     public static void twoRealFarmersBorrowOneNamedHatInTurnAndReturnItsOriginalComponents(GameTestHelper helper) {
         try (var rig = new Rig(helper)) {
             ItemStack expected = rig.stockHat();
             ResidentEntity other = rig.addBody();
             Node first = rig.gather(rig.body);
             Node second = rig.gather(other);
-            helper.assertTrue(first.ready(rig.level), "the first task can borrow the one real store hat");
+            helper.assertTrue(rig.ready(first), "the first task can borrow the one real store hat");
             Node action = rig.prepare(first, rig.body);
             helper.assertTrue(ItemStack.matches(expected, rig.body.getItemBySlot(EquipmentSlot.HEAD)), "the named physical hat occupies the first native HEAD");
             helper.assertTrue(rig.body.pack().isEmpty(), "wearing creates no pack copy");
-            helper.assertFalse(second.ready(rig.level), "a second farmer cannot reserve the already borrowed real hat");
+            helper.assertFalse(rig.ready(second), "a second farmer cannot reserve the already borrowed real hat");
             rig.execute(first, action, rig.body);
             rig.finish(first, rig.body);
             helper.assertTrue(rig.level.getBlockState(rig.grass.above()).isAir(), "the original native grass task actually ran");
             helper.assertTrue(rig.body.getItemBySlot(EquipmentSlot.HEAD).isEmpty(), "the first task returns its hat rather than keeping a permanent kit");
             rig.level.setBlockAndUpdate(rig.grass.above(), Blocks.SHORT_GRASS.defaultBlockState());
-            helper.assertTrue(second.ready(rig.level), "the same one returned hat becomes available to the other farmer");
+            helper.assertTrue(rig.ready(second), "the same one returned hat becomes available to the other farmer");
             rig.finish(second, other);
             helper.assertTrue(other.getItemBySlot(EquipmentSlot.HEAD).isEmpty(), "the second task also leaves its resident bare-headed");
             helper.assertValueEqual(rig.hats(), 1L, "two residents and two native tasks conserve one physical hat");
@@ -130,8 +147,9 @@ public final class CookeryEquipmentGameTests {
             });
             Node first = rig.gather(rig.body);
             Node second = rig.gather(other);
-            helper.assertFalse(first.ready(rig.level), "missing clothing leaves the first resident outside the borrowing task");
-            helper.assertFalse(second.ready(rig.level), "the second resident stays free to craft the missing shared hat too");
+            helper.assertFalse(rig.ready(first),
+                "missing clothing leaves the first resident outside the borrowing task");
+            helper.assertFalse(rig.ready(second), "the second resident stays free to craft the missing shared hat too");
             for (int tick = 0; tick < 60; tick++) rig.tools.tick(rig.level.getServer());
             var deliveries = submitted.stream().filter(node -> node instanceof Delivery).map(node -> (Delivery) node).toList();
             helper.assertValueEqual(deliveries.size(), 1, "two adopted native grass tasks merge exactly one bootstrap delivery");
@@ -149,6 +167,7 @@ public final class CookeryEquipmentGameTests {
             rig.stockHat();
             Node task = rig.gather(rig.body);
             rig.prepare(task, rig.body);
+            rig.observe();
             task.ended(rig.level, Ending.REVOKED);
             helper.assertTrue(rig.body.getItemBySlot(EquipmentSlot.HEAD).isEmpty(), "cancelling immediately unwears only the actual loan");
             var returns = rig.tools.goals(rig.colony.works().view(rig.level));
@@ -189,6 +208,7 @@ public final class CookeryEquipmentGameTests {
             ItemStack playerHat = new ItemStack(ModItems.STRAW_HAT_FLOWER.get());
             playerHat.set(DataComponents.CUSTOM_NAME, Component.literal("player property"));
             rig.body.setItemSlot(EquipmentSlot.HEAD, playerHat);
+            rig.colony.inventory().changedResident(rig.body.id());
             rig.finish(rig.gather(rig.body), rig.body);
             helper.assertTrue(ItemStack.matches(playerHat, rig.body.getItemBySlot(EquipmentSlot.HEAD)), "native task may use the player's suitable hat but never unwears it");
             helper.assertTrue(rig.tools.goals(rig.colony.works().view(rig.level)).isEmpty(), "player equipment does not become shared return inventory");
@@ -203,6 +223,7 @@ public final class CookeryEquipmentGameTests {
         try (var rig = new Rig(helper)) {
             rig.stockHat();
             rig.body.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.DIAMOND_HELMET));
+            rig.colony.inventory().changedResident(rig.body.id());
             Node seed = rig.decorate(rig.seed(rig.body));
             helper.assertTrue(seed.planned(rig.level).isPresent(), "native hat loot cannot be assigned over a player's unrelated helmet");
             helper.assertTrue(rig.body.getItemBySlot(EquipmentSlot.HEAD).is(Items.DIAMOND_HELMET), "the unrelated helmet remains physical native equipment");
@@ -220,7 +241,7 @@ public final class CookeryEquipmentGameTests {
             rig.store.setItem(1, new ItemStack(ModItems.FARMER_CHEST_PLATE.get()));
             rig.store.setItem(2, new ItemStack(ModItems.FARMER_LEGGINGS.get()));
             Node task = rig.paddy();
-            helper.assertFalse(task.ready(rig.level), "a set missing boots cannot occupy a resident");
+            helper.assertFalse(rig.ready(task), "a set missing boots cannot occupy a resident");
             var turn = ((Workload.Within) task.spec().workload()).next(rig.level, rig.worker(rig.body));
             helper.assertTrue(turn instanceof Workload.Within.Turn.Wait, "even a start race waits before moving any partial clothing");
             helper.assertTrue(rig.body.pack().isEmpty(), "no half-set is removed from shared storage");
@@ -269,7 +290,7 @@ public final class CookeryEquipmentGameTests {
             Node task = rig.gather(rig.body);
             rig.prepare(task, rig.body);
             CompoundTag saved = new CompoundTag(); rig.body.saveWithoutId(saved);
-            rig.body.discard();
+            rig.body.remove(net.minecraft.world.entity.Entity.RemovalReason.UNLOADED_TO_CHUNK);
             rig.tools.closed(Closing.SHUTDOWN);
             ResidentEntity restoredBody = PersonBody.RESIDENT.get().create(rig.level);
             restoredBody.load(saved); rig.level.addFreshEntity(restoredBody); rig.bodies.add(restoredBody);
@@ -316,10 +337,11 @@ public final class CookeryEquipmentGameTests {
     public static void suitablePlayerEquipmentReservesNoFictionalBorrowingCargoCell(GameTestHelper helper) {
         try (var rig = new Rig(helper)) {
             rig.body.setItemSlot(EquipmentSlot.HEAD, new ItemStack(ModItems.STRAW_HAT_FLOWER.get()));
+            rig.colony.inventory().changedResident(rig.body.id());
             Node task = rig.gather(rig.body);
             helper.assertTrue(task.spec().leaves().isEmpty() && task.planningLeaves(List.of()).isEmpty(),
                 "a task using a pre-existing player hat adds zero borrowed-item cargo cells before and after adoption");
-            helper.assertTrue(task.ready(rig.level), "the task can start without a shared-store hat or phantom pack room");
+            helper.assertTrue(rig.ready(task), "the task can start without a shared-store hat or phantom pack room");
             rig.finish(task, rig.body);
             helper.assertTrue(rig.body.getItemBySlot(EquipmentSlot.HEAD).is(ModItems.STRAW_HAT_FLOWER.get()), "zero-budget use never takes ownership of the player hat");
         }
@@ -360,7 +382,8 @@ public final class CookeryEquipmentGameTests {
             for (Grown returning : rig.tools.goals(rig.colony.works().view(rig.level))) rig.finish(returning.nodes().getFirst(), rig.body);
             helper.assertTrue(ItemStack.matches(expected, rig.store.getItem(0)), "a disallowed old hat is returned unchanged, never destroyed or replaced");
             Node next = rig.gather(rig.body);
-            helper.assertFalse(next.ready(rig.level), "new work does not borrow the old store hat outside the new clothing selector");
+            helper.assertFalse(rig.ready(next),
+                "new work does not borrow the old store hat outside the new clothing selector");
             helper.assertTrue(rig.body.getItemBySlot(EquipmentSlot.HEAD).isEmpty(), "no unselected physical hat is worn");
             next.ended(rig.level, Ending.REVOKED);
         }
@@ -467,6 +490,16 @@ public final class CookeryEquipmentGameTests {
             tools = nativeService ? colony.works().service(CookeryContent.ID, CookeryPresence.class).orElseThrow().tools()
                 : new TaskTools(colony.works(), level.getServer());
         }
+
+        void observe() {
+            io.github.izakyl.folkways.cookery.InventoryObservations.publish(colony, level);
+        }
+
+        boolean ready(Node work) {
+            observe();
+            return work.ready(level);
+        }
+
         ResidentEntity addBody() {
             var actor = PersonBody.RESIDENT.get().create(level); actor.setNoAi(true);
             actor.moveTo(grass.getX() + 0.5, grass.getY() + 1, grass.getZ() + 1.5);
@@ -512,7 +545,8 @@ public final class CookeryEquipmentGameTests {
                 public Outcome commit(ServerLevel level, Worker who) { return GrassSources.gather(level, who, grass.above(), Set.of(grass)); }
             };
         }
-        Node decorate(Node node) { return tools.decorate(Grown.of(node)).nodes().getFirst(); }
+
+        Node decorate(Node node) { observe(); return tools.decorate(Grown.of(node)).nodes().getFirst(); }
         Node gather(Body actor) {
             Node node = decorate(seed(actor));
             helper.assertTrue(node.spec().workload() instanceof Workload.Within, "real Cookery task is wrapped in task-scoped borrowing");
@@ -547,7 +581,9 @@ public final class CookeryEquipmentGameTests {
         }
         Node prepare(Node task, Body actor) {
             for (int step = 0; step < 8; step++) {
+                observe();
                 var turn = ((Workload.Within) task.spec().workload()).next(level, worker(actor));
+                if (turn instanceof Workload.Within.Turn.Wait) { continue; }
                 helper.assertTrue(turn instanceof Workload.Within.Turn.Piece, "actual storage preparation has a physical piece: " + turn);
                 Node piece = ((Workload.Within.Turn.Piece) turn).node(); stand(piece, actor);
                 if (actor.mob().getItemBySlot(EquipmentSlot.HEAD).is(TagMod.STRAW_HAT)) return piece;
@@ -566,7 +602,9 @@ public final class CookeryEquipmentGameTests {
         }
         void finish(Node task, Body actor) {
             for (int step = 0; step < 24; step++) {
+                observe();
                 var turn = ((Workload.Within) task.spec().workload()).next(level, worker(actor));
+                if (turn instanceof Workload.Within.Turn.Wait) { continue; }
                 if (turn instanceof Workload.Within.Turn.Leave) {
                     helper.assertTrue(Commit.run(level, task, worker(actor)) instanceof Outcome.Done, "completed borrowing settles after physical returns");
                     task.released(level, worker(actor), Ending.DONE); task.ended(level, Ending.DONE); return;

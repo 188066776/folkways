@@ -2,11 +2,13 @@ package io.github.izakyl.folkways.plugins.wares;
 
 import io.github.izakyl.folkways.core.api.colony.Closing;
 import io.github.izakyl.folkways.core.api.colony.Colony;
+import io.github.izakyl.folkways.core.api.inventory.InventorySnapshot;
 import io.github.izakyl.folkways.core.api.colony.ColonyView;
 import io.github.izakyl.folkways.core.api.colony.Sweep;
 import io.github.izakyl.folkways.core.api.terms.Containers;
 import io.github.izakyl.folkways.core.api.terms.ItemSpec;
 import io.github.izakyl.folkways.core.api.terms.Reach;
+import io.github.izakyl.folkways.core.api.terms.Stash;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
 import io.github.izakyl.folkways.core.api.work.Grown;
 import io.github.izakyl.folkways.core.api.work.Workshop;
@@ -208,6 +210,12 @@ final class WaresPresence implements Facing {
         if (!view.blocks(WaresContent.STORE).contains(anchor)) {
             return List.of();
         }
+        WorldPos where = WorldPos.of(level, anchor);
+        var observed = colony.inventory().snapshot().store(where);
+        if (observed.isEmpty() || observed.get().state() != InventorySnapshot.State.OBSERVED) {
+            colony.inventory().ensureObserved(Stash.at(where));
+            return List.of(Line.text(Component.translatable("folkways.settlers.checking_stock")));
+        }
         List<Sentence.Token.Ware> most = stock(level, anchor);
         return most.isEmpty() ? List.of() : List.of(Line.told(Sentence.wares(Sentence.glyph("stock"), most)));
     }
@@ -245,13 +253,13 @@ final class WaresPresence implements Facing {
         return new Placard(id, new Placard.Outline.Box(min, max), lines);
     }
 
-    private static List<Sentence.Token.Ware> stock(ServerLevel level, BlockPos at) {
+    private List<Sentence.Token.Ware> stock(ServerLevel level, BlockPos at) {
         Map<ItemSpec, Long> held = new LinkedHashMap<>();
-        Containers.at(level, at)
-            .ifPresent(
-            store -> {
-                for (int slot = 0; slot < store.getContainerSize(); slot++) {
-                    ItemStack stack = store.getItem(slot);
+        WorldPos where = WorldPos.of(level, at);
+        colony.inventory().snapshot().stores().values().stream()
+            .filter(store -> store.aliases().contains(where)).findFirst().ifPresent(store -> {
+                for (var slot : store.slots()) {
+                    ItemStack stack = slot.stackCopy();
                     if (!stack.isEmpty()) {
                         held.merge(Goods.specOf(stack), (long) stack.getCount(), Long::sum);
                     }

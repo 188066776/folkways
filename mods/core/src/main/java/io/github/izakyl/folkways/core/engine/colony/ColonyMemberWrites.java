@@ -2,6 +2,7 @@ package io.github.izakyl.folkways.core.engine.colony;
 
 import io.github.izakyl.folkways.core.api.ground.BlockChanges;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
+import io.github.izakyl.folkways.core.api.terms.Stash;
 import io.github.izakyl.folkways.core.engine.travel.local.LocalGrounds;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
@@ -53,6 +54,7 @@ public final class ColonyMemberWrites {
             WorldPos at = WorldPos.of(level, cell);
             for (ColonyData colony : colonies) {
                 colony.holdings().reconcile(server, at);
+                colony.inventory().changed(Stash.at(at));
             }
         }));
     }
@@ -93,6 +95,10 @@ public final class ColonyMemberWrites {
             return;
         }
         ColonyRegistry registry = ColonyRegistry.get(serverLevel.getServer());
+        WorldPos at = WorldPos.of(serverLevel, pos);
+        for (ColonyData colony : registry.colonies()) {
+            colony.inventory().mutated(serverLevel, Stash.at(at));
+        }
         if (ColonyMembership.owner(blockEntity).filter(registry::isRazed).isPresent()) {
             ColonyMembership.leave(blockEntity);
         }

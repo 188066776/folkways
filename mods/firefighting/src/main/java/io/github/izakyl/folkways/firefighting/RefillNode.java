@@ -19,7 +19,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.BooleanSupplier;
-import javax.annotation.Nullable;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceLocation;
@@ -40,13 +39,20 @@ final class RefillNode implements Node {
     private final WorldPos source;
     private final BooleanSupplier enabled;
     private final boolean waterSource;
+    private final Runnable stale;
 
     RefillNode(UUID worker, WorldPos source, Stances stances, BooleanSupplier enabled) {
-        this(worker, source, stances, enabled, false);
+        this(worker, source, stances, enabled, false, () -> { });
     }
 
     RefillNode(UUID worker, WorldPos source, Stances stances, BooleanSupplier enabled, boolean waterSource) {
+        this(worker, source, stances, enabled, waterSource, () -> { });
+    }
+
+    RefillNode(UUID worker, WorldPos source, Stances stances, BooleanSupplier enabled, boolean waterSource,
+               Runnable stale) {
         this.worker = worker;
+        this.stale = stale;
         this.source = source;
         this.waterSource = waterSource;
         this.enabled = enabled;
@@ -80,6 +86,7 @@ final class RefillNode implements Node {
         ItemStack stack = ExtinguisherAdapter.find(who.pack());
         IFluidHandler target = stack.getCapability(Capabilities.FluidHandler.ITEM);
         if (target == null) {
+            stale.run();
             return Outcome.failed(DamageControlRefusal.NO_WATER);
         }
         BlockPos at = source.block(level);
@@ -123,23 +130,13 @@ final class RefillNode implements Node {
                 }
             }
         }
+        stale.run();
         return Outcome.failed(DamageControlRefusal.NO_WATER);
     }
 
-    static boolean canSupply(ServerLevel level, WorldPos source, @Nullable Container store) {
+    static boolean canSupply(ServerLevel level, WorldPos source) {
         var block = level.getCapability(Capabilities.FluidHandler.BLOCK, source.block(level), null);
-        if (block != null && !block.drain(new FluidStack(Fluids.WATER, 1), FluidAction.SIMULATE).isEmpty()) {
-            return true;
-        }
-        if (store != null) {
-            for (int slot = 0; slot < store.getContainerSize(); slot++) {
-                var item = store.getItem(slot).getCapability(Capabilities.FluidHandler.ITEM);
-                if (item != null && !item.drain(new FluidStack(Fluids.WATER, 1000), FluidAction.SIMULATE).isEmpty()) {
-                    return true;
-                }
-            }
-        }
-        return false;
+        return block != null && !block.drain(new FluidStack(Fluids.WATER, 1), FluidAction.SIMULATE).isEmpty();
     }
 
     static int transfer(IFluidHandler source, IFluidHandler target) {

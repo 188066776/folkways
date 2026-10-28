@@ -2,6 +2,7 @@ package io.github.izakyl.folkways.create.dispatch;
 
 import io.github.izakyl.folkways.create.FolkwaysCreateConfig;
 import io.github.izakyl.folkways.core.api.Declaring;
+import io.github.izakyl.folkways.core.api.inventory.InventoryProviders;
 import io.github.izakyl.folkways.core.api.colony.Colonies;
 import io.github.izakyl.folkways.core.api.colony.Colony;
 import io.github.izakyl.folkways.effect.perk.Perk;
@@ -63,6 +64,7 @@ public final class DispatchContent {
     public static void declare(Declaring declaring) {
         CreatePackageNetwork network = new CreatePackageNetwork();
         PackageNetworks.install(network);
+        InventoryProviders.register(ID, new DispatchInventory());
         NeoForge.EVENT_BUS.addListener(network::tick);
         NeoForge.EVENT_BUS.addListener(ServerStoppedEvent.class, event -> network.forgetServer());
         declaring.vocation(SPEC.ordered(800));

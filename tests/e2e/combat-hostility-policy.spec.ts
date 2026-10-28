@@ -246,9 +246,8 @@ var colony = Colonies.mint(level.getServer());
 var resident = PersonBody.RESIDENT.get().create(level);
 resident.setNoAi(true);
 resident.moveTo(x + 10.5, y, z + .5);
-colony.hold(PersonContent.ID, Held.Entity.of(resident)).orElseThrow();
-resident.joinColony(colony.id());
 level.addFreshEntity(resident);
+colony.hold(PersonContent.ID, Held.Entity.of(resident)).orElseThrow();
 String kind = args.string("kind");
 Mob monster = switch (kind) {
   case "spider" -> EntityType.SPIDER.create(level);

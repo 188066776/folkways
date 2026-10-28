@@ -8,13 +8,21 @@ import io.github.izakyl.folkways.core.api.colony.ColonyContext;
 import io.github.izakyl.folkways.core.api.colony.ColonyLifecycle;
 import io.github.izakyl.folkways.core.api.colony.ColonyView;
 import io.github.izakyl.folkways.core.api.colony.Contributions;
+import io.github.izakyl.folkways.core.api.inventory.ColonyInventory;
+import io.github.izakyl.folkways.core.api.inventory.InventoryFeedback;
 import io.github.izakyl.folkways.core.api.colony.Held;
 import io.github.izakyl.folkways.core.api.colony.Holding;
+import io.github.izakyl.folkways.core.api.colony.PointSites;
 import io.github.izakyl.folkways.core.api.colony.Release;
 import io.github.izakyl.folkways.core.api.resident.Resident;
+import io.github.izakyl.folkways.core.api.resident.ResidentKinds;
 import io.github.izakyl.folkways.core.api.resident.body.Body;
+import io.github.izakyl.folkways.core.api.resident.body.Bodies;
 import io.github.izakyl.folkways.core.api.terms.StoreRule;
+import io.github.izakyl.folkways.core.api.terms.Containers;
+import io.github.izakyl.folkways.core.api.terms.Stash;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
+import io.github.izakyl.folkways.core.api.terms.WorldSpaces;
 import io.github.izakyl.folkways.core.api.work.Ending;
 import io.github.izakyl.folkways.core.api.work.Grown;
 import io.github.izakyl.folkways.core.api.work.Stall;
@@ -62,6 +70,7 @@ public final class ColonyWorks extends Stretch implements Colony {
 
     private final StorePlaces stores = new StorePlaces();
     private final StorePlaces withheld = new StorePlaces();
+    private long inventoryMembershipRevision;
 
     // What the labor in each dimension last said stands still there.
     private final Map<ResourceKey<Level>, List<Stall>> stalls = new HashMap<>();
@@ -263,6 +272,8 @@ public final class ColonyWorks extends Stretch implements Colony {
     }
 
     private void clearWork() {
+        colony.inventory().clear();
+        inventoryMembershipRevision++;
         workshops.clear();
         stores.clear();
         withheld.clear();
@@ -294,6 +305,7 @@ public final class ColonyWorks extends Stretch implements Colony {
     void settleIn(ColonyRuntime.Run run) {
         settled = true;
         server = run.server();
+        residents().forEach(resident -> colony.inventory().joined(resident.id()));
         for (Contributions.Entry entry : Contributions.all()) {
             Scope scope = opened(new Scope(entry.owner()));
             scopes.add(scope);
@@ -325,10 +337,26 @@ public final class ColonyWorks extends Stretch implements Colony {
     }
 
     @Override
+    public ColonyInventory inventory() {
+        return colony.inventory();
+    }
+
+    @Override
+    public InventoryFeedback inventoryFeedback() {
+        return colony.inventory();
+    }
+
+    public long inventoryMembershipRevision() {
+        return inventoryMembershipRevision;
+    }
+
+    @Override
     public void publish(ResourceLocation owner, ResourceKey<Level> dimension,
                         Collection<Workshop> offering) {
         if (workshops.publish(owner, dimension, offering.stream().map(workshop ->
                 io.github.izakyl.folkways.core.api.work.WorkDecorators.apply(this, workshop)).toList())) {
+            inventoryMembershipRevision++;
+            colony.inventory().offered(dimension, colony, inventoryMembershipRevision);
             listener(dimension).ifPresent(Listening::offered);
         }
     }
@@ -336,18 +364,42 @@ public final class ColonyWorks extends Stretch implements Colony {
     @Override
     public void stores(ResourceLocation owner, ResourceKey<Level> dimension, Collection<WorldPos> offering) {
         if (stores.publish(owner, dimension, List.copyOf(offering))) {
+            inventoryMembershipRevision++;
+            colony.inventory().offered(dimension, colony, inventoryMembershipRevision);
+            if (server != null) {
+                colony.inventory().published(server, dimension);
+            }
             listener(dimension).ifPresent(Listening::offered);
         }
     }
 
     @Override
     public Optional<net.minecraft.world.Container> store(ServerLevel level, WorldPos at) {
-        return storesIn(level.dimension()).contains(at)
-            ? io.github.izakyl.folkways.core.engine.plan.Stores.at(level, at) : Optional.empty();
+        List<WorldPos> offered = storesIn(level.dimension());
+        if (offered.contains(at)) {
+            return Stores.at(level, at);
+        }
+        BlockPos anchor = WorldSpaces.storage(level, at).filter(level::isLoaded)
+            .map(pos -> Containers.anchor(level, pos)).orElse(null);
+        if (anchor == null) {
+            return Optional.empty();
+        }
+        var known = inventory().snapshot().stores().get(Stash.at(WorldPos.of(level, anchor)));
+        if (known != null && known.aliases().stream().filter(offered::contains).anyMatch(alias ->
+            WorldSpaces.storage(level, alias).filter(level::isLoaded)
+                .map(pos -> Containers.anchor(level, pos).equals(anchor)).orElse(false))) {
+            return Stores.at(level, at);
+        }
+        return Optional.empty();
     }
 
     @Override
     public List<StoreRule> storeRules(WorldPos at) {
+        for (var store : inventory().snapshot().stores().values()) {
+            if (store.aliases().contains(at)) {
+                return Stores.rulesAt(store.aliases());
+            }
+        }
         return Stores.rulesAt(at);
     }
 
@@ -377,18 +429,21 @@ public final class ColonyWorks extends Stretch implements Colony {
     @Override
     public void withhold(ResourceLocation owner, ResourceKey<Level> dimension, Collection<WorldPos> answered) {
         if (withheld.publish(owner, dimension, List.copyOf(answered))) {
+            inventoryMembershipRevision++;
+            colony.inventory().offered(dimension, colony, inventoryMembershipRevision);
             listener(dimension).ifPresent(Listening::offered);
         }
     }
 
     public Set<WorldPos> withheldIn(ResourceKey<Level> dimension) {
-        return Set.copyOf(withheld.in(dimension));
+        return withheld.setIn(dimension);
     }
 
     @Override
     public void rule(ResourceLocation owner, ResourceKey<Level> dimension, Collection<StoreRule> ruling) {
         if (rules.publish(owner, dimension, List.copyOf(ruling))) {
             Stores.ruled(id(), rules.all());
+            colony.inventory().rulesChanged();
             listener(dimension).ifPresent(Listening::offered);
         }
     }
@@ -413,9 +468,9 @@ public final class ColonyWorks extends Stretch implements Colony {
     @Override
     public Optional<Holding> hold(ResourceLocation owner, Held what) {
         MinecraftServer running = required();
-        if (what instanceof Held.Point point && io.github.izakyl.folkways.core.api.terms.WorldSpaces.resolve(running, point.cell())
+        if (what instanceof Held.Point point && WorldSpaces.resolve(running, point.cell())
                 .filter(where -> where.level().isLoaded(where.cell())
-                    && io.github.izakyl.folkways.core.api.colony.PointSites.accepts(owner, where.level(), where.cell())).isEmpty()) {
+                    && PointSites.accepts(owner, where.level(), where.cell())).isEmpty()) {
             return Optional.empty();
         }
         if (ColonyRegistry.get(running).taken(what)) {
@@ -464,11 +519,15 @@ public final class ColonyWorks extends Stretch implements Colony {
     @Override
     public void entered(Body body) {
         colony.holdings().entered(body);
+        if (holdingOf(body.id()).isPresent()) {
+            colony.inventory().entered(body);
+        }
     }
 
     @Override
     public void exited(UUID entity) {
         colony.holdings().exited(entity);
+        colony.inventory().unloaded(entity);
     }
 
     @Override
@@ -484,6 +543,7 @@ public final class ColonyWorks extends Stretch implements Colony {
     @Override
     public void carriedOff(UUID entity) {
         colony.holdings().carriedOff(entity);
+        colony.inventory().unloaded(entity);
     }
 
     @Override
@@ -492,12 +552,26 @@ public final class ColonyWorks extends Stretch implements Colony {
     }
 
     private void held(Holding holding) {
+        if (holding.what() instanceof Held.Entity entity && ResidentKinds.of(entity.type()).isPresent()) {
+            colony.inventory().joined(entity.entity());
+            for (ServerLevel level : required().getAllLevels()) {
+                Entity present = level.getEntity(entity.entity());
+                if (present != null) {
+                    Bodies.of(present)
+                        .ifPresent(body -> colony.inventory().entered(body));
+                    break;
+                }
+            }
+        }
         for (Scope scope : List.copyOf(scopes)) {
             scope.heard(holding.owner(), watch -> watch.held(holding));
         }
     }
 
     void released(Holding holding, Release why) {
+        if (holding.what() instanceof Held.Entity entity) {
+            colony.inventory().left(entity.entity());
+        }
         for (Scope scope : List.copyOf(scopes)) {
             scope.heard(holding.owner(), watch -> watch.released(holding, why));
         }
@@ -581,6 +655,15 @@ public final class ColonyWorks extends Stretch implements Colony {
         if (over()) {
             return;
         }
+        for (ServerLevel level : server.getAllLevels()) {
+            Map<UUID, Body> present = new LinkedHashMap<>();
+            for (Body body : colony.holdings().bodiesIn(level)) {
+                if (!colony.holdings().isCarriedOff(body.id())) {
+                    present.put(body.id(), body);
+                }
+            }
+            colony.inventory().advance(level, colony, present);
+        }
         for (Scope scope : List.copyOf(scopes)) {
             long began = System.nanoTime();
             scope.ticks.forEach(callback -> callback.accept(server));
@@ -632,7 +715,9 @@ public final class ColonyWorks extends Stretch implements Colony {
         }
 
         public ResourceLocation owner() { return owner; }
+
         public Colony colony() { return ColonyWorks.this; }
+
         public MinecraftServer server() { return required(); }
 
         public void urges(BiFunction<Worker, ColonyView, List<Urge>> source) {
@@ -698,6 +783,11 @@ public final class ColonyWorks extends Stretch implements Colony {
                         cleanup.run("withheld stores", () -> withheld.forget(owner));
                         cleanup.run("rules", () -> rules.forget(owner));
                         cleanup.run("published rules", () -> Stores.ruled(id(), rules.all()));
+                        inventoryMembershipRevision++;
+                        for (var dimension : stores.dimensions()) {
+                            colony.inventory().offered(dimension, colony, inventoryMembershipRevision);
+                        }
+                        colony.inventory().rulesChanged();
                         cleanup.run("asked work", () -> forgetAsked(owner));
                     }
                 }

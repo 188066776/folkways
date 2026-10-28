@@ -45,6 +45,7 @@
   "folkways.loadouts.summary": "%s · %s assigned · %s incomplete sets · %s unloaded",
   "folkways.loadouts.missing": "Assigned residents still need %s items · Warehouse short by %s items",
   "folkways.loadouts.unloaded": "Unloaded: equipment unknown",
+  "folkways.loadouts.inventory_pending": "Inventory observation pending",
   "folkways.loadouts.unavailable": "Unavailable legacy equipment: %s. Its ID and options are preserved.",
   "folkways.loadouts.manage": "Manage assignments in the colony book’s Loadout profiles page.",
   "folkways.loadouts.no_profile": "Residents without a loadout profile",
