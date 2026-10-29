@@ -26,7 +26,7 @@ import io.github.izakyl.folkways.core.engine.colony.ColonyRuntime;
 import io.github.izakyl.folkways.core.engine.labor.Labor;
 import io.github.izakyl.folkways.core.engine.plan.haul.Haul;
 import io.github.izakyl.folkways.core.engine.travel.PathfindingLoad;
-import io.github.izakyl.folkways.core.engine.travel.TravelBudget;
+import io.github.izakyl.folkways.core.engine.travel.TickBudget;
 import io.github.izakyl.folkways.core.engine.travel.local.LocalGrounds;
 import io.github.izakyl.folkways.core.shell.MobFitting;
 import io.github.izakyl.folkways.core.shell.structure.CreateObstacles;
@@ -155,7 +155,7 @@ public final class FolkwaysMod {
         io.github.izakyl.folkways.core.api.resident.body.TaskTools.clear();
         ColonyRuntime.closeAll(server);
         PathfindingLoad.forgetServer();
-        TravelBudget.forgetServer();
+        TickBudget.forgetServer();
         ColonyOverviews.forgetServer();
         Cadence.forgetServer();
         ColonyFront.forgetAll();

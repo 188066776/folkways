@@ -1,37 +1,43 @@
 package io.github.izakyl.folkways.core.engine.inventory;
 
-import io.github.izakyl.folkways.core.engine.EngineMode;
-import io.github.izakyl.folkways.core.engine.travel.TravelBudget;
+import io.github.izakyl.folkways.core.engine.travel.TickBudget;
+import java.util.function.LongSupplier;
 import net.minecraft.Util;
 
 public final class ObservationBudget {
 
+    private final LongSupplier clock;
+
     private long until;
     private long remaining;
     private int steps;
-    private boolean taken;
+    private long began;
 
     public ObservationBudget(int steps) {
+        this(steps, TickBudget.untimed() ? -1 : Long.MAX_VALUE, Util::getNanos);
+    }
+
+    ObservationBudget(int steps, long remaining, LongSupplier clock) {
         this.steps = steps;
-        remaining = EngineMode.singleThread() ? -1 : TravelBudget.wallClockNanos();
+        this.remaining = remaining;
+        this.clock = clock;
         resume();
     }
 
     public void resume() {
-        until = remaining < 0 ? -1 : Util.getNanos() + remaining;
+        began = clock.getAsLong();
+        until = remaining < 0 ? -1 : began + Math.min(remaining, TickBudget.remaining());
     }
 
     public void pause() {
         if (until >= 0) {
-            remaining = Math.max(0, until - Util.getNanos());
+            long elapsed = clock.getAsLong() - began;
+            remaining = Math.max(0, remaining - elapsed);
+            TickBudget.spent(elapsed);
         }
     }
 
     public boolean spent() {
-        if (!taken) {
-            taken = true;
-            return steps-- <= 0;
-        }
-        return steps-- <= 0 || until >= 0 && Util.getNanos() >= until;
+        return until >= 0 && clock.getAsLong() >= until || steps-- <= 0;
     }
 }

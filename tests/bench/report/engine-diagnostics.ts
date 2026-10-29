@@ -53,6 +53,8 @@ export function engineDiagnostics(log: string) {
     failed_batch_peak: planningFailures.length ? Math.max(...planningFailures) : 0,
     pending_peak: navigation.length ? Math.max(...navigation.map(n => n.asksPending)) : null,
     pending_last: navigation.at(-1)?.asksPending ?? null,
+    budget_skipped_ticks: budgets.length ? budgets.reduce((sum, b) => sum + b.skipped, 0) : null,
+    budget_ticks: budgets.length ? budgets.reduce((sum, b) => sum + b.ticks, 0) : null,
     labor_ms_per_tick_median: median(budgets.map(b => b.workAvgMicros / 1000)),
     labor_ms_per_tick_max: budgets.length ? Math.max(...budgets.map(b => b.workMaxMicros / 1000)) : null,
     publish_ms_per_tick_median: median(publishes.map(p =>

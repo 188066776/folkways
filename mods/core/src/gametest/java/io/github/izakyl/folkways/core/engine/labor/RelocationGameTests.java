@@ -3,6 +3,7 @@ package io.github.izakyl.folkways.core.engine.labor;
 import io.github.izakyl.folkways.FolkwaysMod;
 import io.github.izakyl.folkways.core.api.colony.Colonies;
 import io.github.izakyl.folkways.core.api.colony.Held;
+import io.github.izakyl.folkways.core.api.resident.body.Body;
 import io.github.izakyl.folkways.core.api.terms.Realm;
 import io.github.izakyl.folkways.core.api.terms.Stash;
 import io.github.izakyl.folkways.core.api.terms.WorldPos;
@@ -17,6 +18,7 @@ import io.github.izakyl.folkways.core.api.work.WorkSite;
 import io.github.izakyl.folkways.core.api.work.Worker;
 import io.github.izakyl.folkways.core.api.work.Workload;
 import io.github.izakyl.folkways.core.engine.colony.ColonyData;
+import io.github.izakyl.folkways.core.engine.inventory.InventoryTestWork;
 import io.github.izakyl.folkways.core.engine.plan.Asks;
 import io.github.izakyl.folkways.core.engine.travel.graph.WayGraph;
 import io.github.izakyl.folkways.plugins.person.PersonBody;
@@ -114,7 +116,7 @@ public final class RelocationGameTests {
                 Salvage oldSalvage = (Salvage) salvageField.get(labor);
                 helper.assertTrue(oldSalvage.dropped(drop).isPresent(), "the loose item must be tracked before migration");
                 oldSurvey.asked(new Asks(true, Set.of(), true, Set.of(), Long.MAX_VALUE));
-                oldSurvey.answer(level, data, Map.of(body.id(), body), ignored -> { });
+                answer(oldSurvey, level, data, body);
                 WorldPos old = WorldPos.of(level, cell);
                 helper.assertTrue(oldSurvey.known(WayGraph.UNBUILT, List.of()).world().stock().holds(Stash.at(old)),
                     "the old store reading must exist before relocation");
@@ -150,6 +152,7 @@ public final class RelocationGameTests {
                 helper.assertTrue(fresh.known(WayGraph.UNBUILT, List.of()).hands().isEmpty()
                         && fresh.known(WayGraph.UNBUILT, List.of()).world().stock().stashes().isEmpty(),
                     "old resident and store readings must not cross the migration boundary");
+                answer(fresh, level, data, body);
                 labor.run(level, Lanes.INLINE);
                 helper.assertTrue(reopened.get() == 1,
                     "work submitted while reopening must enter the new runtime exactly once");
@@ -160,10 +163,10 @@ public final class RelocationGameTests {
                     "tracked loose goods must be reoffered at their new address without changing the stack");
                 tracking.set(intoFrame);
                 fresh.asked(Asks.NONE);
-                helper.assertTrue(fresh.answer(level, data, Map.of(body.id(), body), ignored -> { }),
+                helper.assertTrue(answer(fresh, level, data, body),
                     "a delayed entity realm change must refresh the resident even with no pending asks");
                 fresh.asked(new Asks(true, Set.of(), false, Set.of(), Long.MAX_VALUE));
-                fresh.answer(level, data, Map.of(body.id(), body), ignored -> { });
+                answer(fresh, level, data, body);
                 var known = fresh.known(WayGraph.UNBUILT, List.of());
                 helper.assertTrue(known.hands().stream().anyMatch(hand -> hand.id().equals(body.id())
                         && hand.at().equals(WorldSpaces.at(body)))
@@ -187,6 +190,12 @@ public final class RelocationGameTests {
             colony.raze();
         }
         helper.succeed();
+    }
+
+    private static boolean answer(Survey survey, ServerLevel level, ColonyData data, Body body) {
+        boolean changed = survey.answer(level, data, Map.of(body.id(), body), ignored -> { });
+        InventoryTestWork.finish(data.inventory(), level.getServer());
+        return survey.answer(level, data, Map.of(body.id(), body), ignored -> { }) || changed;
     }
 
     private static Survey survey(ColonyLabor labor) throws ReflectiveOperationException {

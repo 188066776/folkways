@@ -1,8 +1,7 @@
 package io.github.izakyl.folkways.core.engine.travel.graph;
 
-import io.github.izakyl.folkways.core.engine.EngineMode;
 import io.github.izakyl.folkways.core.engine.travel.PathfindingLoad;
-import io.github.izakyl.folkways.core.engine.travel.TravelBudget;
+import io.github.izakyl.folkways.core.engine.travel.TickBudget;
 import net.minecraft.Util;
 
 public interface Slice {
@@ -14,12 +13,12 @@ public interface Slice {
     boolean spent(int expansions);
 
     static Slice forWindow() {
-        boolean counted = EngineMode.singleThread();
+        boolean counted = TickBudget.untimed();
         PathfindingLoad.sliceChosen(counted);
         if (counted) {
             return new Steps(SLICE_EXPANSIONS);
         }
-        return new WallClock(TravelBudget.wallClockNanos());
+        return new WallClock(TickBudget.remaining());
     }
 
     final class WallClock implements Slice {

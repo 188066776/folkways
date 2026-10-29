@@ -200,17 +200,21 @@ final class Survey {
             hands.keySet().retainAll(present.keySet());
         }
         ObservationBudget budget = new ObservationBudget(STEPS);
-        for (UUID resident : List.copyOf(handsOf)) {
-            if (budget.spent()) {
-                break;
+        try {
+            for (UUID resident : List.copyOf(handsOf)) {
+                if (budget.spent()) {
+                    break;
+                }
+                InventorySnapshot.Resident observed = inventory.residents().get(resident);
+                if (present.containsKey(resident) && (observed == null
+                    || observed.state() != InventorySnapshot.State.OBSERVED)) {
+                    continue;
+                }
+                handsOf.remove(resident);
+                answered |= readHand(colony, present.get(resident), resident, seen);
             }
-            InventorySnapshot.Resident observed = inventory.residents().get(resident);
-            if (present.containsKey(resident) && (observed == null
-                || observed.state() != InventorySnapshot.State.OBSERVED)) {
-                continue;
-            }
-            handsOf.remove(resident);
-            answered |= readHand(colony, present.get(resident), resident, seen);
+        } finally {
+            budget.pause();
         }
         return answered;
     }

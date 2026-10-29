@@ -25,7 +25,6 @@ import io.github.izakyl.folkways.core.api.work.Workshop;
 import io.github.izakyl.folkways.core.engine.colony.ColonyData;
 import io.github.izakyl.folkways.core.engine.plan.Stands;
 import io.github.izakyl.folkways.core.engine.plan.Stores;
-import io.github.izakyl.folkways.core.engine.travel.TravelBudget;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -41,7 +40,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import net.minecraft.Util;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceKey;
@@ -191,6 +189,7 @@ public final class InventoryIndex implements ColonyInventory, InventoryFeedback 
         }
         endpoints.put(observer, next);
         int immediate = STEPS;
+        ObservationBudget immediateBudget = new ObservationBudget(STEPS);
         for (WorldPos at : next) {
             Stash where = aliases.getOrDefault(at, Stash.at(at));
             if (!stores.containsKey(where)) {
@@ -199,7 +198,14 @@ public final class InventoryIndex implements ColonyInventory, InventoryFeedback 
                 topology++;
                 dirty(entry);
                 if (immediate-- > 0) {
-                    capture(level.getServer(), entry);
+                    immediateBudget.resume();
+                    try {
+                        if (!immediateBudget.spent()) {
+                            capture(level.getServer(), entry);
+                        }
+                    } finally {
+                        immediateBudget.pause();
+                    }
                 }
             }
         }
@@ -374,14 +380,12 @@ public final class InventoryIndex implements ColonyInventory, InventoryFeedback 
         }
         budget(level);
         budget.resume();
-        long began = Util.getNanos();
         try {
             while (!due.isEmpty() && !budget.spent()) {
                 step(level.getServer());
             }
         } finally {
             budget.pause();
-            TravelBudget.spent(Util.getNanos() - began);
         }
         publish();
     }
@@ -428,14 +432,12 @@ public final class InventoryIndex implements ColonyInventory, InventoryFeedback 
         if (entry.body != null && entry.body.mob().level() instanceof ServerLevel level && entry.queued) {
             budget(level);
             budget.resume();
-            long began = Util.getNanos();
             try {
                 if (!budget.spent()) {
                     capture(level.getServer(), entry);
                 }
             } finally {
                 budget.pause();
-                TravelBudget.spent(Util.getNanos() - began);
             }
         }
     }

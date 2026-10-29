@@ -46,17 +46,14 @@ export type NavBeat = {
 };
 
 export type BudgetBeat = {
-  ceilingMicros: number;
-  floorMicros: number;
+  slackAvgMicros: number;
+  grantedAvgMicros: number;
   ceilingCapMicros: number;
-  climbs: number;
-  backOffs: number;
   spentAvgMicros: number;
   spentMaxMicros: number;
   workAvgMicros: number;
   workMaxMicros: number;
-  late: number;
-  over: number;
+  skipped: number;
   ticks: number;
 };
 
@@ -84,24 +81,21 @@ export function isNavLine(line: string): boolean {
 
 function parseBudget(line: string): BudgetBeat | null {
   const head = line.match(
-    / budget=(\d+)us\(floor(\d+)us\/ceil(\d+)us\) aimd=\+(\d+)\/-(\d+)/);
+    / slack=(-?\d+)usavg budget=(\d+)usavg\(ceil(\d+)us\)/);
   if (!head) return null;
   const spent = line.match(/ spent=(\d+)usavg\/(\d+)usmax/);
   const work = line.match(/ work=(\d+)usavg\/(\d+)usmax/);
-  const over = line.match(/ over=(\d+)\/(\d+)/);
+  const skipped = line.match(/ skipped=(\d+)\/(\d+)/);
   return {
-    ceilingMicros: Number(head[1]),
-    floorMicros: Number(head[2]),
+    slackAvgMicros: Number(head[1]),
+    grantedAvgMicros: Number(head[2]),
     ceilingCapMicros: Number(head[3]),
-    climbs: Number(head[4]),
-    backOffs: Number(head[5]),
     spentAvgMicros: Number(spent?.[1] ?? 0),
     spentMaxMicros: Number(spent?.[2] ?? 0),
     workAvgMicros: Number(work?.[1] ?? 0),
     workMaxMicros: Number(work?.[2] ?? 0),
-    late: num(line, "late") ?? 0,
-    over: Number(over?.[1] ?? 0),
-    ticks: Number(over?.[2] ?? 0),
+    skipped: Number(skipped?.[1] ?? 0),
+    ticks: Number(skipped?.[2] ?? 0),
   };
 }
 

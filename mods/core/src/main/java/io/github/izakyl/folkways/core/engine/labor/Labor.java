@@ -7,7 +7,7 @@ import io.github.izakyl.folkways.core.engine.colony.ColonyMemberWrites;
 import io.github.izakyl.folkways.core.engine.colony.ColonyRegistry;
 import io.github.izakyl.folkways.core.engine.colony.ColonyWays;
 import io.github.izakyl.folkways.core.engine.travel.PathfindingLoad;
-import io.github.izakyl.folkways.core.engine.travel.TravelBudget;
+import io.github.izakyl.folkways.core.engine.travel.TickBudget;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -45,7 +45,7 @@ public final class Labor {
 
     private boolean offThread;
 
-    private int graphs;
+    private int siteCursor;
 
     private int simulationTicks;
 
@@ -68,15 +68,19 @@ public final class Labor {
         if (!server.tickRateManager().runsNormally()) {
             return;
         }
+        long enteredAt = Util.getNanos();
+        TickBudget.beginTick(server, enteredAt);
         simulationTicks++;
         ColonyMemberWrites.reconcile(server);
-        long enteredAt = Util.getNanos();
-        TravelBudget.beginTick(server, graphs);
         if (!(server instanceof GameTestServer)) {
             work(server);
         }
         pulse(server);
-        TravelBudget.endTick(server, enteredAt, Util.getNanos() - enteredAt);
+        TickBudget.endTick(Util.getNanos() - enteredAt);
+        if (!(server instanceof GameTestServer)
+            && simulationTicks % (BEAT_TICKS * FolkwaysConfig.heartbeatCycles()) == 0) {
+            beat(server, ColonyRegistry.get(server));
+        }
     }
 
     private void pulse(MinecraftServer server) {
@@ -87,28 +91,37 @@ public final class Labor {
 
     private void work(MinecraftServer server) {
         ColonyRegistry registry = ColonyRegistry.get(server);
-        boolean heartbeat = simulationTicks % (BEAT_TICKS * FolkwaysConfig.heartbeatCycles()) == 0;
-        int asking = 0;
+        record Visit(ColonyData colony, ServerLevel level, Site key, boolean deserted) {
+        }
+        List<Visit> visits = new ArrayList<>();
         for (ServerLevel level : server.getAllLevels()) {
             for (ColonyData colony : registry.colonies()) {
                 Site key = new Site(colony.colonyId(), level.dimension());
                 boolean deserted = colony.holdings().bodiesIn(level).isEmpty();
-                if (deserted && !sites.containsKey(key)) {
-                    continue;
-                }
-                if (ColonyWays.advance(colony, level)) {
-                    asking++;
-                }
-                ColonyLabor labor = sites.compute(key, (site, previous) -> previous == null
-                    ? new ColonyLabor(colony, level.dimension()) : previous.current());
-                labor.run(level, planFor(colony.colonyId()));
-                if (labor.desertedLongEnough(deserted, level.getGameTime())) {
-                    sites.remove(key).close();
-                    ColonyWays.forget(colony.colonyId(), level.dimension());
+                if (!deserted || sites.containsKey(key)) {
+                    visits.add(new Visit(colony, level, key, deserted));
                 }
             }
         }
-        graphs = asking;
+        int count = visits.size();
+        int start = EngineMode.singleThread() ? 0 : startSite(siteCursor, count);
+        for (int i = 0; i < count; i++) {
+            Visit visit = visits.get((start + i) % count);
+            TickBudget.openSite(count - i);
+            try {
+                ColonyWays.advance(visit.colony(), visit.level());
+                ColonyLabor labor = sites.compute(visit.key(), (site, previous) -> previous == null
+                    ? new ColonyLabor(visit.colony(), visit.level().dimension()) : previous.current());
+                labor.run(visit.level(), planFor(visit.colony().colonyId()));
+                if (labor.desertedLongEnough(visit.deserted(), visit.level().getGameTime())) {
+                    sites.remove(visit.key()).close();
+                    ColonyWays.forget(visit.colony().colonyId(), visit.level().dimension());
+                }
+            } finally {
+                TickBudget.closeSite();
+            }
+        }
+        siteCursor = count == 0 ? 0 : (start + 1) % count;
         sites.keySet().removeIf(site -> {
             if (registry.find(site.colony()).isPresent()) {
                 return false;
@@ -119,9 +132,10 @@ public final class Labor {
             }
             return true;
         });
-        if (heartbeat) {
-            beat(server, registry);
-        }
+    }
+
+    static int startSite(int cursor, int count) {
+        return count == 0 ? 0 : Math.floorMod(cursor, count);
     }
 
     private void beat(MinecraftServer server, ColonyRegistry registry) {
@@ -129,7 +143,7 @@ public final class Labor {
             colony.reconcile(server);
         }
         warnOnStuckSolves();
-        String nav = PathfindingLoad.drainHeartbeat() + " " + TravelBudget.drainHeartbeat();
+        String nav = PathfindingLoad.drainHeartbeat() + " " + TickBudget.drainHeartbeat();
         if (!FolkwaysConfig.logPlanHeartbeat()) {
             return;
         }
@@ -160,6 +174,7 @@ public final class Labor {
 
     public void begin(MinecraftServer server) {
         shutdown();
+        TickBudget.startServer(server);
         offThread = EngineMode.begin() == FolkwaysConfig.Mode.DEFAULT;
         if (!offThread) {
             LOGGER.info("single-thread mode: solves and ways are worked out on the tick");
@@ -179,7 +194,7 @@ public final class Labor {
         sites.values().forEach(ColonyLabor::close);
         sites.clear();
         simulationTicks = 0;
-        graphs = 0;
+        siteCursor = 0;
         offThread = false;
         if (solves != null) {
             solves.shutdown();

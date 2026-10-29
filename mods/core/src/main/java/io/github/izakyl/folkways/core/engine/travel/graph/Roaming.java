@@ -11,7 +11,7 @@ import io.github.izakyl.folkways.core.engine.travel.Faring;
 import io.github.izakyl.folkways.core.engine.travel.Feet;
 import io.github.izakyl.folkways.core.engine.travel.Hops;
 import io.github.izakyl.folkways.core.engine.travel.PathfindingLoad;
-import io.github.izakyl.folkways.core.engine.travel.TravelBudget;
+import io.github.izakyl.folkways.core.engine.travel.TickBudget;
 import io.github.izakyl.folkways.core.engine.travel.Urgency;
 import io.github.izakyl.folkways.core.engine.travel.Ways;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
@@ -279,7 +279,7 @@ public final class Roaming {
                     settleNow(ask, sorts, roamers, now);
                 }
             }
-        } else {
+        } else if (!(slice instanceof Slice.WallClock) || !slice.spent(0)) {
             // Loose pieces are bridged on a reserve of their own, before the asks: the asks take every slice there is.
             if (wandering && now >= nextBridge) {
                 bridge(sorts, roamers, slice, now);
@@ -306,7 +306,7 @@ public final class Roaming {
 
         publish(sorts, roamers, crossings, now, slice == Slice.UNTIL_ANSWERED);
 
-        TravelBudget.spent(Util.getNanos() - began);
+        TickBudget.spent(Util.getNanos() - began);
         return asking;
     }
 

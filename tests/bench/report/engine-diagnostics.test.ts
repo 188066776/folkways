@@ -4,11 +4,14 @@ import { engineDiagnostics } from "./engine-diagnostics.ts";
 
 test("keeps Post work separate from vanilla MSPT and each planning stage apart", () => {
   const report = engineDiagnostics(`
-labor heartbeat colonies=1 asksPending=546971 budget=250us(floor250us/ceil8000us) aimd=+0/-200 spent=4573usavg/18192usmax work=43143usavg/229638usmax late=200 over=200/200
+labor heartbeat colonies=1 asksPending=546971 slack=500usavg budget=250usavg(ceil8000us) spent=4573usavg/18192usmax work=43143usavg/229638usmax skipped=20/200
 weave timing tick=12000 queue_us=1000 messages_us=2000 weave_us=3000 total_us=6000 bodies=500 messages=900 nodes=1200 put=40 removed=3
 schedule timing tick=12000 changes=2 apply_us=500 schedule_us=12000000 total_us=12000500 nodes=1200 tours=300 unassigned=10
 `);
   assert.equal(report.pending_last, 546971);
+  assert.equal(report.budget_skipped_ticks, 20);
+  assert.equal(report.budget_ticks, 200);
+  assert.equal(report.navigation[0].budget?.grantedAvgMicros, 250);
   assert.equal(report.labor_ms_per_tick_median, 43.143);
   assert.equal(report.labor_ms_per_tick_max, 229.638);
   assert.equal(report.slow_weave_medians_ms.queue, 1);
@@ -20,6 +23,8 @@ test("missing diagnostic evidence stays unknown", () => {
   const report = engineDiagnostics("ordinary server output");
   assert.equal(report.pending_last, null);
   assert.equal(report.pending_peak, null);
+  assert.equal(report.budget_skipped_ticks, null);
+  assert.equal(report.budget_ticks, null);
   assert.equal(report.labor_ms_per_tick_median, null);
   assert.equal(report.slow_weave_medians_ms.total, null);
   assert.equal(report.slow_schedule_medians_ms.total, null);

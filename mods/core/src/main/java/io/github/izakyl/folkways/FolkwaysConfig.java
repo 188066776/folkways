@@ -19,7 +19,6 @@ public final class FolkwaysConfig {
     private static final ModConfigSpec.IntValue PLAN_HORIZON_TICKS;
     private static final ModConfigSpec.IntValue PLAN_HORIZON_DEPTH;
 
-    private static final ModConfigSpec.IntValue TRAVEL_FLOOR_MICROS;
     private static final ModConfigSpec.IntValue TRAVEL_CEILING_MICROS;
 
     private static final ModConfigSpec.IntValue SOLVE_THREADS;
@@ -83,18 +82,10 @@ public final class FolkwaysConfig {
         BUILDER.push("navigation");
         TRAVEL_CEILING_MICROS = BUILDER
             .comment("Microseconds per tick the whole server may spend working out where residents can",
-                "walk, shared out between colonies and dimensions. The mod spends up to this and backs",
-                "off whenever its own work pushes a tick past its deadline, climbing again while ticks",
-                "fit — so this is the most it will ask for on a quiet server, not what it always takes.",
+                "walk and observe, shared between colonies and dimensions. At most half of the time",
+                "remaining before the next tick is granted, up to this ceiling.",
                 "SINGLE_THREAD mode ignores it: there every question is worked out when it is asked.")
             .defineInRange("travelCeilingMicros", 8_000, 500, 40_000);
-        TRAVEL_FLOOR_MICROS = BUILDER
-            .comment("Microseconds per tick a single colony's reachability is never cut below. This is",
-                "not a quality setting. Reachability is the only thing that turns \"no way known yet\"",
-                "into an answer; a colony that never finishes working one out has jobs nobody can be",
-                "given, and the unanswered questions pile up faster than the saved time pays for. The",
-                "floor is what stops backing off from feeding itself.")
-            .defineInRange("travelFloorMicros", 250, 50, 2_000);
         BUILDER.pop();
 
         BUILDER.push("diagnostics");
@@ -148,10 +139,6 @@ public final class FolkwaysConfig {
 
     public static long travelCeilingMicros() {
         return read(TRAVEL_CEILING_MICROS);
-    }
-
-    public static long travelFloorMicros() {
-        return read(TRAVEL_FLOOR_MICROS);
     }
 
     public static boolean logPlanHeartbeat() {

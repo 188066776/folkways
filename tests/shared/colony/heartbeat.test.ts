@@ -22,8 +22,8 @@ const NAV = "labor heartbeat colonies=1 searches=0 nodes=0 peakSearches/tick=0 p
   + " quests=41found/2denied/1gaveup denied=1farEnd/0nearEnd/1frontier/0noGoals"
   + " renumbered=4 straightened=37pts publish=1200usstraighten/3400usfreeze/95usmax"
   + " rambles=6/58edges hops=2 attached=9laid/1closed/3far segments=2struck/40walked"
-  + " budget=450us(floor200us/ceil800us) aimd=+3/-1 spent=310usavg/790usmax"
-  + " work=120usavg/460usmax late=2 over=1/40";
+  + " slack=600usavg budget=450usavg(ceil800us) spent=310usavg/790usmax"
+  + " work=120usavg/460usmax skipped=2/40";
 
 const NAV_IDLE = "labor heartbeat colonies=0 searches=0 nodes=0 peakSearches/tick=0 peakNodes/tick=0"
   + " slices=0steps/0wall graph=0pts/0edges/0shut/0parts disproved=0pts asksPending=0"
@@ -120,18 +120,23 @@ test("every field of the navigation line is read", () => {
 test("the budget line is what the config prose says to watch for starvation", () => {
   const budget = parseNav(NAV)?.budget;
   assert.ok(budget);
-  assert.equal(budget.ceilingMicros, 450);
-  assert.equal(budget.floorMicros, 200);
+  assert.equal(budget.slackAvgMicros, 600);
+  assert.equal(budget.grantedAvgMicros, 450);
   assert.equal(budget.ceilingCapMicros, 800);
-  assert.equal(budget.climbs, 3);
-  assert.equal(budget.backOffs, 1);
   assert.equal(budget.spentAvgMicros, 310);
   assert.equal(budget.spentMaxMicros, 790);
   assert.equal(budget.workAvgMicros, 120);
   assert.equal(budget.workMaxMicros, 460);
-  assert.equal(budget.late, 2);
-  assert.equal(budget.over, 1);
+  assert.equal(budget.skipped, 2);
   assert.equal(budget.ticks, 40);
+});
+
+test("a lagging window reads its negative slack instead of dropping the budget", () => {
+  const lagging = NAV.replace(" slack=600usavg budget=450usavg", " slack=-1200usavg budget=0usavg");
+  const budget = parseNav(lagging)?.budget;
+  assert.ok(budget);
+  assert.equal(budget.slackAvgMicros, -1200);
+  assert.equal(budget.grantedAvgMicros, 0);
 });
 
 test("old logs without publish= read as null, not a fake 0", () => {
