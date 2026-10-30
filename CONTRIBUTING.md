@@ -116,9 +116,6 @@ feat(draft): add a dock pattern
   `Pages.text` / `Pages.readText` for UI sync and `Line.text` for information cards.
   Calling `getString()` on the server loses the player's language.
 - Arguments use `%s`, or indexed `%1$s` when reordered; a literal percent uses `%%`.
-- Run `npm run test:i18n` after translation changes. It checks keys, arguments,
-  direct translation calls, notice/refusal enums and built-in pattern dictionaries
-  and errors, but not every computed Java key.
 - Pattern-owned titles, controls, materials and refusal messages belong in the
   pattern's `lang` dictionary. Built-in patterns and shared libraries provide all
   four locales; matching mod catalog entries are not needed.

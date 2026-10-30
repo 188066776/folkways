@@ -6,7 +6,6 @@ import java.util.UUID;
 final class BuildAct {
 
     private static final String CANCEL = "cancel:";
-    private static final String STOP = "stop:";
 
     private BuildAct() {
     }
@@ -17,14 +16,6 @@ final class BuildAct {
 
     static Optional<UUID> cancelled(String key) {
         return idAfter(CANCEL, key);
-    }
-
-    static String stopping(UUID growing) {
-        return STOP + growing;
-    }
-
-    static Optional<UUID> stopped(String key) {
-        return idAfter(STOP, key);
     }
 
     private static Optional<UUID> idAfter(String prefix, String key) {

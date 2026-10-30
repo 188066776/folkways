@@ -11,7 +11,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.core.HolderLookup;
 
@@ -20,8 +19,6 @@ final class BuildPlacards {
     private static final ResourceLocation BUILDING_GLYPH = ResourceLocation.fromNamespaceAndPath(
         BuildContent.BUILDING.getNamespace(), "doing/" + BuildContent.BUILDING.getPath());
     private static final String PROGRESS = "folkways.page.build.progress";
-    private static final String GROWING = "folkways.page.build.growing";
-    private static final String STUCK = "folkways.page.build.growing.stuck";
 
     private BuildPlacards() {
     }
@@ -63,10 +60,4 @@ final class BuildPlacards {
             .toList());
     }
 
-    static List<Line> waiting(Growing one) {
-        Component said = one.stuck().isEmpty()
-            ? Component.translatable(GROWING, one.growth().round() + 1)
-            : Component.translatable(STUCK, one.growth().round() + 1, one.stuckText());
-        return List.of(Line.literal(one.name()), Line.text(said));
-    }
 }

@@ -21,7 +21,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Vec3i;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.structure.BoundingBox;
@@ -1124,38 +1123,6 @@ public final class Vocabulary implements StarlarkValue {
         useStarlarkThread = true)
     public void report(String key, Object value, StarlarkThread thread) throws EvalException {
         Derivation.of(thread).report(key, value);
-    }
-
-    @StarlarkBuiltin(name = "grown", doc = "One round of a pattern that keeps growing.")
-    public record Grown(Object parts, CompoundTag keep, boolean last) implements StarlarkValue {
-
-        @Override
-        public boolean isImmutable() {
-            return true;
-        }
-    }
-
-    @StarlarkMethod(
-        name = "grown",
-        doc = "What grow(site) answers for one round: the parts to build now, what to keep for the next round"
-            + " (read back as site.kept), and whether this is the last round. keep = None carries site.kept"
-            + " over unchanged. A grow that answers no parts at all has finished.",
-        parameters = {
-            @Param(name = "parts"),
-            @Param(name = "keep", defaultValue = "None", named = true, positional = false),
-            @Param(name = "last", defaultValue = "False", named = true, positional = false)},
-        useStarlarkThread = true)
-    public Grown grown(Object parts, Object keep, boolean last, StarlarkThread thread) throws EvalException {
-        Derivation drawing = Derivation.of(thread);
-        CompoundTag keeping;
-        if (keep == Starlark.NONE) {
-            keeping = drawing.commission().growth().kept();
-        } else if (keep instanceof Dict<?, ?> written) {
-            keeping = Kept.of(written);
-        } else {
-            throw Starlark.errorf("keep is a dict or None, got %s", Starlark.type(keep));
-        }
-        return new Grown(parts, keeping, last);
     }
 
     @StarlarkMethod(

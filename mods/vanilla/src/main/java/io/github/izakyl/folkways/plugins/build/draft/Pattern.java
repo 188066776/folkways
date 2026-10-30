@@ -38,7 +38,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public record Pattern(ResourceLocation id, Schema knobs, Face face, Set<String> accepts, List<String> phases,
-        Capture capture, Object draw, Object grow) {
+        Capture capture, Object draw) {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("folkways-patterns");
 
@@ -52,7 +52,6 @@ public record Pattern(ResourceLocation id, Schema knobs, Face face, Set<String> 
     private static final String KNOBS = "knobs";
     private static final String LANG = "lang";
     private static final String DRAW = "draw";
-    private static final String GROW = "grow";
     private static final String ACCEPTS = "accepts";
     private static final String PHASES = "phases";
     private static final String CAPTURE = "capture";
@@ -69,8 +68,8 @@ public record Pattern(ResourceLocation id, Schema knobs, Face face, Set<String> 
         accepts = Set.copyOf(accepts);
         phases = List.copyOf(phases);
         Objects.requireNonNull(capture, "capture");
-        if ((draw == null) == (grow == null)) {
-            throw new IllegalArgumentException("a pattern defines draw(site) or grow(site), and not both");
+        if (draw == null) {
+            throw new IllegalArgumentException("a pattern defines draw(site)");
         }
     }
 
@@ -92,17 +91,13 @@ public record Pattern(ResourceLocation id, Schema knobs, Face face, Set<String> 
             Map<ResourceLocation, Module> loaded = new LinkedHashMap<>();
             Module module = execute(id, source, libraries, mutability, loaded, new LinkedHashSet<>());
             Object drawing = module.getGlobal(DRAW);
-            Object growing = module.getGlobal(GROW);
-            if (drawing == null && growing == null) {
+            if (drawing == null) {
                 return Optional.empty();
-            }
-            if (drawing != null && growing != null) {
-                throw Starlark.errorf("a pattern defines draw(site) or grow(site), and not both");
             }
             Pattern pattern = new Pattern(id, schema(module.getGlobal(KNOBS)),
                 new Face(offered(module.getGlobal(KNOBS)), words(module, loaded)),
                 accepts(module.getGlobal(ACCEPTS)), phases(module.getGlobal(PHASES)),
-                Capture.parse(module.getGlobal(CAPTURE)), drawing, growing);
+                Capture.parse(module.getGlobal(CAPTURE)), drawing);
             Set<ResourceLocation> unloaded = pattern.unloaded();
             if (!unloaded.isEmpty()) {
                 LOGGER.warn("{}: needs {}, which this game has not loaded", id, unloaded);
@@ -168,10 +163,6 @@ public record Pattern(ResourceLocation id, Schema knobs, Face face, Set<String> 
         return accepts.contains(hint.kind());
     }
 
-    public boolean grows() {
-        return grow != null;
-    }
-
     public Set<ResourceLocation> unloaded() {
         Set<ResourceLocation> missing = new LinkedHashSet<>();
         for (Schema.Setting setting : knobs.settings()) {
@@ -213,48 +204,22 @@ public record Pattern(ResourceLocation id, Schema knobs, Face face, Set<String> 
         }
     }
 
-    /** The chunks a drawing of this pattern over the mark, at this round, may read. */
-    public Area area(Hint hint, Growth growth) {
-        return Area.around(hint, growth, capture);
+    /** The chunks a drawing of this pattern over the mark may read. */
+    public Area area(Hint hint) {
+        return Area.around(hint, capture);
     }
 
     /**
      * What a drawing of this pattern over the mark will read, taken from the level now so it can be drawn on
      * another thread; this runs on the level's own thread.
      */
-    public World capture(Level level, Hint hint, Growth growth) {
-        return World.capture(level, area(hint, growth));
+    public World capture(Level level, Hint hint) {
+        return World.capture(level, area(hint));
     }
 
     public Drawn drawOn(Commission commission) {
-        if (draw == null) {
-            return switch (growOn(commission)) {
-                case Round.Grew grew -> grew.ready();
-                case Round.Ended ended -> Drawn.refused(DraftRefusal.NOTHING_DRAWN);
-                case Round.Stuck stuck -> stuck.refused();
-            };
-        }
-        Derivation drawing = new Derivation(commission, area(commission.hint(), commission.growth()), phases, face);
-        Drawn drawn = run(commission, drawing, draw);
-        if (drawn instanceof Drawn.Ready && drawing.grown() != null) {
-            return Drawn.refused(DraftRefusal.PATTERN_FAILED, "grown(...) is what grow(site) answers, not draw(site)");
-        }
-        return drawn;
-    }
-
-    public Round growOn(Commission commission) {
-        if (grow == null) {
-            return new Round.Stuck(new Drawn.Refused(DraftRefusal.PATTERN_FAILED, id + " does not grow"));
-        }
-        Derivation drawing = new Derivation(commission, area(commission.hint(), commission.growth()), phases, face);
-        Drawn drawn = run(commission, drawing, grow);
-        Vocabulary.Grown grown = drawing.grown();
-        return switch (drawn) {
-            case Drawn.Ready ready -> new Round.Grew(ready,
-                grown == null ? commission.growth().kept() : grown.keep(), grown != null && grown.last());
-            case Drawn.Refused refused when refused.why() == DraftRefusal.NOTHING_DRAWN -> new Round.Ended();
-            case Drawn.Refused refused -> new Round.Stuck(refused);
-        };
+        Derivation drawing = new Derivation(commission, area(commission.hint()), phases, face);
+        return run(commission, drawing, draw);
     }
 
     private Drawn run(Commission commission, Derivation drawing, Object fn) {

@@ -17,10 +17,8 @@ import io.github.izakyl.folkways.front.api.notice.Line;
 import io.github.izakyl.folkways.front.api.notice.Notice;
 import io.github.izakyl.folkways.front.api.notice.Sentence;
 import io.github.izakyl.folkways.front.api.panel.Board;
-import io.github.izakyl.folkways.plugins.build.draft.DraftRefusal;
 import io.github.izakyl.folkways.plugins.build.draft.Hint;
 import io.github.izakyl.folkways.plugins.build.draft.Joint;
-import io.github.izakyl.folkways.plugins.build.draft.Round;
 import io.github.izakyl.folkways.plugins.build.draft.Templates;
 import io.github.izakyl.folkways.core.api.terms.ItemSpec;
 import java.util.ArrayList;
@@ -32,7 +30,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiConsumer;
 import javax.annotation.Nullable;
@@ -65,8 +62,6 @@ final class BuildPresence implements Facing {
 
     private static final String TAG_CANCELLED = "cancelled";
 
-    private static final String TAG_GROWING = "growing";
-
     private static final String TAG_DRAFTED = "drafted";
 
     private static final String TAG_MET = "met";
@@ -74,8 +69,6 @@ final class BuildPresence implements Facing {
     private static final String TAG_CELLS = "cells";
 
     private static final String TAG_NUMBERED = "numbered";
-
-    static final int RETRY_TICKS = 200;
 
     private final Colony colony;
 
@@ -85,9 +78,6 @@ final class BuildPresence implements Facing {
     private final Map<UUID, TemporaryScaffolds> temporary = new LinkedHashMap<>();
     private final Set<UUID> cancelled = new LinkedHashSet<>();
     private final Map<UUID, BuildSite> sites = new LinkedHashMap<>();
-    private final Map<UUID, Growing> growing = new LinkedHashMap<>();
-    // Growing sites whose next round is being drawn now.
-    private final Set<UUID> drawing = new HashSet<>();
     private final Map<UUID, Drafted> drafted = new LinkedHashMap<>();
     private final Map<UUID, Map<ItemSpec, Long>> owed = new ConcurrentHashMap<>();
     private final Map<UUID, Set<BlockPos>> met = new LinkedHashMap<>();
@@ -129,9 +119,6 @@ final class BuildPresence implements Facing {
                 }
             });
         }
-        for (Reader entry : saved.children(TAG_GROWING)) {
-            Growing.load(entry).ifPresent(one -> growing.put(one.id(), one));
-        }
         for (Reader entry : saved.children(TAG_DRAFTED)) {
             Drafted.load(entry).ifPresent(one -> drafted.put(one.order(), one));
         }
@@ -156,20 +143,11 @@ final class BuildPresence implements Facing {
             && site.target().in(level).cells().containsKey(at.block(level)));
     }
 
-    // Sites kept from before they were named are numbered now; an order a growing site placed shares its name.
+    // Sites kept from before they were named are numbered now.
     private void nameUnnamed() {
-        for (Growing one : List.copyOf(growing.values())) {
-            if (one.name().isEmpty()) {
-                growing.put(one.id(), one.named(SiteNames.numbered(++numbered)));
-            }
-        }
         for (BlueprintBuildOrder order : book.allBuildOrders()) {
             if (order.name().isEmpty()) {
-                book.rename(order.id(), growing.values().stream()
-                    .filter(one -> one.order().filter(order.id()::equals).isPresent())
-                    .map(Growing::name)
-                    .findFirst()
-                    .orElseGet(() -> SiteNames.numbered(++numbered)));
+                book.rename(order.id(), SiteNames.numbered(++numbered));
             }
         }
     }
@@ -194,7 +172,6 @@ final class BuildPresence implements Facing {
                 .uuid(TAG_ORDER, entry.getKey())
                 .flag(TAG_CANCELLED, cancelled.contains(entry.getKey()))
                 .tag())
-            .children(TAG_GROWING, growing.values(), Growing::save)
             .children(TAG_DRAFTED, drafted.values(), Drafted::save)
             .children(TAG_MET, metNow().entrySet(), entry -> Writer.of()
                 .uuid(TAG_ORDER, entry.getKey())
@@ -282,119 +259,15 @@ final class BuildPresence implements Facing {
         return book.place(level, blueprint.id(), name, anchor, playerId, playerName, level.getGameTime());
     }
 
-    /**
-     * Begins a growing site once its first round is drawn; every round it places carries the name it was given, or
-     * the number it was dealt when it was placed.
-     */
-    CompletableFuture<Optional<Component>> grow(ServerLevel level, Growing begun) {
-        return Rounds.draw(level, begun).thenApply(round -> {
-            Growing next = advance(level, begun.named(siteName(begun.name())), round);
-            if (next == null) {
-                return Optional.of(Component.translatable(DraftRefusal.NOTHING_DRAWN.translationKey(), ""));
-            }
-            if (next.order().isEmpty()) {
-                return Optional.of(next.stuckText());
-            }
-            growing.put(next.id(), next);
-            spend(begun.name());
-            keep();
-            return Optional.empty();
-        });
-    }
-
-    private Growing advance(ServerLevel level, Growing one, Round drawn) {
-        long retry = level.getGameTime() + RETRY_TICKS;
-        return switch (drawn) {
-            case Round.Ended ended -> null;
-            case Round.Stuck stuck -> one.stuck(stuck.refused(), retry);
-            case Round.Grew grew -> {
-                Optional<Blueprint> blueprint = Rounds.blueprintOf(level, one, grew.ready().draft());
-                if (blueprint.isEmpty()) {
-                    yield one.stuck(DraftRefusal.SITE_TOO_LARGE.translationKey(), "", retry);
-                }
-                Optional<BlueprintBuildOrder> order = place(level, blueprint.get(), grew.ready().corner(),
-                    one.name(), one.playerId(), one.playerName());
-                if (order.isEmpty()) {
-                    yield one.stuck("folkways.blueprint.too_many", Integer.toString(BlueprintBook.MAX_BUILD_ORDERS),
-                        retry);
-                }
-                yield one.building(order.get().id(),
-                    one.growth().next(grew.kept(), grew.ready().corner(), grew.ready().draft(), one.hint().anchor()),
-                    grew.last());
-            }
-        };
-    }
-
-    private void tend(ServerLevel level) {
-        boolean changed = false;
-        for (Growing one : List.copyOf(growing.values())) {
-            if (drawing.contains(one.id()) || !one.anchor().in(level) || one.order().filter(this::filed).isPresent()) {
-                continue;
-            }
-            if (one.order().isPresent()) {
-                if (one.last()) {
-                    growing.remove(one.id());
-                    changed = true;
-                    continue;
-                }
-                one = one.waiting();
-                growing.put(one.id(), one);
-                changed = true;
-            }
-            if (level.getGameTime() < one.retryAt()) {
-                continue;
-            }
-            // The round is drawn off the server's thread; until it comes back the site is left as it stands, and
-            // what comes back is let go if the site was stopped or changed meanwhile.
-            Growing asked = one;
-            drawing.add(asked.id());
-            Rounds.logged(Rounds.draw(level, asked).thenAccept(round -> {
-                drawing.remove(asked.id());
-                if (!asked.equals(growing.get(asked.id()))) {
-                    return;
-                }
-                Growing next = advance(level, asked, round);
-                if (next == null) {
-                    growing.remove(asked.id());
-                } else {
-                    growing.put(next.id(), next);
-                }
-                keep();
-            }));
-        }
-        if (changed) {
-            keep();
-        }
-    }
-
-    Optional<String> growingName(UUID id) {
-        return Optional.ofNullable(growing.get(id)).map(Growing::name);
-    }
-
-    private void stopGrowing(UUID order) {
-        growing.values().removeIf(one -> one.order().filter(order::equals).isPresent());
-    }
-
     @Override
     public Attempt act(ResourceLocation page, String actionKey, Optional<BlockPos> at, ColonyView view) {
         if (!page.equals(BuildContent.PAGE.id())) {
             return Attempt.refused(BuildRefusal.NO_SUCH_ORDER);
         }
-        Optional<UUID> stopped = BuildAct.stopped(actionKey);
-        if (stopped.isPresent()) {
-            Growing one = growing.remove(stopped.get());
-            if (one == null) {
-                return Attempt.refused(BuildRefusal.NO_SUCH_ORDER);
-            }
-            one.order().filter(this::filed).ifPresent(this::cancel);
-            keep();
-            return Attempt.went();
-        }
         Optional<UUID> order = BuildAct.cancelled(actionKey);
         if (order.isEmpty() || !filed(order.get())) {
             return Attempt.refused(BuildRefusal.NO_SUCH_ORDER);
         }
-        stopGrowing(order.get());
         cancel(order.get());
         keep();
         return Attempt.went();
@@ -459,7 +332,6 @@ final class BuildPresence implements Facing {
                     finish(order.id());
                 }
             }
-            tend(level);
         }
         for (UUID order : List.copyOf(sites.keySet())) {
             if (!standing.contains(order) && !filed(order)) {
@@ -479,10 +351,7 @@ final class BuildPresence implements Facing {
         if (!loaded(level, target)) {
             return null;
         }
-        var workArea = growing.values().stream().filter(one -> one.order().filter(order.id()::equals).isPresent())
-            .map(one -> one.growth().reach().moved(one.hint().anchor().getX(), one.hint().anchor().getY(),
-                one.hint().anchor().getZ())).findFirst().orElse(null);
-        BuildSite site = new BuildSite(order.id(), asks, target, scaffoldsOf(order.id()), workArea);
+        BuildSite site = new BuildSite(order.id(), asks, target, scaffoldsOf(order.id()));
         sites.put(order.id(), site);
         site.start(level, met.getOrDefault(order.id(), Set.of()), joined.getOrDefault(order.id(), Set.of()));
         untallied.add(order.id());
@@ -592,36 +461,22 @@ final class BuildPresence implements Facing {
     public List<Placard> placards(ColonyView view) {
         ServerLevel level = view.level();
         List<Placard> placards = new ArrayList<>();
-        Map<UUID, Growing> grownOrders = new LinkedHashMap<>();
-        for (Growing one : growing.values()) {
-            if (!one.anchor().in(level)) {
-                continue;
-            }
-            Optional<UUID> order = one.order().filter(this::filed);
-            order.ifPresent(id -> grownOrders.put(id, one));
-            if (order.isEmpty()) {
-                placards.add(new Placard(one.id(), BuildPlacards.outline(one.hint()), BuildPlacards.waiting(one)));
-            }
-        }
         for (BlueprintBuildOrder order : book.allBuildOrders()) {
             if (cancelled.contains(order.id()) || !order.anchor().in(level)) {
                 continue;
             }
             BuildSite site = sites.get(order.id());
             Optional<BuildOrderView> seen = site == null ? Optional.empty() : site.progress();
-            Growing grown = grownOrders.get(order.id());
             Drafted drawn = drafted.get(order.id());
-            Optional<Placard.Outline> outline = grown != null
-                ? Optional.of(BuildPlacards.outline(grown.hint()))
-                : drawn != null
-                    ? Optional.of(BuildPlacards.outline(drawn.hint()))
-                    : seen.map(seenView -> new Placard.Outline.Box(seenView.min(), seenView.max()));
+            Optional<Placard.Outline> outline = drawn != null
+                ? Optional.of(BuildPlacards.outline(drawn.hint()))
+                : seen.map(seenView -> new Placard.Outline.Box(seenView.min(), seenView.max()));
             if (outline.isEmpty()) {
                 continue;
             }
             placards.add(
                 new Placard(
-                grown != null ? grown.id() : order.id(),
+                order.id(),
                 outline.get(),
                 BuildPlacards.building(
                 Line.literal(order.name()),
@@ -640,11 +495,6 @@ final class BuildPresence implements Facing {
         List<Board.Row> standing = new ArrayList<>();
         for (BlueprintBuildOrder order : book.allBuildOrders()) {
             standing.add(rowFor(order, view.level().registryAccess()));
-        }
-        for (Growing one : growing.values()) {
-            if (one.order().filter(this::filed).isEmpty()) {
-                standing.add(rowFor(one));
-            }
         }
         // The blueprints there are to set down lead the page, and the build orders standing follow them.
         List<Board.Row> rows = new ArrayList<>();
@@ -678,19 +528,6 @@ final class BuildPresence implements Facing {
         return cancelled.contains(order.id()) || site == null || site.progress().isEmpty()
             ? row
             : row.told(toldOf(site, owed.getOrDefault(order.id(), Map.of()), registries));
-    }
-
-    private static Board.Row rowFor(Growing one) {
-        Component detail = one.stuck().isEmpty()
-            ? Component.translatable("folkways.page.build.growing", one.growth().round() + 1)
-            : Component.translatable("folkways.page.build.growing.stuck", one.growth().round() + 1,
-                one.stuckText());
-        return new Board.Row(new ItemStack(Items.IRON_PICKAXE),
-            Component.literal(one.name()),
-            detail,
-            List.of(new Board.Act.Ping(one.anchor().cell()),
-                new Board.Act.Do(BuildAct.stopping(one.id()), "folkways.action.delete",
-                    ResourceLocation.withDefaultNamespace("barrier"))));
     }
 
     // The building glyph and the first of what is owed, or how far it has come when nothing is;

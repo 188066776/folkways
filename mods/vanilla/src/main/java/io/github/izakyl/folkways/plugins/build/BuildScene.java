@@ -177,7 +177,7 @@ public final class BuildScene {
         scene.idle(100);
 
         scene.overlay().showText(90)
-            .text("A pattern such as the mine grows in rounds: once one round is built, the next is drawn onto what stands now. The page says which round is coming up.")
+            .text("The mine is drawn all at once from the ground as it stands, and filed as one ordinary build order.")
             .pointAt(util.vector().topOf(MIDDLE, ROOF, MIDDLE))
             .placeNearTarget()
             .attachKeyFrame();

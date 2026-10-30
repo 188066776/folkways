@@ -250,21 +250,12 @@ final class BuildSite {
     private long toldAt = NEVER;
     @Nullable
     private ServerLevel standing;
-    @Nullable
-    private final BoundingBox workArea;
-
     BuildSite(UUID order, Asks asks, BuildTarget target, TemporaryScaffolds temporary) {
-        this(order, asks, target, temporary, null);
-    }
-
-    BuildSite(UUID order, Asks asks, BuildTarget target, TemporaryScaffolds temporary,
-            @Nullable BoundingBox workArea) {
         this.order = order;
         this.asks = asks;
         this.emptying = new Emptying(order, asks);
         this.target = target;
         this.temporary = temporary;
-        this.workArea = workArea;
     }
 
     /** Infrastructure work on existing floors never needs temporary access structures. */
@@ -350,9 +341,8 @@ final class BuildSite {
         if (!(target.realm() instanceof Realm.Dimension) || target.cells().isEmpty()) {
             return;
         }
-        // A growing structure remains one site: earlier flights of a mine are still on the way out.
-        BlockPos min = workArea == null ? null : new BlockPos(workArea.minX(), workArea.minY(), workArea.minZ());
-        BlockPos max = workArea == null ? null : new BlockPos(workArea.maxX(), workArea.maxY(), workArea.maxZ());
+        BlockPos min = null;
+        BlockPos max = null;
         for (BlockPos cell : target.cells().keySet()) {
             min = min == null ? cell : BlockPos.min(min, cell);
             max = max == null ? cell : BlockPos.max(max, cell);

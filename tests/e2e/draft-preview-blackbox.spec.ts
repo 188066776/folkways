@@ -36,7 +36,7 @@ return Map.of("ghosts", ((List<?>) ghosts.get(null)).size(), "offer", String.val
   }),
 });
 
-// How many build orders the colony bound to the player's book has filed, and patterns it keeps growing.
+// How many build orders the colony bound to the player's book has filed.
 const SITES = defineTask<{ player: string }, Record<string, any>>({
   name: "folkways.draft-preview.sites",
   side: "server",
@@ -55,8 +55,7 @@ var presence = colony.service(BuildContent.ID, Object.class).orElseThrow();
 var book = presence.getClass().getDeclaredField("book"); book.setAccessible(true);
 var held = book.get(presence);
 var orders = held.getClass().getDeclaredMethod("allBuildOrders"); orders.setAccessible(true);
-var growing = presence.getClass().getDeclaredField("growing"); growing.setAccessible(true);
-return Map.of("sites", ((List<?>) orders.invoke(held)).size(), "growing", ((Map<?, ?>) growing.get(presence)).size());
+return Map.of("sites", ((List<?>) orders.invoke(held)).size());
 `,
   }),
 });
@@ -140,8 +139,8 @@ for (const stage of twins()) test(stage.title("a pattern is previewed out in the
     await media.screenshot(client, { path: outAbs("e2e", "shots", `${stage.name("draft-preview")}.png`),
       camera: { position: eye, ...cameraLookingAt(eye, { x: (min.x + max.x) / 2, y: min.y, z: (min.z + max.z) / 2 }) } });
     evidence.sites_previewed = await sites(server, playerName);
-    expect(evidence.sites_previewed.sites + evidence.sites_previewed.growing, "a preview files no build site")
-      .toBe(evidence.sites_before.sites + evidence.sites_before.growing);
+    expect(evidence.sites_previewed.sites, "a preview files no build site")
+      .toBe(evidence.sites_before.sites);
 
     // Back in the window it opens on the same pattern, and can now be built.
     await openBookPage(server, client, playerName, origin, stage);
@@ -153,8 +152,8 @@ for (const stage of twins()) test(stage.title("a pattern is previewed out in the
     await expect.poll(async () => {
       await tick.sprint(server, 3);
       const now = await sites(server, playerName);
-      return now.sites + now.growing;
-    }, { timeout: 8_000, message: "building files a site" }).toBeGreaterThan(evidence.sites_before.sites + evidence.sites_before.growing);
+      return now.sites;
+    }, { timeout: 8_000, message: "building files a site" }).toBeGreaterThan(evidence.sites_before.sites);
     evidence.built = await client.run(PREVIEWED, undefined);
     expect(evidence.built.ghosts, "once built the preview is gone").toBe(0);
   } catch (error) {
@@ -178,7 +177,7 @@ async function openOffer(server: MinecraftServer, client: MinecraftClient, playe
 }
 
 async function sites(server: MinecraftServer, playerName: string) {
-  return (await server.run(SITES, { player: playerName })) as { sites: number; growing: number };
+  return (await server.run(SITES, { player: playerName })) as { sites: number };
 }
 
 async function tokensOf(client: MinecraftClient): Promise<string[]> {

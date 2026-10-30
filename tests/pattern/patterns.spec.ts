@@ -231,7 +231,7 @@ const GALLERIES: Gallery[] = [
     forceload: "-80 -44 80 44",
     check: (value) => {
       const unfinished = value.mines.filter((mine: any) => mine.end !== "ended").map((mine: any) => `${mine.name}: ${mine.end}`);
-      expect(unfinished, "the mine did not finish growing").toEqual([]);
+      expect(unfinished, "the mine was not drawn").toEqual([]);
     },
     views: mineViews,
   },

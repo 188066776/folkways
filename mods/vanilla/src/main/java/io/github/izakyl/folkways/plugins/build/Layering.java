@@ -292,7 +292,7 @@ final class Layering {
                 if (sameLayer && cleared && !owner.containsKey(next) && layer.size() < MOST_DRAINED) {
                     layer.put(next, state);
                     open.add(next);
-                } else if (!cleared) {
+                } else if (!cleared && !seals(next, direction)) {
                     layer.keySet().forEach(cellOf -> refused.put(cellOf, BuildRefusal.NO_WAY_TO_BUILD));
                     return;
                 }
@@ -360,10 +360,18 @@ final class Layering {
             for (Direction direction : Direction.values()) {
                 BlockPos next = part.relative(direction);
                 Integer by = owner.get(next);
-                if (by == null || by == draft.id || drafts.get(by).kind != Kind.STRIP) {
+                if (by == null || by == draft.id) {
                     continue;
                 }
                 BlockState state = level.getBlockState(next);
+                if (drafts.get(by).kind == Kind.LAY && !state.getFluidState().isEmpty()
+                        && seals(next, direction)) {
+                    wait(draft.id, by);
+                    continue;
+                }
+                if (drafts.get(by).kind != Kind.STRIP) {
+                    continue;
+                }
                 if (!state.isAir() && !state.liquid() && BuildPlanner.stays(level, next, state)
                     && !BuildPlanner.stays(without, next, state)) {
                     wait(draft.id, by);
@@ -372,12 +380,35 @@ final class Layering {
         }
     }
 
-    // Water is let out from the top down, so the layer over a drained one does not run back into it.
+    // A planned wall can hold back fluid that is outside the cells being drained.
+    private boolean seals(BlockPos cell, Direction from) {
+        if (!target.cells().containsKey(cell)) {
+            return false;
+        }
+        BlockState wanted = target.wanted(cell);
+        return wanted.getFluidState().isEmpty() && wanted.isFaceSturdy(level, cell, from.getOpposite());
+    }
+
+    // Fluid is let out from the top down, after any planned walls that hold it back.
     private void drained(Draft draft) {
         for (BlockPos cell : draft.after().keySet()) {
             Integer over = owner.get(cell.above());
             if (over != null && over != draft.id && drafts.get(over).kind == Kind.DRAIN) {
                 wait(draft.id, over);
+            }
+            for (Direction direction : Direction.values()) {
+                BlockPos next = cell.relative(direction);
+                BlockState standing = level.getBlockState(next);
+                if ((!standing.isAir() && standing.getFluidState().isEmpty()) || !seals(next, direction)) {
+                    continue;
+                }
+                Integer wall = owner.get(next);
+                if (wall == null || drafts.get(wall).dropped) {
+                    draft.dropped = true;
+                    draft.after().keySet().forEach(part -> refused.put(part, BuildRefusal.NO_WAY_TO_BUILD));
+                } else if (wall != draft.id) {
+                    wait(draft.id, wall);
+                }
             }
         }
     }

@@ -20,18 +20,17 @@ public record Area(LongSet chunks, int lowest, int highest) {
         chunks = LongSets.unmodifiable(new LongOpenHashSet(chunks));
     }
 
-    public static Area around(Hint hint, Growth growth, Capture capture) {
+    public static Area around(Hint hint, Capture capture) {
         int reach = capture.around();
         LongSet under = new LongOpenHashSet();
         BlockPos anchor = hint.anchor();
-        // A first round reads around the mark itself; later ones around all that has been drawn since.
-        if (hint instanceof Hint.Path path && growth.round() == 0) {
+        if (hint instanceof Hint.Path path) {
             List<BlockPos> points = path.points();
             for (int at = 1; at < points.size(); at++) {
                 trace(points.get(at - 1), points.get(at), under);
             }
         } else {
-            BoundingBox drawn = growth.reach();
+            BoundingBox drawn = hint.bounds();
             box(SectionPos.blockToSectionCoord(anchor.getX() + drawn.minX()),
                 SectionPos.blockToSectionCoord(anchor.getZ() + drawn.minZ()),
                 SectionPos.blockToSectionCoord(anchor.getX() + drawn.maxX()),
@@ -43,7 +42,7 @@ public record Area(LongSet chunks, int lowest, int highest) {
             int z = ChunkPos.getZ(chunk);
             box(x - reach, z - reach, x + reach, z + reach, reached);
         }
-        BoundingBox drawn = growth.reach();
+        BoundingBox drawn = hint.bounds();
         int low = SectionPos.blockToSectionCoord(anchor.getY() + drawn.minY());
         int high = SectionPos.blockToSectionCoord(anchor.getY() + drawn.maxY());
         return new Area(reached, capture.down() == Capture.ALL ? Integer.MIN_VALUE : low - capture.down(),

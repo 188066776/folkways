@@ -68,18 +68,6 @@ public final class DraftSite implements StarlarkValue {
         return StarlarkInt.of(commission.hint().anchor().getY());
     }
 
-    @StarlarkMethod(name = "round", doc = "Which round of a growing pattern this is, from 0. Always 0 for a"
-        + " pattern that is drawn once.", structField = true)
-    public StarlarkInt round() {
-        return StarlarkInt.of(commission.growth().round());
-    }
-
-    @StarlarkMethod(name = "kept", doc = "What the last round of a growing pattern asked to keep, as a dict;"
-        + " empty in round 0.", structField = true)
-    public Dict<String, Object> kept() {
-        return Kept.read(commission.growth().kept());
-    }
-
     @StarlarkMethod(name = "flag", doc = "What the player set this switch to.", parameters = {@Param(name = "key")})
     public boolean flag(String key) {
         return commission.settings().flag(key);

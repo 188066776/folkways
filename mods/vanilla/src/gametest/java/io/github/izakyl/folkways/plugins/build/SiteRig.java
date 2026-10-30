@@ -29,8 +29,14 @@ final class SiteRig implements BuildSite.Asks {
     private final Map<UUID, BiConsumer<UUID, Ending>> heard = new HashMap<>();
     final BuildSite site;
 
-    private SiteRig(BuildTarget target, TemporaryScaffolds temporary) {
-        site = new BuildSite(UUID.randomUUID(), this, target, temporary);
+    private SiteRig(UUID order, BuildTarget target, TemporaryScaffolds temporary) {
+        site = new BuildSite(order, this, target, temporary);
+    }
+
+    static SiteRig start(ServerLevel level, UUID order, BuildTarget target) {
+        SiteRig rig = new SiteRig(order, target, new TemporaryScaffolds(() -> { }));
+        rig.site.start(level, Set.of(), Set.of());
+        return rig;
     }
 
     static SiteRig start(ServerLevel level, BuildTarget target) {
@@ -43,7 +49,7 @@ final class SiteRig implements BuildSite.Asks {
 
     static SiteRig start(ServerLevel level, BuildTarget target, TemporaryScaffolds temporary, Set<BlockPos> met,
             Set<io.github.izakyl.folkways.plugins.build.draft.Joint> joined) {
-        SiteRig rig = new SiteRig(target, temporary);
+        SiteRig rig = new SiteRig(UUID.randomUUID(), target, temporary);
         rig.site.start(level, met, joined);
         return rig;
     }

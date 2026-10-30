@@ -1,5 +1,5 @@
 // Patterns commissioned the way a player draws them: a zone framed or a path marked, the knobs set, and the colony's
-// build site files what the pattern draws there (or keeps growing it round by round, for a mine). Each site's answer
+// build site files what the pattern draws there. Each site's answer
 // says whether it was filed and what the colony said.
 import { defineTask, javaTask, type MinecraftServer } from "@izakyl/blockwright-minecraft";
 import { runColonyTask } from "./colony-tasks";

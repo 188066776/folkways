@@ -1,18 +1,14 @@
 package io.github.izakyl.folkways.plugins.build;
 
 import io.github.izakyl.folkways.front.api.Settings;
-import io.github.izakyl.folkways.plugins.build.draft.Chosen;
 import io.github.izakyl.folkways.plugins.build.draft.Commission;
 import io.github.izakyl.folkways.plugins.build.draft.Draft;
-import io.github.izakyl.folkways.plugins.build.draft.DraftRefusal;
 import io.github.izakyl.folkways.plugins.build.draft.DraftTemplate;
 import io.github.izakyl.folkways.plugins.build.draft.Hint;
 import io.github.izakyl.folkways.plugins.build.draft.Drafting;
 import io.github.izakyl.folkways.plugins.build.draft.Drawn;
-import io.github.izakyl.folkways.plugins.build.draft.Growth;
 import io.github.izakyl.folkways.plugins.build.draft.Pattern;
 import io.github.izakyl.folkways.plugins.build.draft.Patterns;
-import io.github.izakyl.folkways.plugins.build.draft.Round;
 import io.github.izakyl.folkways.plugins.build.draft.World;
 import java.util.Optional;
 import java.util.UUID;
@@ -34,22 +30,6 @@ final class Rounds {
     private Rounds() {
     }
 
-    /**
-     * Draws the site's next round over the chunks it reaches as they stand now, on a drafting thread; what it drew
-     * comes back on the server's thread.
-     */
-    static CompletableFuture<Round> draw(ServerLevel level, Growing one) {
-        Optional<Pattern> found = Patterns.find(one.pattern()).filter(Pattern::grows);
-        if (found.isEmpty()) {
-            return CompletableFuture.completedFuture(new Round.Stuck(new Drawn.Refused(DraftRefusal.PATTERN_FAILED,
-                "no growing pattern called " + one.pattern() + " is loaded")));
-        }
-        Pattern pattern = found.get();
-        World world = pattern.capture(level, one.hint(), one.growth());
-        return onServer(level, Drafting.grow(pattern, new Commission(one.hint(),
-            Chosen.load(pattern.knobs(), one.settings()), world, one.facing(), one.roundSeed(), one.growth())));
-    }
-
     // What a drafting thread hands back is taken up on the server's thread; once the server has stopped, it is not.
     static <T> CompletableFuture<T> onServer(ServerLevel level, CompletableFuture<T> drawing) {
         MinecraftServer server = level.getServer();
@@ -67,10 +47,6 @@ final class Rounds {
                 LOGGER.error("taking up a drawing failed", broken);
             }
         });
-    }
-
-    static Optional<Blueprint> blueprintOf(ServerLevel level, Growing one, Draft draft) {
-        return blueprintOf(level, one.pattern().getPath() + " #" + (one.growth().round() + 1), draft);
     }
 
     static Optional<Blueprint> blueprintOf(ServerLevel level, String name, Draft draft) {
@@ -91,7 +67,7 @@ final class Rounds {
 
     static CompletableFuture<Once> drawOnce(ServerLevel level, Pattern pattern, Hint hint, Settings settings,
             Direction facing) {
-        World world = pattern.capture(level, hint, Growth.first(hint));
+        World world = pattern.capture(level, hint);
         return onServer(level, Drafting.draw(pattern, new Commission(hint, settings, world, facing,
             Patterns.seedOf(pattern, hint)))).thenApply(drawn -> blueprinted(level, pattern, drawn));
     }

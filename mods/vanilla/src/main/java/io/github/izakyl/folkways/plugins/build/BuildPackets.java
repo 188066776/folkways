@@ -3,18 +3,15 @@ package io.github.izakyl.folkways.plugins.build;
 import io.github.izakyl.folkways.FolkwaysMod;
 import io.github.izakyl.folkways.core.api.colony.Books;
 import io.github.izakyl.folkways.plugins.build.draft.Chosen;
-import io.github.izakyl.folkways.plugins.build.draft.DraftRefusal;
 import io.github.izakyl.folkways.plugins.build.draft.Hint;
 import io.github.izakyl.folkways.plugins.build.draft.Joint;
 import io.github.izakyl.folkways.plugins.build.draft.Pattern;
 import io.github.izakyl.folkways.plugins.build.draft.Patterns;
-import io.github.izakyl.folkways.plugins.build.draft.Round;
 import io.github.izakyl.folkways.plugins.build.draft.Templates;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
@@ -31,9 +28,6 @@ import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 public final class BuildPackets {
-
-    // Custom patterns need not terminate; allow long sites while keeping one request bounded.
-    static final int MOST_RAISED_ROUNDS = 4096;
 
     private BuildPackets() {
     }
@@ -148,15 +142,7 @@ public final class BuildPackets {
             ServerLevel level = player.serverLevel();
             Chosen settings = Chosen.load(pattern.get().knobs(), packet.settings());
             if (packet.raiseInCreative() && player.isCreative()) {
-                if (pattern.get().grows()) {
-                    Growing growing = Commissions.begun(level, pattern.get(), hint.get(), settings,
-                        packet.facing(), packet.siteName(), Optional.of(player.getUUID()),
-                        player.getGameProfile().getName());
-                    Rounds.logged(raiseRounds(level, growing).thenAccept(raised ->
-                        player.displayClientMessage(raised.message(growing.pattern()), true)));
-                } else {
-                    raiseOnce(level, player, pattern.get(), hint.get(), settings, packet.facing());
-                }
+                raiseOnce(level, player, pattern.get(), hint.get(), settings, packet.facing());
                 return;
             }
             Rounds.logged(Commissions.file(level, site.get(), pattern.get(), hint.get(), settings,
@@ -177,59 +163,6 @@ public final class BuildPackets {
             player.displayClientMessage(
                 Component.translatable("folkways.blueprint.raised", drafted.blueprint().name()), true);
         }));
-    }
-
-    record Raised(int rounds, Optional<Component> refusal) {
-
-        Component message(ResourceLocation pattern) {
-            if (refusal.isPresent()) {
-                return rounds == 0 ? refusal.get() : Component.translatable("folkways.draft.grow.interrupted",
-                    pattern.getPath(), rounds, refusal.get());
-            }
-            return Component.translatable("folkways.draft.grow.raised", pattern.getPath(), rounds);
-        }
-    }
-
-    static CompletableFuture<Raised> raiseRounds(ServerLevel level, Growing growing) {
-        return raiseRounds(level, growing, MOST_RAISED_ROUNDS);
-    }
-
-    static CompletableFuture<Raised> raiseRounds(ServerLevel level, Growing growing, int mostRounds) {
-        return raiseRound(level, growing.waiting(), 0, mostRounds);
-    }
-
-    // Each round is drawn over what the one before it raised, so the next is asked for only once this one stands.
-    private static CompletableFuture<Raised> raiseRound(ServerLevel level, Growing one, int raised, int mostRounds) {
-        return Rounds.draw(level, one).thenCompose(round -> {
-            if (round instanceof Round.Stuck stuck) {
-                return stopped(raised, stuck.refused().component());
-            }
-            if (round instanceof Round.Ended) {
-                return raised == 0
-                    ? stopped(raised, Component.translatable(DraftRefusal.NOTHING_DRAWN.translationKey(), ""))
-                    : CompletableFuture.completedFuture(new Raised(raised, Optional.empty()));
-            }
-            // Ask once more at the limit: a pattern ending here has completed without another placement.
-            if (raised >= mostRounds) {
-                return stopped(raised, Component.translatable("folkways.draft.grow.limit", mostRounds));
-            }
-            Round.Grew grew = (Round.Grew) round;
-            Optional<Blueprint> blueprint = Rounds.blueprintOf(level, one, grew.ready().draft());
-            if (blueprint.isEmpty()) {
-                return stopped(raised, Component.translatable(DraftRefusal.SITE_TOO_LARGE.translationKey(), ""));
-            }
-            raise(level, blueprint.get(), grew.ready().corner());
-            Growing next = one.building(blueprint.get().id(), one.growth().next(grew.kept(),
-                grew.ready().corner(), grew.ready().draft(), one.hint().anchor()), grew.last());
-            if (grew.last()) {
-                return CompletableFuture.completedFuture(new Raised(raised + 1, Optional.empty()));
-            }
-            return raiseRound(level, next.waiting(), raised + 1, mostRounds);
-        });
-    }
-
-    private static CompletableFuture<Raised> stopped(int raised, Component why) {
-        return CompletableFuture.completedFuture(new Raised(raised, Optional.of(why)));
     }
 
     private static void raise(ServerLevel level, Blueprint blueprint, BlockPos anchor) {

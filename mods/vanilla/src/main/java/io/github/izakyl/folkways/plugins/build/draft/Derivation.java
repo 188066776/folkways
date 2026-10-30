@@ -52,7 +52,6 @@ final class Derivation {
     private Rule.Node current;
     private DraftRefusal stoppedFor;
     private Notice explanation;
-    private Vocabulary.Grown grown;
 
     Derivation(Commission commission, Area area, List<String> phases, Face face) {
         this.face = face;
@@ -156,10 +155,6 @@ final class Derivation {
         }
     }
 
-    Vocabulary.Grown grown() {
-        return grown;
-    }
-
     Object attribute(String name) {
         return current == null ? null : current.attribute(name);
     }
@@ -169,10 +164,6 @@ final class Derivation {
         thread.setThreadLocal(Derivation.class, this);
         phase = 0;
         Object answered = Starlark.call(thread, draw, List.of(site), Map.of());
-        if (answered instanceof Vocabulary.Grown round) {
-            grown = round;
-            answered = round.parts();
-        }
         collect(null, answered);
         for (phase = 0; phase < phases.size(); phase++) {
             PriorityQueue<Queued> queue = queues.get(phase);
@@ -233,9 +224,6 @@ final class Derivation {
         if (made instanceof Vocabulary.Made one) {
             parts.add(new Committed(one.part().at(childPath(owner, one.part().role())), owner, phase));
             return;
-        }
-        if (made instanceof Vocabulary.Grown) {
-            throw Starlark.errorf("grown(...) is what grow(site) itself answers, not something to draw inside it");
         }
         if (made instanceof Rule.Node node) {
             if (node.phase() < phase) {

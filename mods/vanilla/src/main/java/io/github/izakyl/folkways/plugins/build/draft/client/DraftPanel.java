@@ -29,7 +29,6 @@ import io.github.izakyl.folkways.plugins.build.draft.Drafting;
 import io.github.izakyl.folkways.plugins.build.draft.DraftTemplate;
 import io.github.izakyl.folkways.plugins.build.draft.Drawn;
 import io.github.izakyl.folkways.plugins.build.draft.Face;
-import io.github.izakyl.folkways.plugins.build.draft.Growth;
 import io.github.izakyl.folkways.plugins.build.draft.Hint;
 import io.github.izakyl.folkways.plugins.build.draft.Pattern;
 import io.github.izakyl.folkways.plugins.build.draft.Patterns;
@@ -330,7 +329,7 @@ public final class DraftPanel {
             return;
         }
         Level level = Minecraft.getInstance().level;
-        World world = level == null ? World.NONE : chosen.capture(level, hint, Growth.first(hint));
+        World world = level == null ? World.NONE : chosen.capture(level, hint);
         // The knobs are copied as they stand, as they may be turned while it is drawn.
         Commission commission = new Commission(hint, Chosen.of(chosen.knobs(), values), world, front,
             Patterns.seedOf(chosen, hint));
@@ -356,9 +355,6 @@ public final class DraftPanel {
         }
         Drawn.Ready ready = (Drawn.Ready) drawn;
         if (LocalPatterns.local(chosen)) {
-            if (chosen.grows()) {
-                return refuse(Component.translatable(TOKEN + ".grow.local"));
-            }
             if (!DraftOffer.fits(fileOf(ready))) {
                 return refuse(Component.translatable(TOKEN + ".too_big_to_send"));
             }

@@ -23,6 +23,12 @@ import io.github.izakyl.folkways.core.api.work.Worker;
 import io.github.izakyl.folkways.core.api.work.Workload;
 import io.github.izakyl.folkways.core.engine.labor.Commit;
 import io.github.izakyl.folkways.core.engine.labor.LaborRefusal;
+import io.github.izakyl.folkways.front.api.Schema;
+import io.github.izakyl.folkways.front.api.Settings;
+import io.github.izakyl.folkways.plugins.build.draft.Chosen;
+import io.github.izakyl.folkways.plugins.build.draft.Hint;
+import io.github.izakyl.folkways.plugins.build.draft.Pattern;
+import io.github.izakyl.folkways.plugins.build.draft.Patterns;
 import io.github.izakyl.folkways.plugins.FolkwaysVanillaMod;
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
@@ -32,6 +38,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -517,6 +524,41 @@ public final class BuildPlanningGameTests {
     }
 
     @GameTest(template = "empty_large", timeoutTicks = 100)
+    public static void plannedWallsComeBeforeDrainingWaterAndLava(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        floor(helper);
+        for (int z : new int[] {7, 15}) {
+            BlockState fluid = z == 7 ? Blocks.WATER.defaultBlockState() : Blocks.LAVA.defaultBlockState();
+            BlockPos source = at(helper, 10, 1, z);
+            BlockPos flowing = source.east();
+            BlockPos wall = flowing.east();
+            BlockPos rock = wall.north();
+            for (int x = 9; x <= 13; x++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    level.setBlock(at(helper, x, 1, z + dz), STONE, 2);
+                }
+            }
+            level.setBlock(source, fluid, 2);
+            level.setBlock(flowing, fluid.setValue(net.minecraft.world.level.block.LiquidBlock.LEVEL, 3), 2);
+            level.setBlock(wall, fluid, 2);
+            SiteRig rig = SiteRig.start(level, target(level, Map.of(source, AIR, flowing, AIR, rock, AIR,
+                wall, Blocks.COBBLESTONE.defaultBlockState())));
+            helper.assertTrue(rig.site.refusals().isEmpty(), "a planned wall makes the drain possible: "
+                + rig.site.refusals());
+            helper.assertTrue(rig.before(wall, source), "the wall precedes the drain");
+            helper.assertTrue(rig.before(wall, rock), "the wall precedes excavation beside fluid");
+            Worker worker = worker(helper, at(helper, 3, 1, 3),
+                new SimpleContainer(new ItemStack(Items.COBBLESTONE, 64)));
+            helper.assertTrue(rig.work(helper, wall, worker) instanceof Outcome.Done, "the wall is laid");
+            helper.assertTrue(rig.work(helper, source, worker) instanceof Outcome.Done, "the fluid is drained");
+            helper.assertTrue(level.getBlockState(source).isAir() && level.getBlockState(flowing).isAir(),
+                "source and flowing fluid are gone");
+            helper.assertTrue(level.getBlockState(wall).is(Blocks.COBBLESTONE), "the wall stands");
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty_large", timeoutTicks = 100)
     public static void aLeftoverScaffoldIsTakenDownByItsOrder(GameTestHelper helper) {
         ServerLevel level = helper.getLevel();
         floor(helper);
@@ -569,6 +611,211 @@ public final class BuildPlanningGameTests {
         helper.assertTrue(level.getBlockState(goal).isAir(), "nor built");
         helper.assertTrue(asked.saved.get().getCompound("book").getList("buildOrders", 10).isEmpty(),
             "the order is removed with nothing left to take down");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty_large", timeoutTicks = 200)
+    public static void aPatternDrawnOnTheServerIsFiledWholeFarPastFiveHundredCells(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        BuildPresence presence = new BuildPresence(colony(helper, new Asked()), level.getServer());
+        Pattern pattern = Patterns.find(ResourceLocation.fromNamespaceAndPath(FolkwaysMod.MOD_ID, "test_slab"))
+            .orElseThrow();
+        BlockPos start = at(helper, 1, 2, 1);
+        Hint hint = new Hint.Zone(start, start.offset(39, 0, 39));
+        CompletableFuture<Rounds.Once> drawing = Rounds.drawOnce(level, pattern, hint,
+            Chosen.load(pattern.knobs(), new CompoundTag()), Direction.NORTH);
+        helper.startSequence().thenWaitUntil(() -> helper.assertTrue(drawing.isDone(), "the drawing comes back"))
+            .thenExecute(() -> {
+                Rounds.Once once = drawing.join();
+                helper.assertTrue(once instanceof Rounds.Once.Drafted, "the slab is drawn: " + once);
+                Rounds.Once.Drafted drafted = (Rounds.Once.Drafted) once;
+                helper.assertValueEqual(drafted.blueprint().blocks().size(), 1600, "every cell of the slab is kept");
+                helper.assertValueEqual(drafted.corner(), start, "the slab lies where it was marked");
+                helper.assertTrue(presence.file(level, drafted.blueprint(), drafted.corner(), "", Optional.empty(),
+                    "").isPresent(), "the slab is filed as one order");
+                helper.assertTrue(level.getBlockState(start).isAir(), "filing builds nothing for free");
+            }).thenSucceed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 40)
+    public static void aCommissionCrossesTheWireIntact(GameTestHelper helper) {
+        Hint hint = new Hint.Path(List.of(new BlockPos(1, 2, 3), new BlockPos(40, 5, -6)));
+        CompoundTag settings = new CompoundTag();
+        settings.putInt("width", 7);
+        CommissionPacket sent = new CommissionPacket(UUID.randomUUID(),
+            ResourceLocation.fromNamespaceAndPath(FolkwaysMod.MOD_ID, "arch_bridge"), hint.save(), settings,
+            Direction.EAST, "西桥", true);
+        var buffer = new net.minecraft.network.RegistryFriendlyByteBuf(io.netty.buffer.Unpooled.buffer(),
+            helper.getLevel().registryAccess());
+        try {
+            CommissionPacket.STREAM_CODEC.encode(buffer, sent);
+            CommissionPacket read = CommissionPacket.STREAM_CODEC.decode(buffer);
+            helper.assertValueEqual(read.colonyId(), sent.colonyId(), "the colony");
+            helper.assertValueEqual(read.pattern(), sent.pattern(), "the pattern");
+            helper.assertValueEqual(Hint.load(read.hint()).orElseThrow(), hint, "the mark");
+            helper.assertValueEqual(read.settings().getInt("width"), 7, "the settings");
+            helper.assertValueEqual(read.facing(), Direction.EAST, "the facing");
+            helper.assertValueEqual(read.siteName(), "西桥", "the site's name");
+            helper.assertTrue(read.raiseInCreative(), "whether to raise at once");
+        } finally {
+            buffer.release();
+        }
+        helper.succeed();
+    }
+
+    private static Chosen mineSettings(Pattern pattern, int y) {
+        CompoundTag values = new CompoundTag();
+        values.putInt("y", y);
+        values.putInt("main_east", 6);
+        values.putInt("branch_east", 3);
+        values.putBoolean("chase", false);
+        Chosen loaded = Chosen.load(pattern.knobs(), values);
+        return Chosen.of(pattern.knobs(), new Settings() {
+            public boolean flag(String key) {
+                return loaded.flag(key);
+            }
+
+            public int count(String key) {
+                return loaded.count(key);
+            }
+
+            public ResourceLocation choice(String key) {
+                return loaded.choice(key);
+            }
+
+            public Optional<ItemSpec> items(String key) {
+                for (Schema.Setting setting : pattern.knobs().settings()) {
+                    if (setting instanceof Schema.Setting.Items slot && slot.key().equals(key)) {
+                        return Optional.of(ItemSpec.of(slot.byDefault().getFirst().id()));
+                    }
+                }
+                return Optional.empty();
+            }
+        });
+    }
+
+    @GameTest(template = "empty_large", timeoutTicks = 2000)
+    public static void aWholeMineOrderCanBeBuilt(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        BlockPos ground = at(helper, 10, 40, 10);
+        for (int x = -16; x <= 22; x++) {
+            for (int z = -16; z <= 16; z++) {
+                for (int y = -18; y <= 0; y++) {
+                    level.setBlock(ground.offset(x, y, z), STONE, 2);
+                }
+            }
+        }
+        BlockPos centre = ground.offset(1, -16, 1);
+        BlockPos inside = centre.east(12).above();
+        BlockPos flowing = inside.south();
+        BlockPos outside = flowing.south();
+        level.setBlock(inside, Blocks.WATER.defaultBlockState(), 2);
+        level.setBlock(flowing, Blocks.WATER.defaultBlockState()
+            .setValue(net.minecraft.world.level.block.LiquidBlock.LEVEL, 3), 2);
+        level.setBlock(outside, Blocks.WATER.defaultBlockState(), 2);
+        Pattern pattern = Patterns.find(ResourceLocation.fromNamespaceAndPath(FolkwaysMod.MOD_ID, "mine"))
+            .orElseThrow();
+        BlockPos mark = ground.above();
+        Hint hint = new Hint.Zone(mark, mark.offset(2, 0, 2));
+        Chosen settings = mineSettings(pattern, ground.getY() - 16);
+        BuildPresence presence = new BuildPresence(colony(helper, new Asked()), level.getServer());
+        CompletableFuture<Rounds.Once> drawing = Rounds.drawOnce(level, pattern, hint, settings, Direction.NORTH);
+        AtomicReference<SiteRig> active = new AtomicReference<>();
+        AtomicReference<Worker> builder = new AtomicReference<>();
+        AtomicReference<SimpleContainer> supplies = new AtomicReference<>();
+        AtomicReference<String> failure = new AtomicReference<>();
+        helper.startSequence().thenWaitUntil(() -> helper.assertTrue(drawing.isDone(), "the mine drawing comes back"))
+            .thenExecute(() -> {
+                Rounds.Once once = drawing.join();
+                helper.assertTrue(once instanceof Rounds.Once.Drafted, "the mine is drawn: " + once);
+                Rounds.Once.Drafted drafted = (Rounds.Once.Drafted) once;
+                BlueprintBuildOrder order = presence.file(level, drafted.blueprint(), drafted.corner(), "",
+                    Optional.empty(), "").orElseThrow();
+                BuildTarget target = BuildTarget.of(order, drafted.blueprint().confirm(level)).in(level);
+                active.set(SiteRig.start(level, order.id(), target));
+                SimpleContainer pack = new SimpleContainer(128);
+                supplies.set(pack);
+                Mob body = walker(helper, mark.above());
+                builder.set((Worker) Proxy.newProxyInstance(BuildPlanningGameTests.class.getClassLoader(),
+                    new Class<?>[] {Worker.class}, (proxy, method, args) -> switch (method.getName()) {
+                        case "body" -> body;
+                        case "pack" -> pack;
+                        case "resident" -> new Resident(body.getUUID(), ResourceLocation.withDefaultNamespace("pig"));
+                        case "effects" -> Effects.NONE;
+                        case "placement" -> Placement.NOWHERE;
+                        case "held" -> new ItemStack(Items.DIAMOND_PICKAXE);
+                        case "within", "route", "supplied" -> List.of();
+                        default -> null;
+                    }));
+            }).thenWaitUntil(() -> {
+                BuildSite site = active.get().site;
+                SimpleContainer pack = supplies.get();
+                for (BuildSite.Piece piece : site.pieces()) {
+                    if (!site.before(piece).isEmpty()) {
+                        continue;
+                    }
+                    pack.clearContent();
+                    int slot = 0;
+                    for (var need : piece.node().spec().needs()) {
+                        var item = Goods.members(need.spec()).stream().findFirst().orElseThrow();
+                        long left = need.count();
+                        while (left > 0) {
+                            int count = (int) Math.min(left, item.getDefaultMaxStackSize());
+                            pack.setItem(slot++, new ItemStack(item, count));
+                            left -= count;
+                        }
+                    }
+                    Outcome outcome = Commit.run(level, piece.node(), builder.get());
+                    if (!(outcome instanceof Outcome.Done)) {
+                        failure.set("mine piece " + piece.work().focus() + " failed: " + outcome
+                            + " refusals=" + site.refusals());
+                        break;
+                    }
+                    site.ended(piece.node().id(), Ending.DONE);
+                }
+                site.tick(level);
+                helper.assertTrue(site.complete() || failure.get() != null, "mine incomplete: left=" + site.left()
+                    + " turns=" + site.turns() + " refusals=" + site.refusals() + " pieces=" + site.pieces().stream()
+                        .map(piece -> piece.work().focus() + " before=" + site.before(piece)).toList());
+            }).thenExecute(() -> {
+                helper.assertTrue(failure.get() == null, String.valueOf(failure.get()));
+                helper.assertTrue(level.getBlockState(inside).isAir() && level.getBlockState(flowing).isAir(),
+                    "water inside the drift is drained");
+                helper.assertTrue(level.getBlockState(outside).is(Blocks.COBBLESTONE), "the pocket is sealed");
+                helper.assertTrue(level.getBlockState(centre.east(14).above()).isAir(), "main drift is excavated");
+                helper.assertTrue(level.getBlockState(centre.north(7).above()).isAir(),
+                    "junction reaches the stair bottom");
+                boolean stairBottom = false;
+                for (int x = -4; x <= 4; x++) {
+                    for (int z = -4; z <= 4; z++) {
+                        BlockPos floor = centre.offset(x, 0, z);
+                        if (level.getBlockState(floor).is(Blocks.SPRUCE_PLANKS)
+                                && level.getBlockState(floor.above()).isAir()) {
+                            stairBottom = true;
+                        }
+                    }
+                }
+                helper.assertTrue(stairBottom, "the stair bottom has a landing and air above it");
+                helper.assertTrue(level.getBlockState(ground.offset(-4, 0, -4)).is(Blocks.SPRUCE_PLANKS),
+                    "the headframe deck stands");
+            }).thenSucceed();
+    }
+
+    @GameTest(template = "empty_large", timeoutTicks = 100)
+    public static void oldGrowingEntriesAreIgnoredButOrdersRemain(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        floor(helper);
+        Asked asked = new Asked();
+        Colony colony = colony(helper, asked);
+        BuildPresence presence = new BuildPresence(colony, level.getServer());
+        BlueprintBuildOrder order = presence.file(level, blueprint(BlockPos.ZERO), at(helper, 10, 1, 10), "",
+            Optional.empty(), "").orElseThrow();
+        net.minecraft.nbt.ListTag old = new net.minecraft.nbt.ListTag();
+        old.add(new CompoundTag());
+        asked.saved.get().put("growing", old);
+        BuildPresence restored = new BuildPresence(colony, level.getServer());
+        restored.settle(level.getServer());
+        helper.assertTrue(restored.site(order.id()).isPresent(), "the existing order remains after loading");
         helper.succeed();
     }
 

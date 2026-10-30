@@ -1159,8 +1159,7 @@ async function worldState(server: MinecraftServer, layout: Layout, integrations:
   };
 }
 
-// Every build site the colony keeps (blueprints and commissioned work), how far each has come; and every growing
-// pattern (the mine), which round it is on and what holds it up.
+// Every build site the colony keeps (blueprints and commissioned work), and how far each has come.
 const BUILD_PROGRESS = defineTask<{ colony_id: string }, Record<string, any>>({
   name: "folkways.bench.build-progress",
   side: "server",
@@ -1181,10 +1180,7 @@ for (var site : ((Map<?, ?>) sitesField.get(presence)).values()) {
   seen.ifPresent(v -> row.put("view", String.valueOf(v)));
   sites.add(row);
 }
-var growing = new ArrayList<Object>();
-var growingField = presence.getClass().getDeclaredField("growing"); growingField.setAccessible(true);
-for (var one : ((Map<?, ?>) growingField.get(presence)).values()) growing.add(String.valueOf(one).substring(0, Math.min(400, String.valueOf(one).length())));
-return Map.of("ok", true, "sites", sites, "growing", growing);
+return Map.of("ok", true, "sites", sites);
 `,
   }),
 });

@@ -55,10 +55,6 @@ public final class Drafting {
         return run(pattern, () -> pattern.drawOn(commission), Function.identity());
     }
 
-    public static CompletableFuture<Round> grow(Pattern pattern, Commission commission) {
-        return run(pattern, () -> pattern.growOn(commission), refused -> new Round.Stuck((Drawn.Refused) refused));
-    }
-
     /**
      * Stops a drawing whose time is up. Starlark looks for this between statements of its own; the long loops a
      * drawing runs in Java call it as they go.

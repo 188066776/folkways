@@ -4,10 +4,8 @@ import dev.blockwright.api.Context;
 import io.github.izakyl.folkways.plugins.build.draft.Commission;
 import io.github.izakyl.folkways.plugins.build.draft.Draft;
 import io.github.izakyl.folkways.plugins.build.draft.Drawn;
-import io.github.izakyl.folkways.plugins.build.draft.Growth;
 import io.github.izakyl.folkways.plugins.build.draft.Hint;
 import io.github.izakyl.folkways.plugins.build.draft.Pattern;
-import io.github.izakyl.folkways.plugins.build.draft.Round;
 import io.github.izakyl.folkways.plugins.build.draft.World;
 import io.github.izakyl.folkways.front.api.Schema;
 import io.github.izakyl.folkways.front.api.Settings;
@@ -82,7 +80,6 @@ public final class Task {
     static final int SURFACE = 90;
     static final int BOTTOM = 0;
     static final int X0 = -80, X1 = 80, Z0 = -44, Z1 = 44;
-    static final int MOST_ROUNDS = 80;
     static final TagKey<Block> ORES = TagKey.create(Registries.BLOCK, ResourceLocation.parse("c:ores"));
 
     static int hash(int x, int y, int z) {
@@ -138,35 +135,21 @@ public final class Task {
         Settings settings = new Knobs(pattern.knobs(), knobs);
         Hint hint = new Hint.Zone(new BlockPos(cx - 1, SURFACE + 1, cz - 1),
             new BlockPos(cx + 1, SURFACE + 1, cz + 1));
-        Growth growth = Growth.first(hint);
-        List<Map<String, Object>> rounds = new ArrayList<>();
+        List<Map<String, Object>> drawings = new ArrayList<>();
         Map<String, Integer> roles = new TreeMap<>();
         int[] dug = box();
         int[] mouth = box();
         int ore = 0;
-        String end = "ran out of rounds";
-        for (int round = 0; round < MOST_ROUNDS; round++) {
-            Round answered = pattern.growOn(new Commission(hint, settings, World.of(level), Direction.NORTH, 7L,
-                growth));
-            if (answered instanceof Round.Ended) {
-                end = "ended";
-                break;
-            }
-            if (answered instanceof Round.Stuck stuck) {
-                end = "stuck: " + stuck.refused().why() + " " + stuck.refused().detail();
-                break;
-            }
-            Round.Grew grew = (Round.Grew) answered;
-            Drawn.Ready ready = grew.ready();
+        Drawn answered = pattern.drawOn(new Commission(hint, settings, World.of(level), Direction.NORTH, 7L));
+        String end = answered instanceof Drawn.Ready ? "ended" : "refused: " + answered;
+        if (answered instanceof Drawn.Ready ready) {
             int[] reach = box();
             int opened = 0;
             for (Draft.Cell cell : ready.draft().cells()) {
                 BlockPos at = ready.corner().offset(cell.offset());
                 roles.merge(cell.source().role(), 1, Integer::sum);
                 grow(reach, at);
-                if (round == 0) {
-                    grow(mouth, at);
-                }
+                grow(mouth, at);
                 if (cell.state().isAir()) {
                     opened++;
                     grow(dug, at);
@@ -176,20 +159,19 @@ public final class Task {
                 }
                 level.setBlock(at, cell.state(), 2);
             }
-            rounds.add(Map.of("cells", ready.draft().cells().size(), "opened", opened, "reach", reach));
-            growth = growth.next(grew.kept(), ready.corner(), ready.draft(), hint.anchor());
+            drawings.add(Map.of("cells", ready.draft().cells().size(), "opened", opened, "reach", reach));
         }
         Map<String, Object> report = new LinkedHashMap<>();
         report.put("name", name);
         report.put("center", new int[] {cx, SURFACE, cz});
         report.put("knobs", knobs.toString());
         report.put("end", end);
-        report.put("rounds", rounds.size());
+        report.put("drawings", drawings.size());
         report.put("mouth", mouth);
         report.put("dug", dug);
         report.put("ore", ore);
         report.put("roles", roles);
-        report.put("each", rounds);
+        report.put("each", drawings);
         return report;
     }
 
@@ -218,7 +200,7 @@ public final class Task {
             "main_east", 14, "timber", "minecraft:oak_log", "planks", "minecraft:oak_planks",
             "stairs", "minecraft:oak_stairs", "rail", "minecraft:oak_fence", "gate", "minecraft:oak_fence_gate")));
         boolean ok = mines.stream().allMatch(m -> "ended".equals(((Map<?, ?>) m).get("end"))
-            && (Integer) ((Map<?, ?>) m).get("rounds") > 3);
+            && (Integer) ((Map<?, ?>) m).get("drawings") == 1);
         return Map.of("ok", ok, "surface", SURFACE, "rock", new int[] {X0, BOTTOM, Z0, X1, SURFACE, Z1},
             "mines", mines);
     }
