@@ -13,6 +13,7 @@ import io.github.izakyl.folkways.core.api.work.WorkSite;
 import io.github.izakyl.folkways.core.api.work.Worker;
 import io.github.izakyl.folkways.core.api.work.Workload;
 import io.github.izakyl.folkways.core.api.work.Xp;
+import io.github.izakyl.folkways.core.engine.labor.LaborRefusal;
 import io.github.izakyl.folkways.plugins.build.draft.Joint;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -56,6 +57,13 @@ final class EfficientBuilder {
     /** How long a hand stays at a site nothing has come of before it goes back to its other work. */
     private static final int PATIENCE_TICKS = 600;
 
+    /** How far into the plan the basket a hand carries is reckoned, so asking does not cost the whole plan. */
+    private static final int ASKED_WORKS = 64;
+
+    /** How many kinds of material one hand carries, and how many of each, before the trip is too big to fill. */
+    private static final int BASKET_KINDS = 4;
+    private static final long BASKET_PER_KIND = 16L;
+
     private final UUID order;
     private final BuildSite.Asks asks;
     private final BuildTarget target;
@@ -76,6 +84,7 @@ final class EfficientBuilder {
     private int asked;
     private boolean toldFirstShot;
     private boolean dirty;
+    private boolean drained;
     private BlockPos anchor = BlockPos.ZERO;
     private ServerLevel standing;
 
@@ -127,6 +136,7 @@ final class EfficientBuilder {
         if (target.cells().isEmpty()) {
             return;
         }
+        LOGGER.info("efficient site {}: a hand will bring {}", shortId(), needs());
         staff();
     }
 
@@ -155,6 +165,13 @@ final class EfficientBuilder {
         }
         if (claimed.isEmpty() && level.getGameTime() - lastShotAt > PATIENCE_TICKS) {
             rest(200);
+            return Workload.Within.LEAVE;
+        }
+        // A hand that spent its basket goes back for another: the site's shots draw from what is carried, not from
+        // a reservation of the plan's.
+        if (drained) {
+            drained = false;
+            rest(100);
             return Workload.Within.LEAVE;
         }
         int done = 0;
@@ -246,6 +263,9 @@ final class EfficientBuilder {
     /** The core has handed a shot back: the piece is free again, and the site says what became of it. */
     void dropped(ShotNode shot, Ending how) {
         claimed.remove(shot.work().id());
+        if (how instanceof Ending.Failed failed && failed.why() == LaborRefusal.GOODS_GONE) {
+            drained = true;
+        }
         if (!(how instanceof Ending.Done)) {
             LOGGER.info("efficient site {}: a shot at {} came back {}", shortId(), shot.focus(), how);
         }
@@ -417,18 +437,52 @@ final class EfficientBuilder {
         return at;
     }
 
-    /** The stay a resident is kept in while it is on the site. It carries nothing: each shot brings its own goods. */
+    /** The stay a resident is kept in while it is on the site. It carries the basket the shots spend. */
     NodeSpec staySpec(PresenceNode node, @Nullable BlockPos stance) {
         BlockPos where = stance == null ? anchor : stance;
         Stances footing = stance == null ? Stances.WHEREVER : Stances.at(standing, stance);
         return NodeSpec.of(UUID.randomUUID(), BuildContent.ID, new WorkSite.AtBlock(target.cell(where)), footing,
                 node)
+            .needs(needs())
             .vocation(BuildContent.trade())
             .gesture(WorkGesture.SWING)
             .focus(where)
             .estimate(100)
             .doing(BuildContent.BUILDING)
             .done();
+    }
+
+    // What a hand coming now would usefully bring: the kinds the next stretch of the plan spends most of, in a
+    // basket one resident can gather and carry. The site's shots have no reservation of their own, so what they
+    // spend has to be in the pack already.
+    List<Need> needs() {
+        ServerLevel level = standing;
+        if (level == null) {
+            return List.of();
+        }
+        Map<ItemSpec, Long> wanted = new LinkedHashMap<>();
+        int looked = 0;
+        for (Layering.Work work : works) {
+            if (finished.contains(work.id()) || work.kind() == Layering.Kind.JOIN) {
+                continue;
+            }
+            Optional<Step> maybe = work.step();
+            if (maybe.isEmpty()) {
+                continue;
+            }
+            BuildJob job = maybe.get().job(level, target, Stances.WHEREVER, latched);
+            for (Need need : job.cost()) {
+                wanted.merge(need.spec(), need.count(), Long::sum);
+            }
+            if (++looked >= ASKED_WORKS) {
+                break;
+            }
+        }
+        return wanted.entrySet().stream()
+            .sorted(Map.Entry.<ItemSpec, Long>comparingByValue().reversed())
+            .limit(BASKET_KINDS)
+            .map(entry -> new Need(entry.getKey(), Math.min(entry.getValue(), BASKET_PER_KIND), true))
+            .toList();
     }
 
     BuildTarget target() {
