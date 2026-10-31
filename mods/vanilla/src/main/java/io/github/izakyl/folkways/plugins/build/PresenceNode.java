@@ -1,6 +1,5 @@
 package io.github.izakyl.folkways.plugins.build;
 
-import io.github.izakyl.folkways.core.api.terms.Goods;
 import io.github.izakyl.folkways.core.api.terms.RefusalKind;
 import io.github.izakyl.folkways.core.api.work.Ending;
 import io.github.izakyl.folkways.core.api.work.Need;
@@ -11,19 +10,20 @@ import io.github.izakyl.folkways.core.api.work.Recourse;
 import io.github.izakyl.folkways.core.api.work.Worker;
 import io.github.izakyl.folkways.core.api.work.Workload;
 import java.util.List;
+import javax.annotation.Nullable;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
 import net.minecraft.world.InteractionHand;
-import net.minecraft.world.item.ItemStack;
 
 /**
- * A resident standing on a site that raises itself: what it is here for is being here, carrying the basket, and
- * looking busy, not the laying of any particular block.
+ * A resident standing on a site that raises itself: what it is here for is being here, carrying its share of the
+ * material, and looking busy, not the laying of any particular block.
  *
- * <p>The stay asks the colony for the materials the next stretch of the plan spends and carries them in its pack.
- * Each block is then handed to the resident as a shot of its own ({@link ShotNode}), and that shot draws what it
- * costs from the pack. A stay whose basket is spent goes back for another.
+ * <p>The stay asks the colony for the materials its run of the plan spends and carries them in its pack. Each block
+ * is then handed to the resident as a shot of its own ({@link ShotNode}), and that shot draws what it costs from the
+ * packs of the hands on the site, its own first. A stay that has built its run takes another while the site still
+ * holds anything to build with; one that can pay for nothing goes back for another basket.
  */
 final class PresenceNode implements Node, Workload.Within {
 
@@ -34,8 +34,8 @@ final class PresenceNode implements Node, Workload.Within {
 
     private final EfficientBuilder site;
     private final BlockPos stance;
-    private final List<Integer> slice;
     private final NodeSpec spec;
+    private List<Integer> slice;
     private boolean arrived;
     private boolean drained;
     private Worker who;
@@ -44,11 +44,11 @@ final class PresenceNode implements Node, Workload.Within {
     private long waitingSince = Long.MIN_VALUE;
     private long swungAt = Long.MIN_VALUE;
 
-    PresenceNode(EfficientBuilder site, BlockPos stance, List<Integer> slice) {
+    PresenceNode(EfficientBuilder site, BlockPos stance, EfficientBuilder.Run run) {
         this.site = site;
         this.stance = stance;
-        this.slice = List.copyOf(slice);
-        this.spec = site.staySpec(this, stance, this.slice);
+        this.slice = List.copyOf(run.ids());
+        this.spec = site.staySpec(this, stance, run);
     }
 
     @Override
@@ -70,8 +70,8 @@ final class PresenceNode implements Node, Workload.Within {
             site.touched();
             site.handArrived(this, who);
         }
-        // This hand's own basket is spent: it goes back for another. What another hand could not carry says
-        // nothing about this one.
+        // The shot this hand was given came back for want of goods nothing on the site could pay for: it is better
+        // sent back for another basket than kept standing where it can do nothing.
         if (drained) {
             drained = false;
             site.rest(100);
@@ -81,28 +81,23 @@ final class PresenceNode implements Node, Workload.Within {
     }
 
     /**
-     * Whether this hand carries what a piece costs. A piece needing what this one did not bring is not handed to
-     * it: the core would draw nothing, the shot would come back for want of goods, and the site would be no further
-     * on. The next basket is reckoned from what is still up, so what is left out this time comes in with another.
+     * Whether the hands on the site hold, between them, what a piece costs. A piece nothing on the site carries is
+     * not handed to this hand: the shot would come back for want of goods and the site would be no further on.
      */
     boolean canPay(List<Need> cost) {
-        if (who == null) {
-            return false;
-        }
-        Container pack = who.pack();
-        for (Need need : cost) {
-            long have = 0L;
-            for (int slot = 0; slot < pack.getContainerSize(); slot++) {
-                ItemStack stack = pack.getItem(slot);
-                if (!stack.isEmpty() && Goods.matches(stack, need.spec())) {
-                    have += stack.getCount();
-                }
-            }
-            if (have < need.count()) {
-                return false;
-            }
-        }
-        return true;
+        return site.poolPays(cost);
+    }
+
+    /** This hand's pack, which is part of the site's pool; null before it has been met. */
+    @Nullable
+    Container pack() {
+        return who == null ? null : who.pack();
+    }
+
+    /** Its run is built and the site still holds material: the hand takes the next run rather than leaving. */
+    void reslice(List<Integer> next) {
+        this.slice = List.copyOf(next);
+        waitingSince = Long.MIN_VALUE;
     }
 
     /** A shot was handed over: the hand is not idle. */
@@ -110,7 +105,7 @@ final class PresenceNode implements Node, Workload.Within {
         waitingSince = Long.MIN_VALUE;
     }
 
-    /** Nothing up could be paid for with what this hand carries. */
+    /** Nothing up could be paid for with what the site holds. */
     void waited(ServerLevel level) {
         if (waitingSince == Long.MIN_VALUE) {
             waitingSince = level.getGameTime();
@@ -122,7 +117,7 @@ final class PresenceNode implements Node, Workload.Within {
         return waitingSince != Long.MIN_VALUE && level.getGameTime() - waitingSince > BORED_TICKS;
     }
 
-    /** The shot this hand was given came back for want of goods: its basket, not the site's, is spent. */
+    /** The shot this hand was given came back for want of goods: what the site holds does not cover its run. */
     void drain() {
         drained = true;
     }

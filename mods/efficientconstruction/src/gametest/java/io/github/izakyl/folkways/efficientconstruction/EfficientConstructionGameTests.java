@@ -38,14 +38,12 @@ public final class EfficientConstructionGameTests {
 
     @GameTest(template = TEMPLATE, timeoutTicks = 20)
     public static void theSettingsRefuseToBuildNothing(GameTestHelper helper) {
-        helper.assertTrue(refused(() -> new EfficientConstruction.Settings(0, 8, 2, 16)),
+        helper.assertTrue(refused(() -> new EfficientConstruction.Settings(0, 8, 2)),
             "a block cannot be laid in no time");
-        helper.assertTrue(refused(() -> new EfficientConstruction.Settings(16, 0, 2, 16)),
+        helper.assertTrue(refused(() -> new EfficientConstruction.Settings(16, 0, 2)),
             "a site with no hands never starts");
-        helper.assertTrue(refused(() -> new EfficientConstruction.Settings(16, 8, 0, 16)),
-            "a hand that brings no kind of material builds nothing");
-        helper.assertTrue(refused(() -> new EfficientConstruction.Settings(16, 8, 2, 0)),
-            "a hand that brings none of it builds nothing");
+        helper.assertTrue(refused(() -> new EfficientConstruction.Settings(16, 8, 0)),
+            "a hand that brings no material builds nothing");
         helper.succeed();
     }
 

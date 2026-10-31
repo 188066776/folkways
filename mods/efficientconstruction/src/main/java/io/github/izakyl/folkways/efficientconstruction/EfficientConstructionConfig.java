@@ -9,8 +9,7 @@ public final class EfficientConstructionConfig {
 
     static final ModConfigSpec.IntValue TICKS_PER_BLOCK;
     static final ModConfigSpec.IntValue WORKERS_PER_SITE;
-    static final ModConfigSpec.IntValue BASKET_KINDS;
-    static final ModConfigSpec.IntValue BASKET_ITEMS;
+    static final ModConfigSpec.IntValue STACKS_PER_TRIP;
     static final ModConfigSpec SPEC;
 
     static {
@@ -25,15 +24,12 @@ public final class EfficientConstructionConfig {
             .comment("How many residents one site asks for at a time. Standing room on the site can ask for fewer.")
             .defineInRange("workersPerSite", 8, 1, 64);
 
-        BASKET_KINDS = BUILDER
-            .comment("How many kinds of material one resident carries on a trip. Each resident is given a run of the"
-                + " plan and asks for exactly what that run spends, so a wide list is filled only when the stores"
-                + " hold it. Raise it when the colony's stores are deep, lower it when only one resident turns up.")
-            .defineInRange("basketKinds", 6, 1, 8);
-
-        BASKET_ITEMS = BUILDER
-            .comment("How many of each kind one resident carries. More means fewer trips, and a harder list to fill.")
-            .defineInRange("basketItemsPerKind", 64, 1, 64);
+        STACKS_PER_TRIP = BUILDER
+            .comment("How many stacks of material one resident is asked to bring on a trip. The run it is given is cut"
+                + " to what that many stacks pay for, so a hand arrives with everything it will lay instead of coming"
+                + " back halfway. More means fewer journeys and a harder list for the colony to fill; the site asks"
+                + " for less by itself when its asks keep going unfilled.")
+            .defineInRange("stacksPerTrip", 18, 1, 36);
 
         BUILDER.pop();
         SPEC = BUILDER.build();
