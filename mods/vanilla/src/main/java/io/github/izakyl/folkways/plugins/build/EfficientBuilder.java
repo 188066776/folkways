@@ -164,8 +164,10 @@ final class EfficientBuilder {
             return false;
         }
         forgetHandsThatNeverCame(level);
-        if (!present.isEmpty() && arrived() == 0 && level.getGameTime() % 200L == 0L) {
-            LOGGER.info("efficient site {}: {} hand(s) asked, none here yet", shortId(), present.size());
+        if (level.getGameTime() % 200L == 0L) {
+            LOGGER.info("efficient site {}: built {}/{} cell(s), {} piece(s) left, hands here {}/{} asked, "
+                + "{} shot(s) out", shortId(), latched.size(), target.cells().size(), works.size() - finished.size(),
+                arrived(), present.size(), claimed.size());
         }
         staff();
         boolean changed = dirty;
@@ -253,7 +255,7 @@ final class EfficientBuilder {
     }
 
     /** Fires the shot the hand was given: what the goods it was handed pay for lands in the world. */
-    Outcome shoot(Layering.Work work, BuildJob job, ServerLevel level, Worker who) {
+    Outcome shoot(PresenceNode hand, Layering.Work work, BuildJob job, ServerLevel level, Worker who) {
         claimed.remove(work.id());
         dirty = true;
         lastShotAt = level.getGameTime();
@@ -278,7 +280,9 @@ final class EfficientBuilder {
             if (!Bystanders.clear(level, fill(job), stances)) {
                 return Outcome.failed(BuildRefusal.OCCUPIED);
             }
+            int cells = fill(job).size();
             List<ItemStack> drops = lay(level, job);
+            hand.laid(cells);
             work.step().ifPresent(step -> latch(level, step));
             drops.forEach(stack -> Block.popResource(level, job.focus().cell(), stack));
             finished.add(work.id());
@@ -447,6 +451,8 @@ final class EfficientBuilder {
             present.put(node.id(), node);
             askedAt.put(node.id(), level.getGameTime());
             asks.submit(level.dimension(), Grown.of(node), this::ended);
+            LOGGER.info("efficient site {}: asked for a hand at {} to build {} piece(s)", shortId(),
+                stance == null ? "-" : stance.toShortString(), slice.size());
             added++;
         }
         if (added > 0) {
@@ -495,14 +501,31 @@ final class EfficientBuilder {
         }
     }
 
+    /** The asking the site made has ended, whether a hand took it or not. */
     void ended(UUID node, Ending how) {
-        present.remove(node);
-        askedAt.remove(node);
+        PresenceNode hand = present.get(node);
+        if (hand != null) {
+            gone(hand, how);
+        }
     }
 
-    void leave(PresenceNode node) {
-        present.remove(node.id());
-        askedAt.remove(node.id());
+    /** The hand's own stay is over: why it is over is the only thing that says where the site's pace went. */
+    void handLeft(PresenceNode hand, Ending how) {
+        if (present.containsKey(hand.id())) {
+            gone(hand, how);
+        }
+    }
+
+    private void gone(PresenceNode hand, Ending how) {
+        present.remove(hand.id());
+        askedAt.remove(hand.id());
+        LOGGER.info("efficient site {}: a hand is gone after {} block(s), {} tick(s) on site [{}]: {}",
+            shortId(), hand.laid(), standing == null ? -1L : hand.onSiteFor(standing),
+            hand.arrived() ? "arrived" : "never arrived", why(how));
+    }
+
+    private static String why(Ending how) {
+        return how instanceof Ending.Failed failed ? "failed:" + failed.why() : how.getClass().getSimpleName();
     }
 
     // A hand asked for long ago that has never come is a place on the site nobody is using. The asking is taken
@@ -539,7 +562,17 @@ final class EfficientBuilder {
         for (int slot = 0; slot < pack.getContainerSize(); slot++) {
             stacks += pack.getItem(slot).isEmpty() ? 0 : 1;
         }
-        LOGGER.info("efficient site {}: a hand is here with {} stack(s)", shortId(), stacks);
+        int shared = 0;
+        for (PresenceNode other : present.values()) {
+            if (other != node && other.stance() != null && other.stance().equals(node.stance())) {
+                shared++;
+            }
+        }
+        Long since = askedAt.get(node.id());
+        long waited = since == null || standing == null ? -1L : standing.getGameTime() - since;
+        LOGGER.info("efficient site {}: a hand is here at {} after {} tick(s) with {} stack(s), {} piece(s) to "
+            + "build, {} other hand(s) on the same spot", shortId(),
+            node.stance() == null ? "-" : node.stance().toShortString(), waited, stacks, node.slice().size(), shared);
     }
 
     private int arrived() {

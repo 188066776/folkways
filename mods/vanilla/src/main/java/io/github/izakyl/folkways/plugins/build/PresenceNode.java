@@ -39,6 +39,8 @@ final class PresenceNode implements Node, Workload.Within {
     private boolean arrived;
     private boolean drained;
     private Worker who;
+    private int laid;
+    private long arrivedAt = Long.MIN_VALUE;
     private long waitingSince = Long.MIN_VALUE;
     private long swungAt = Long.MIN_VALUE;
 
@@ -63,6 +65,7 @@ final class PresenceNode implements Node, Workload.Within {
     public Workload.Within.Turn next(ServerLevel level, Worker who) {
         if (!arrived) {
             arrived = true;
+            arrivedAt = level.getGameTime();
             this.who = who;
             site.touched();
             site.handArrived(this, who);
@@ -147,7 +150,7 @@ final class PresenceNode implements Node, Workload.Within {
 
     @Override
     public void ended(ServerLevel level, Ending how) {
-        site.leave(this);
+        site.handLeft(this, how);
     }
 
     // Every shot handed to this stay comes back here, taken or dropped.
@@ -160,6 +163,20 @@ final class PresenceNode implements Node, Workload.Within {
 
     boolean arrived() {
         return arrived;
+    }
+
+    /** Counts what this hand put in the world, so a stay can be read back as its own work. */
+    void laid(int cells) {
+        laid += cells;
+    }
+
+    int laid() {
+        return laid;
+    }
+
+    /** How long this hand has stood on the site, or -1 if it never got there. */
+    long onSiteFor(ServerLevel level) {
+        return arrivedAt == Long.MIN_VALUE ? -1L : level.getGameTime() - arrivedAt;
     }
 
     BlockPos stance() {

@@ -62,7 +62,7 @@ final class ShotNode implements Node {
 
     @Override
     public Outcome commit(ServerLevel level, Worker who) {
-        return site.shoot(work, job, level, who);
+        return site.shoot(hand, work, job, level, who);
     }
 
     @Override
