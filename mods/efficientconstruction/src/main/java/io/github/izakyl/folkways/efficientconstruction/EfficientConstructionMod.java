@@ -34,9 +34,7 @@ public final class EfficientConstructionMod {
     private static void applyConfig() {
         activate(new EfficientConstruction.Settings(
             EfficientConstructionConfig.TICKS_PER_BLOCK.get(),
-            EfficientConstructionConfig.WORKERS_PER_SITE.get(),
-            EfficientConstructionConfig.MATERIAL_KINDS.get(),
-            EfficientConstructionConfig.MATERIAL_STACKS.get()));
+            EfficientConstructionConfig.WORKERS_PER_SITE.get()));
     }
 
     // A Folkways Vanilla built without the efficient-construction seam cannot be extended this way: say so plainly

@@ -9,8 +9,6 @@ public final class EfficientConstructionConfig {
 
     static final ModConfigSpec.IntValue TICKS_PER_BLOCK;
     static final ModConfigSpec.IntValue WORKERS_PER_SITE;
-    static final ModConfigSpec.IntValue MATERIAL_KINDS;
-    static final ModConfigSpec.IntValue MATERIAL_STACKS;
     static final ModConfigSpec SPEC;
 
     static {
@@ -24,14 +22,6 @@ public final class EfficientConstructionConfig {
         WORKERS_PER_SITE = BUILDER
             .comment("How many residents one site asks for at a time. Standing room on the site can ask for fewer.")
             .defineInRange("workersPerSite", 8, 1, 64);
-
-        MATERIAL_KINDS = BUILDER
-            .comment("How many kinds of material one resident is asked to bring, the ones the plan spends most of.")
-            .defineInRange("materialKinds", 4, 1, 27);
-
-        MATERIAL_STACKS = BUILDER
-            .comment("Multiplies the 16 of each material a resident is asked to bring on one trip.")
-            .defineInRange("materialStacks", 1, 1, 4);
 
         BUILDER.pop();
         SPEC = BUILDER.build();

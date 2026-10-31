@@ -1,17 +1,20 @@
 package io.github.izakyl.folkways.plugins.build;
 
-import io.github.izakyl.folkways.core.api.terms.Goods;
 import io.github.izakyl.folkways.core.api.terms.ItemSpec;
 import io.github.izakyl.folkways.core.api.work.Ending;
 import io.github.izakyl.folkways.core.api.work.Grown;
 import io.github.izakyl.folkways.core.api.work.Need;
 import io.github.izakyl.folkways.core.api.work.NodeSpec;
+import io.github.izakyl.folkways.core.api.work.Outcome;
 import io.github.izakyl.folkways.core.api.work.Stances;
 import io.github.izakyl.folkways.core.api.work.WorkGesture;
+import io.github.izakyl.folkways.core.api.work.WorkNoise;
 import io.github.izakyl.folkways.core.api.work.WorkSite;
+import io.github.izakyl.folkways.core.api.work.Worker;
+import io.github.izakyl.folkways.core.api.work.Workload;
+import io.github.izakyl.folkways.core.api.work.Xp;
 import io.github.izakyl.folkways.plugins.build.draft.Joint;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -36,9 +39,9 @@ import net.minecraft.world.level.block.state.BlockState;
  * An order's work raised by the site itself rather than by hands on every block.
  *
  * <p>The plan is the one {@link Layering} lays out for the ordinary site, in the order it can be done. What changes
- * is who does it: the site fires each shot itself, as the schematicannon would, and the residents who come to the
- * site only carry what it takes and keep it going. A cell that needs something under it to stand is left until
- * that thing is there; everything else goes up as soon as its materials are in a hand at the site.
+ * is who does it: a resident standing on the site is handed one shot at a time ({@link ShotNode}), and the site fires
+ * it as the schematicannon would. No resident walks to a block, so nothing of the site's cost is pathfinding, and a
+ * cell that needs something under it to stand is left until that thing is there.
  *
  * <p>Only created when {@link EfficientConstruction#active()} is set by the add-on, so a world without it never
  * reaches this class.
@@ -47,20 +50,11 @@ final class EfficientBuilder {
 
     private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger("folkways-build");
 
-    /** How many shots one tick may fire whatever the crowd, so a whole colony cannot stall the server. */
-    private static final int MOST_SHOTS_A_TICK = 64;
-
     /** How many hands one asking may bring, so the plan is not flooded with journeys at once. */
     private static final int HANDS_A_PASS = 2;
 
-    /** How long the site keeps asking for hands when nothing at all can be laid. */
-    private static final int IDLE_TICKS = 200;
-
-    /** How many of one material one hand is asked to bring in a trip, before the stack setting multiplies it. */
-    private static final long BASKET_PER_KIND = 16L;
-
-    /** How far into the plan the basket for a hand is reckoned, so asking does not cost the whole plan each time. */
-    private static final int ASKED_WORKS = 64;
+    /** How long a hand stays at a site nothing has come of before it goes back to its other work. */
+    private static final int PATIENCE_TICKS = 600;
 
     private final UUID order;
     private final BuildSite.Asks asks;
@@ -71,15 +65,16 @@ final class EfficientBuilder {
 
     private final List<Layering.Work> works = new ArrayList<>();
     private final Set<Integer> finished = new HashSet<>();
+    private final Set<Integer> claimed = new HashSet<>();
     private final Map<UUID, PresenceNode> present = new LinkedHashMap<>();
     private final List<BlockPos> stances = new ArrayList<>();
 
-    private double credit;
     private boolean closed;
-    private long idleSince = Long.MIN_VALUE;
     private long staffAt = Long.MIN_VALUE;
+    private long lastShotAt = Long.MIN_VALUE;
     private int asked;
     private boolean toldFirstShot;
+    private boolean dirty;
     private BlockPos anchor = BlockPos.ZERO;
     private ServerLevel standing;
 
@@ -96,6 +91,7 @@ final class EfficientBuilder {
     /** Takes the order up: what was met before, then the plan for what is left. */
     void start(ServerLevel level, Set<BlockPos> met, Set<Joint> metJoints) {
         standing = level;
+        lastShotAt = level.getGameTime();
         met.forEach(cell -> latched.add(cell.offset(target.storageOrigin())));
         metJoints.forEach(joint -> joined.add(joint.moved(target.storageOrigin())));
         for (Map.Entry<BlockPos, BlockState> cell : target.cells().entrySet()) {
@@ -119,7 +115,7 @@ final class EfficientBuilder {
                 finished.add(work.id());
                 continue;
             }
-            if (satisfied(level, step.get())) {
+            if (work.kind() != Layering.Kind.JOIN && satisfied(level, step.get())) {
                 finished.add(work.id());
             }
         }
@@ -130,64 +126,53 @@ final class EfficientBuilder {
         if (target.cells().isEmpty()) {
             return;
         }
-        LOGGER.info("efficient site {}: a hand is asked for {}", shortId(), needs());
         staff();
     }
 
-    /** One turn of the site: hands asked for, and the shots those hands pay for fired. */
+    /** One turn of the site: hands asked for, and one hand kept company. */
     boolean tick(ServerLevel level) {
         if (closed) {
             return false;
         }
         standing = level;
-        boolean changed = false;
         if (nothingLeft()) {
             return false;
-        }
-        credit += arrived() / (double) EfficientConstruction.settings().ticksPerBlock();
-        int fired = 0;
-        while (credit >= 1.0D && fired < MOST_SHOTS_A_TICK) {
-            if (!fire(level)) {
-                break;
-            }
-            credit -= 1.0D;
-            fired++;
-            changed = true;
-        }
-        if (fired == 0) {
-            credit = Math.min(credit, 1.0D);
-        }
-        if (fired > 0) {
-            idleSince = Long.MIN_VALUE;
-        } else if (idleSince == Long.MIN_VALUE) {
-            idleSince = level.getGameTime();
         }
         if (!present.isEmpty() && arrived() == 0 && level.getGameTime() % 200L == 0L) {
             LOGGER.info("efficient site {}: {} hand(s) asked, none here yet", shortId(), present.size());
         }
         staff();
+        boolean changed = dirty;
+        dirty = false;
         return changed;
     }
 
-    private boolean fire(ServerLevel level) {
+    /** What a hand that is here does next: a shot of the plan, or waiting for one. */
+    Workload.Within.Turn hand(ServerLevel level, PresenceNode hand) {
+        if (closed || complete()) {
+            return Workload.Within.LEAVE;
+        }
+        if (claimed.isEmpty() && level.getGameTime() - lastShotAt > PATIENCE_TICKS) {
+            rest(200);
+            return Workload.Within.LEAVE;
+        }
         for (Layering.Work work : works) {
-            if (finished.contains(work.id())) {
+            if (finished.contains(work.id()) || claimed.contains(work.id())) {
                 continue;
             }
             Optional<Step> maybe = work.step();
-            if (maybe.isEmpty()) {
+            if (maybe.isEmpty() || work.kind() == Layering.Kind.SCAFFOLD) {
                 finished.add(work.id());
                 continue;
             }
             Step step = maybe.get();
             if (work.kind() == Layering.Kind.JOIN) {
-                if (join(level, work, step)) {
+                Joint joint = work.joint().orElse(null);
+                if (joint == null || joined.contains(joint)) {
                     finished.add(work.id());
-                    return true;
+                    continue;
                 }
-                continue;
-            }
-            if (satisfied(level, step)) {
+            } else if (satisfied(level, step)) {
                 finished.add(work.id());
                 continue;
             }
@@ -195,40 +180,52 @@ final class EfficientBuilder {
                 continue;
             }
             BuildJob job = step.job(level, target, Stances.WHEREVER, latched);
-            if (!affordable(job.cost())) {
+            List<Need> cost = work.kind() == Layering.Kind.JOIN ? joinCost(level, work) : job.cost();
+            if (cost == null) {
                 continue;
             }
-            pay(job.cost());
-            lay(level, job);
-            finished.add(work.id());
-            latch(level, step);
-            if (!toldFirstShot) {
-                toldFirstShot = true;
-                LOGGER.info("efficient site {}: first block at {} ({} piece(s) left)", shortId(),
-                    step.focus(), works.size() - finished.size());
+            claimed.add(work.id());
+            return new Workload.Within.Turn.Piece(new ShotNode(this, work, job, hand.stance(), cost, level));
+        }
+        return Workload.Within.WAIT;
+    }
+
+    /** Fires the shot the hand was given: what the goods it was handed pay for lands in the world. */
+    Outcome shoot(Layering.Work work, BuildJob job, ServerLevel level, Worker who) {
+        claimed.remove(work.id());
+        finished.add(work.id());
+        dirty = true;
+        lastShotAt = level.getGameTime();
+        if (work.kind() == Layering.Kind.JOIN) {
+            Joint joint = work.joint().orElse(null);
+            if (joint != null) {
+                Joints.Joining joining = Joints.joiner().join(level, joint.from(), joint.to(), who.supplied());
+                if (joining.joined()) {
+                    joined.add(joint);
+                }
+                joining.left().forEach(stack -> Block.popResource(level, joint.from(), stack));
             }
-            return true;
+        } else {
+            List<ItemStack> drops = lay(level, job);
+            work.step().ifPresent(step -> latch(level, step));
+            drops.forEach(stack -> Block.popResource(level, job.focus().cell(), stack));
         }
-        return false;
+        if (!toldFirstShot) {
+            toldFirstShot = true;
+            LOGGER.info("efficient site {}: first block at {} ({} piece(s) left)", shortId(),
+                job.focus().cell(), works.size() - finished.size());
+        }
+        return new Outcome.Done(
+            List.of(WorkNoise.placed(job.focus().cell(), level.getBlockState(job.focus().cell()))),
+            List.of(), Optional.of(new Xp(BuildContent.trade(), 1)), List.of());
     }
 
-    // A block that needs something to lean on, or hangs in the air until it falls, waits for what holds it up.
-    private static boolean stands(ServerLevel level, Step step) {
-        BlockState wanted = step.after().get(step.focus());
-        if (wanted == null || wanted.isAir()) {
-            return true;
-        }
-        if (!wanted.canSurvive(level, step.focus())) {
-            return false;
-        }
-        if (wanted.getBlock() instanceof FallingBlock) {
-            BlockPos below = step.focus().below();
-            return level.getBlockState(below).isFaceSturdy(level, below, Direction.UP);
-        }
-        return true;
+    /** The shot was given up before it was fired: the piece is up for another hand. */
+    void release(Layering.Work work) {
+        claimed.remove(work.id());
     }
 
-    private void lay(ServerLevel level, BuildJob job) {
+    private List<ItemStack> lay(ServerLevel level, BuildJob job) {
         Map<BlockPos, BlockState> before = new LinkedHashMap<>();
         job.before().forEach((pos, state) -> {
             BlockPos at = pos.cell();
@@ -244,19 +241,15 @@ final class EfficientBuilder {
             }
         });
         if (after.isEmpty()) {
-            return;
+            return List.of();
         }
         Set<BlockPos> shot = new LinkedHashSet<>();
         job.shot().forEach(pos -> shot.add(pos.cell()));
         Map<BlockPos, BlockData> data = new LinkedHashMap<>();
         job.data().forEach((pos, payload) -> data.put(pos.cell(), payload));
         spill(level, before.keySet());
-        List<ItemStack> drops = Rubble.lay(level, null, before, after, shot, job.focus().cell(), data,
-            ItemStack.EMPTY, SchematicPlacement.icon(job.cost()), true);
-        // What the site broke is the colony's, as it is when a resident breaks it: left where it fell.
-        for (ItemStack drop : drops) {
-            Block.popResource(level, job.focus().cell(), drop);
-        }
+        return Rubble.lay(level, null, before, after, shot, job.focus().cell(), data, ItemStack.EMPTY,
+            SchematicPlacement.icon(job.cost()), true);
     }
 
     // Whatever a broken cell held is put on the ground rather than lost with the block.
@@ -276,35 +269,22 @@ final class EfficientBuilder {
         }
     }
 
-    private boolean join(ServerLevel level, Layering.Work work, Step step) {
+    // What a turn between two laid ends costs, read off the blocks it joins. Null when the joiner cannot quote it.
+    @Nullable
+    private static List<Need> joinCost(ServerLevel level, Layering.Work work) {
         Joint joint = work.joint().orElse(null);
         if (joint == null) {
-            return true;
+            return List.of();
         }
-        if (joined.contains(joint) || Joints.joiner().joined(level, joint.from(), joint.to())) {
-            joined.add(joint);
-            return true;
-        }
-        // What a turn between two laid ends costs is read off the blocks it joins, as the ordinary site reads it.
         Optional<List<ItemStack>> quoted = Joints.joiner().cost(level, joint.from(), joint.to());
         if (quoted.isEmpty()) {
-            return false;
+            return null;
         }
         List<Need> needs = new ArrayList<>();
         for (ItemStack stack : quoted.get()) {
             needs.add(new Need(ItemSpec.of(BuiltInRegistries.ITEM.getKey(stack.getItem())), stack.getCount()));
         }
-        if (!affordable(needs)) {
-            return false;
-        }
-        List<ItemStack> paid = pay(needs);
-        Joints.Joining joining = Joints.joiner().join(level, joint.from(), joint.to(), paid);
-        if (joining.joined()) {
-            joined.add(joint);
-            return true;
-        }
-        joining.left().forEach(stack -> Block.popResource(level, joint.from(), stack));
-        return false;
+        return needs;
     }
 
     private void latch(ServerLevel level, Step step) {
@@ -328,6 +308,22 @@ final class EfficientBuilder {
         return true;
     }
 
+    // A block that needs something to lean on, or hangs in the air until it falls, waits for what holds it up.
+    private static boolean stands(ServerLevel level, Step step) {
+        BlockState wanted = step.after().get(step.focus());
+        if (wanted == null || wanted.isAir()) {
+            return true;
+        }
+        if (!wanted.canSurvive(level, step.focus())) {
+            return false;
+        }
+        if (wanted.getBlock() instanceof FallingBlock) {
+            BlockPos below = step.focus().below();
+            return level.getBlockState(below).isFaceSturdy(level, below, Direction.UP);
+        }
+        return true;
+    }
+
     /** Every cell met and every joint made: the order is built. */
     boolean complete() {
         return !closed && latched.size() == target.cells().size() && joined.containsAll(target.joints());
@@ -338,8 +334,7 @@ final class EfficientBuilder {
     }
 
     // The hands at the site, asked for as far as there are places to stand and work to do. A few at a time and no
-    // more often than the colony can take them: a hand that comes back empty-handed must not be replaced at once,
-    // or the site would ask for a fresh journey every tick and drown the plan in journeys that go nowhere.
+    // more often than the colony can take them.
     void staff() {
         ServerLevel level = standing;
         if (closed || level == null || nothingLeft()) {
@@ -351,7 +346,6 @@ final class EfficientBuilder {
         int wanted = Math.min(EfficientConstruction.settings().workersPerSite(), Math.max(1, stances.size()));
         int added = 0;
         while (present.size() < wanted && added < HANDS_A_PASS) {
-            // With no place found to stand, the colony is still asked: the resident makes its own way to the site.
             BlockPos stance = stances.isEmpty() ? null : stances.get(asked % stances.size());
             asked++;
             PresenceNode node = new PresenceNode(this, stance);
@@ -380,37 +374,15 @@ final class EfficientBuilder {
         present.remove(node.id());
     }
 
-    boolean idle(ServerLevel level) {
-        return idleSince != Long.MIN_VALUE && level.getGameTime() - idleSince > IDLE_TICKS;
-    }
-
     // A resident has just come: whatever kept the site idle until now is not this one's to answer for.
     void touched() {
-        idleSince = Long.MIN_VALUE;
+        lastShotAt = standing == null ? lastShotAt : standing.getGameTime();
     }
 
-    /** A hand reached the site; what it brought is what the site can spend from now on. */
     void handArrived(PresenceNode node) {
-        int stacks = 0;
-        for (ItemStack stack : node.held()) {
-            stacks += stack.isEmpty() ? 0 : 1;
-        }
-        if (stacks == 0) {
-            LOGGER.info("efficient site {}: a hand arrived empty", shortId());
-        } else {
-            LOGGER.info("efficient site {}: a hand arrived with {} stack(s)", shortId(), stacks);
-        }
+        LOGGER.info("efficient site {}: a hand is here", shortId());
     }
 
-    private String shortId() {
-        return order.toString().substring(0, 8);
-    }
-
-    List<PresenceNode> hands() {
-        return List.copyOf(present.values());
-    }
-
-    // Only residents who have actually come to the site carry materials or add to its pace.
     private int arrived() {
         int at = 0;
         for (PresenceNode node : present.values()) {
@@ -419,12 +391,12 @@ final class EfficientBuilder {
         return at;
     }
 
-    NodeSpec spec(PresenceNode node, BlockPos stance) {
+    /** The stay a resident is kept in while it is on the site. It carries nothing: each shot brings its own goods. */
+    NodeSpec staySpec(PresenceNode node, @Nullable BlockPos stance) {
         BlockPos where = stance == null ? anchor : stance;
         Stances footing = stance == null ? Stances.WHEREVER : Stances.at(standing, stance);
         return NodeSpec.of(UUID.randomUUID(), BuildContent.ID, new WorkSite.AtBlock(target.cell(where)), footing,
                 node)
-            .needs(needs())
             .vocation(BuildContent.trade())
             .gesture(WorkGesture.SWING)
             .focus(where)
@@ -433,76 +405,8 @@ final class EfficientBuilder {
             .done();
     }
 
-    // What a hand coming now would usefully bring: the kinds the rest of the plan spends most of, in a basket one
-    // resident can gather and carry.
-    //
-    // A laying step carries no cost of its own: what a shot spends is read off the world when the job is made, by
-    // {@code Step.job}. Asking a step for its cost directly gives nothing, and a hand asked to bring nothing walks
-    // to the site empty. So the basket is reckoned from the jobs themselves, over the next stretch of the plan.
-    List<Need> needs() {
-        ServerLevel level = standing;
-        if (level == null) {
-            return List.of();
-        }
-        Map<ItemSpec, Long> wanted = new LinkedHashMap<>();
-        int looked = 0;
-        for (Layering.Work work : works) {
-            if (finished.contains(work.id())) {
-                continue;
-            }
-            Optional<Step> maybe = work.step();
-            if (maybe.isEmpty() || work.kind() == Layering.Kind.JOIN) {
-                continue;
-            }
-            BuildJob job = maybe.get().job(level, target, Stances.WHEREVER, latched);
-            for (Need need : job.cost()) {
-                wanted.merge(need.spec(), need.count(), Long::sum);
-            }
-            if (++looked >= ASKED_WORKS) {
-                break;
-            }
-        }
-        long cap = BASKET_PER_KIND * EfficientConstruction.settings().materialStacks();
-        return wanted.entrySet().stream()
-            .sorted(Map.Entry.<ItemSpec, Long>comparingByValue().reversed())
-            .limit(EfficientConstruction.settings().materialKinds())
-            .map(entry -> new Need(entry.getKey(), Math.min(entry.getValue(), cap), true))
-            .toList();
-    }
-
-    private boolean affordable(List<Need> cost) {
-        for (Need need : cost) {
-            if (held(need.spec()) < need.count()) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private long held(ItemSpec spec) {
-        long count = 0L;
-        for (PresenceNode node : present.values()) {
-            if (node.arrived()) {
-                count += node.holding(spec);
-            }
-        }
-        return count;
-    }
-
-    private List<ItemStack> pay(List<Need> cost) {
-        List<ItemStack> paid = new ArrayList<>();
-        for (Need need : cost) {
-            long left = need.count();
-            for (PresenceNode node : present.values()) {
-                if (left <= 0) {
-                    break;
-                }
-                if (node.arrived()) {
-                    left -= node.take(need.spec(), left, paid);
-                }
-            }
-        }
-        return paid;
+    BuildTarget target() {
+        return target;
     }
 
     /** Gives the order up: every hand is turned away and the site hears no more. */
@@ -560,12 +464,7 @@ final class EfficientBuilder {
         }
     }
 
-    UUID order() {
-        return order;
-    }
-
-    @Nullable
-    ServerLevel standing() {
-        return standing;
+    private String shortId() {
+        return order.toString().substring(0, 8);
     }
 }

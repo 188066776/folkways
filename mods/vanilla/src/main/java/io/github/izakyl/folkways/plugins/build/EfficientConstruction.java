@@ -9,10 +9,15 @@ package io.github.izakyl.folkways.plugins.build;
  */
 public final class EfficientConstruction {
 
-    /** What the add-on asks of a site. Read once, when the add-on activates. */
-    public record Settings(int ticksPerBlock, int workersPerSite, int materialKinds, int materialStacks) {
+    /**
+     * What the add-on asks of a site. Read once, when the add-on activates.
+     *
+     * <p>Materials are not asked for here: what a shot spends is read off the block it lays and handed over by the
+     * core when the shot is committed.
+     */
+    public record Settings(int ticksPerBlock, int workersPerSite) {
 
-        public static final Settings DEFAULTS = new Settings(16, 8, 4, 1);
+        public static final Settings DEFAULTS = new Settings(16, 8);
 
         public Settings {
             if (ticksPerBlock < 1) {
@@ -20,9 +25,6 @@ public final class EfficientConstruction {
             }
             if (workersPerSite < 1) {
                 throw new IllegalArgumentException("a site needs at least one worker to start");
-            }
-            if (materialKinds < 1 || materialStacks < 1) {
-                throw new IllegalArgumentException("a worker must be able to bring something to build with");
             }
         }
     }
