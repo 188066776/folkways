@@ -45,11 +45,19 @@ import net.minecraft.world.level.block.state.BlockState;
  */
 final class EfficientBuilder {
 
+    private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger("folkways-build");
+
     /** How many shots one tick may fire whatever the crowd, so a whole colony cannot stall the server. */
     private static final int MOST_SHOTS_A_TICK = 64;
 
+    /** How many hands one asking may bring, so the plan is not flooded with journeys at once. */
+    private static final int HANDS_A_PASS = 2;
+
     /** How long the site keeps asking for hands when nothing at all can be laid. */
     private static final int IDLE_TICKS = 200;
+
+    /** How many of one material one hand is asked to bring in a trip, before the stack setting multiplies it. */
+    private static final long BASKET_PER_KIND = 16L;
 
     private final UUID order;
     private final BuildSite.Asks asks;
@@ -66,6 +74,10 @@ final class EfficientBuilder {
     private double credit;
     private boolean closed;
     private long idleSince = Long.MIN_VALUE;
+    private long staffAt = Long.MIN_VALUE;
+    private int asked;
+    private boolean toldFirstShot;
+    private BlockPos anchor = BlockPos.ZERO;
     private ServerLevel standing;
 
     EfficientBuilder(UUID order, BuildSite.Asks asks, BuildTarget target, Set<BlockPos> latched,
@@ -109,6 +121,9 @@ final class EfficientBuilder {
             }
         }
         stances.addAll(findStances(level));
+        anchor = target.cells().keySet().stream().findFirst().orElse(BlockPos.ZERO);
+        LOGGER.info("efficient site {}: {} cell(s), {} piece(s), {} stance(s)", shortId(),
+            target.cells().size(), works.size(), stances.size());
         staff();
     }
 
@@ -139,6 +154,9 @@ final class EfficientBuilder {
             idleSince = Long.MIN_VALUE;
         } else if (idleSince == Long.MIN_VALUE) {
             idleSince = level.getGameTime();
+        }
+        if (!present.isEmpty() && arrived() == 0 && level.getGameTime() % 200L == 0L) {
+            LOGGER.info("efficient site {}: {} hand(s) asked, none here yet", shortId(), present.size());
         }
         staff();
         return changed;
@@ -177,6 +195,11 @@ final class EfficientBuilder {
             lay(level, job);
             finished.add(work.id());
             latch(level, step);
+            if (!toldFirstShot) {
+                toldFirstShot = true;
+                LOGGER.info("efficient site {}: first block at {} ({} piece(s) left)", shortId(),
+                    step.focus(), works.size() - finished.size());
+            }
             return true;
         }
         return false;
@@ -307,19 +330,38 @@ final class EfficientBuilder {
         return latched.size() >= target.cells().size() && joined.containsAll(target.joints());
     }
 
-    // The hands at the site, asked for as far as there are places to stand and work to do.
+    // The hands at the site, asked for as far as there are places to stand and work to do. A few at a time and no
+    // more often than the colony can take them: a hand that comes back empty-handed must not be replaced at once,
+    // or the site would ask for a fresh journey every tick and drown the plan in journeys that go nowhere.
     void staff() {
         ServerLevel level = standing;
-        if (closed || level == null || stances.isEmpty() || nothingLeft()) {
+        if (closed || level == null || nothingLeft()) {
             return;
         }
-        int wanted = Math.min(EfficientConstruction.settings().workersPerSite(), stances.size());
-        int at = 0;
-        while (present.size() < wanted) {
-            BlockPos stance = stances.get(at++ % stances.size());
+        if (level.getGameTime() < staffAt) {
+            return;
+        }
+        int wanted = Math.min(EfficientConstruction.settings().workersPerSite(), Math.max(1, stances.size()));
+        int added = 0;
+        while (present.size() < wanted && added < HANDS_A_PASS) {
+            // With no place found to stand, the colony is still asked: the resident makes its own way to the site.
+            BlockPos stance = stances.isEmpty() ? null : stances.get(asked % stances.size());
+            asked++;
             PresenceNode node = new PresenceNode(this, stance);
             present.put(node.id(), node);
             asks.submit(level.dimension(), Grown.of(node), this::ended);
+            added++;
+        }
+        if (added > 0) {
+            LOGGER.info("efficient site {}: asked for {} hand(s), {} at the site", shortId(), added, present.size());
+        }
+    }
+
+    /** Holds the next asking back, so a site nothing can be done at does not ask again in the same breath. */
+    void rest(long ticks) {
+        ServerLevel level = standing;
+        if (level != null) {
+            staffAt = level.getGameTime() + ticks;
         }
     }
 
@@ -340,6 +382,23 @@ final class EfficientBuilder {
         idleSince = Long.MIN_VALUE;
     }
 
+    /** A hand reached the site; what it brought is what the site can spend from now on. */
+    void handArrived(PresenceNode node) {
+        int stacks = 0;
+        for (ItemStack stack : node.held()) {
+            stacks += stack.isEmpty() ? 0 : 1;
+        }
+        if (stacks == 0) {
+            LOGGER.info("efficient site {}: a hand arrived empty", shortId());
+        } else {
+            LOGGER.info("efficient site {}: a hand arrived with {} stack(s)", shortId(), stacks);
+        }
+    }
+
+    private String shortId() {
+        return order.toString().substring(0, 8);
+    }
+
     List<PresenceNode> hands() {
         return List.copyOf(present.values());
     }
@@ -354,18 +413,22 @@ final class EfficientBuilder {
     }
 
     NodeSpec spec(PresenceNode node, BlockPos stance) {
-        return NodeSpec.of(UUID.randomUUID(), BuildContent.ID, new WorkSite.AtBlock(target.cell(stance)),
-                Stances.at(standing, stance), node)
+        BlockPos where = stance == null ? anchor : stance;
+        Stances footing = stance == null ? Stances.WHEREVER : Stances.at(standing, stance);
+        return NodeSpec.of(UUID.randomUUID(), BuildContent.ID, new WorkSite.AtBlock(target.cell(where)), footing,
+                node)
             .needs(needs())
             .vocation(BuildContent.trade())
             .gesture(WorkGesture.SWING)
-            .focus(stance)
+            .focus(where)
             .estimate(100)
             .doing(BuildContent.BUILDING)
             .done();
     }
 
-    // What a hand coming now would usefully bring: the kinds the rest of the plan spends most of.
+    // What a hand coming now would usefully bring: the kinds the rest of the plan spends most of, in a basket one
+    // resident can gather and carry. Asking for a whole stack of everything the plan will ever need is a basket the
+    // colony may never be able to fill, and a hand that never comes builds nothing.
     List<Need> needs() {
         Map<ItemSpec, Long> wanted = new LinkedHashMap<>();
         for (Layering.Work work : works) {
@@ -375,7 +438,7 @@ final class EfficientBuilder {
             work.step().ifPresent(step -> step.cost()
                 .forEach(need -> wanted.merge(need.spec(), need.count(), Long::sum)));
         }
-        long cap = 64L * EfficientConstruction.settings().materialStacks();
+        long cap = BASKET_PER_KIND * EfficientConstruction.settings().materialStacks();
         return wanted.entrySet().stream()
             .sorted(Map.Entry.<ItemSpec, Long>comparingByValue().reversed())
             .limit(EfficientConstruction.settings().materialKinds())

@@ -12,7 +12,7 @@ public final class EfficientConstruction {
     /** What the add-on asks of a site. Read once, when the add-on activates. */
     public record Settings(int ticksPerBlock, int workersPerSite, int materialKinds, int materialStacks) {
 
-        public static final Settings DEFAULTS = new Settings(16, 8, 6, 1);
+        public static final Settings DEFAULTS = new Settings(16, 8, 4, 1);
 
         public Settings {
             if (ticksPerBlock < 1) {

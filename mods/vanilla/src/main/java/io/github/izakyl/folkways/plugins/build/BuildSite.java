@@ -283,7 +283,9 @@ final class BuildSite {
     }
 
     void start(ServerLevel level, Set<BlockPos> met, Set<Joint> metJoints) {
-        if (EfficientConstruction.active()) {
+        // Work that opted out of scaffolds is single-cell infrastructure, not an order: it keeps the ordinary site,
+        // so the colony is not asked for a crew to lay one block of floor.
+        if (EfficientConstruction.active() && scaffoldsAllowed) {
             efficient = new EfficientBuilder(order, asks, target, latched, joined, refused);
             efficient.start(level, met, metJoints);
             return;

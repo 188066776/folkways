@@ -27,11 +27,11 @@ public final class EfficientConstructionConfig {
 
         MATERIAL_KINDS = BUILDER
             .comment("How many kinds of material one resident is asked to bring, the ones the plan spends most of.")
-            .defineInRange("materialKinds", 6, 1, 27);
+            .defineInRange("materialKinds", 4, 1, 27);
 
         MATERIAL_STACKS = BUILDER
-            .comment("How many stacks of each material one resident is asked to bring.")
-            .defineInRange("materialStacks", 1, 1, 36);
+            .comment("Multiplies the 16 of each material a resident is asked to bring on one trip.")
+            .defineInRange("materialStacks", 1, 1, 4);
 
         BUILDER.pop();
         SPEC = BUILDER.build();

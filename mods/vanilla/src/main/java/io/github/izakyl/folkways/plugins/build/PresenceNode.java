@@ -29,6 +29,9 @@ final class PresenceNode implements Node, Workload.Within {
 
     private static final int SWING_TICKS = 10;
 
+    /** How long the site waits before asking for hands again after one came back with nothing to spend. */
+    private static final int REST_TICKS = 200;
+
     private final EfficientBuilder site;
     private final NodeSpec spec;
     private List<ItemStack> held = List.of();
@@ -56,9 +59,22 @@ final class PresenceNode implements Node, Workload.Within {
             arrived = true;
             held = new ArrayList<>(who.supplied());
             site.touched();
+            site.handArrived(this);
             site.staff();
         }
-        if (site.complete() || site.idle(level) || empty()) {
+        if (site.complete()) {
+            site.leave(this);
+            return Workload.Within.LEAVE;
+        }
+        // A hand with nothing in its pack is no hand at all: the colony is asked again only after a pause, or the
+        // site would send it out, take it back and send it out again every tick.
+        if (empty()) {
+            site.rest(REST_TICKS);
+            site.leave(this);
+            return Workload.Within.LEAVE;
+        }
+        if (site.idle(level)) {
+            site.rest(REST_TICKS);
             site.leave(this);
             return Workload.Within.LEAVE;
         }
@@ -98,6 +114,11 @@ final class PresenceNode implements Node, Workload.Within {
     /** Whether this resident has actually come to the site yet. */
     boolean arrived() {
         return arrived;
+    }
+
+    /** What this resident still carries; read back when it leaves so the site can give the rest up. */
+    List<ItemStack> held() {
+        return held;
     }
 
     /** How much of {@code spec} this pack still holds. */
