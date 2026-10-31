@@ -12,12 +12,14 @@ public final class EfficientConstruction {
     /**
      * What the add-on asks of a site. Read once, when the add-on activates.
      *
-     * <p>Materials are not asked for here: what a shot spends is read off the block it lays and handed over by the
-     * core when the shot is committed.
+     * <p>{@code basketKinds} and {@code basketItemsPerKind} say how much a hand carries on one trip. They are a
+     * trade-off the colony makes, not a preference: a node's whole list is reserved before anyone is sent, and a
+     * list too wide to fill leaves the node waiting for goods instead of sending a hand. Wide is fewer trips; narrow
+     * is more hands working at once.
      */
-    public record Settings(int ticksPerBlock, int workersPerSite) {
+    public record Settings(int ticksPerBlock, int workersPerSite, int basketKinds, int basketItemsPerKind) {
 
-        public static final Settings DEFAULTS = new Settings(16, 8);
+        public static final Settings DEFAULTS = new Settings(16, 8, 6, 64);
 
         public Settings {
             if (ticksPerBlock < 1) {
@@ -25,6 +27,9 @@ public final class EfficientConstruction {
             }
             if (workersPerSite < 1) {
                 throw new IllegalArgumentException("a site needs at least one worker to start");
+            }
+            if (basketKinds < 1 || basketItemsPerKind < 1) {
+                throw new IllegalArgumentException("a hand must be able to bring something to build with");
             }
         }
     }

@@ -10,7 +10,7 @@ import net.neoforged.fml.event.config.ModConfigEvent;
 import org.slf4j.Logger;
 
 /**
- * Folkways: Efficient Construction — the switch that lets a build site raise itself instead of having residents
+ * Folkways: Efficient Construction - the switch that lets a build site raise itself instead of having residents
  * place every block.
  *
  * <p>This jar holds no building code: it only tells Folkways Vanilla to use the efficient site, and hands it the
@@ -34,7 +34,9 @@ public final class EfficientConstructionMod {
     private static void applyConfig() {
         activate(new EfficientConstruction.Settings(
             EfficientConstructionConfig.TICKS_PER_BLOCK.get(),
-            EfficientConstructionConfig.WORKERS_PER_SITE.get()));
+            EfficientConstructionConfig.WORKERS_PER_SITE.get(),
+            EfficientConstructionConfig.BASKET_KINDS.get(),
+            EfficientConstructionConfig.BASKET_ITEMS.get()));
     }
 
     // A Folkways Vanilla built without the efficient-construction seam cannot be extended this way: say so plainly

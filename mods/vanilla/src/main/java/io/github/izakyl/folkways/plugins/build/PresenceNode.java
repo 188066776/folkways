@@ -1,7 +1,6 @@
 package io.github.izakyl.folkways.plugins.build;
 
 import io.github.izakyl.folkways.core.api.terms.Goods;
-import io.github.izakyl.folkways.core.api.terms.ItemSpec;
 import io.github.izakyl.folkways.core.api.terms.RefusalKind;
 import io.github.izakyl.folkways.core.api.work.Ending;
 import io.github.izakyl.folkways.core.api.work.Need;
@@ -35,6 +34,7 @@ final class PresenceNode implements Node, Workload.Within {
 
     private final EfficientBuilder site;
     private final BlockPos stance;
+    private final List<Integer> slice;
     private final NodeSpec spec;
     private boolean arrived;
     private boolean drained;
@@ -42,10 +42,11 @@ final class PresenceNode implements Node, Workload.Within {
     private long waitingSince = Long.MIN_VALUE;
     private long swungAt = Long.MIN_VALUE;
 
-    PresenceNode(EfficientBuilder site, BlockPos stance) {
+    PresenceNode(EfficientBuilder site, BlockPos stance, List<Integer> slice) {
         this.site = site;
         this.stance = stance;
-        this.spec = site.staySpec(this, stance);
+        this.slice = List.copyOf(slice);
+        this.spec = site.staySpec(this, stance, this.slice);
     }
 
     @Override
@@ -163,5 +164,10 @@ final class PresenceNode implements Node, Workload.Within {
 
     BlockPos stance() {
         return stance;
+    }
+
+    /** This hand's own run of the plan, in the order it is built. */
+    List<Integer> slice() {
+        return slice;
     }
 }

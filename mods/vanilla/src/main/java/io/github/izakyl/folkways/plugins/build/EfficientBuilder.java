@@ -17,6 +17,7 @@ import io.github.izakyl.folkways.core.engine.labor.LaborRefusal;
 import io.github.izakyl.folkways.plugins.build.draft.Joint;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -57,8 +58,8 @@ final class EfficientBuilder {
     /** How long a hand stays at a site nothing has come of before it goes back to its other work. */
     private static final int PATIENCE_TICKS = 600;
 
-    /** How far into the plan the basket a hand carries is reckoned, so asking does not cost the whole plan. */
-    private static final int ASKED_WORKS = 64;
+    /** How many pieces one hand is given at a time: its own run of the plan, and the goods that run spends. */
+    private static final int SLICE_PER_HAND = 24;
 
     /**
      * How long a hand may be asked for and not come before the asking is taken back and made again. This is a
@@ -66,14 +67,6 @@ final class EfficientBuilder {
      * out takes minutes, and taking the asking back under it only sends another resident out behind it.
      */
     private static final int ASK_TICKS = 6000;
-
-    /**
-     * How many kinds of material one hand carries, and how many of each. Kept small on purpose: the colony
-     * reserves a node's needs in full before it sends anyone, and eight hands asking for the same wide basket
-     * cannot all be filled out of one store. A slim basket is filled for everyone, and the hands work side by side.
-     */
-    private static final int BASKET_KINDS = 2;
-    private static final long BASKET_PER_KIND = 16L;
 
     private final UUID order;
     private final BuildSite.Asks asks;
@@ -83,11 +76,18 @@ final class EfficientBuilder {
     private final Map<BlockPos, BuildRefusal> refused;
 
     private final List<Layering.Work> works = new ArrayList<>();
+    private final Map<Integer, Layering.Work> byId = new LinkedHashMap<>();
     private final Set<Integer> finished = new HashSet<>();
     private final Set<Integer> claimed = new HashSet<>();
     private final Map<UUID, PresenceNode> present = new LinkedHashMap<>();
     private final Map<UUID, Long> askedAt = new LinkedHashMap<>();
     private final List<BlockPos> stances = new ArrayList<>();
+
+    /** Where the next slice of the plan begins: each hand takes a run of pieces and builds only those. */
+    private int sliceAt;
+
+    /** Runs handed to a hand that never came, put back in front of the cursor rather than behind it. */
+    private final Set<Integer> abandoned = new LinkedHashSet<>();
 
     private boolean closed;
     private long staffAt = Long.MIN_VALUE;
@@ -126,6 +126,7 @@ final class EfficientBuilder {
         Layering.Plan plan = Layering.of(level, target, latched);
         refused.putAll(plan.refused());
         works.addAll(plan.works());
+        works.forEach(work -> byId.put(work.id(), work));
         for (Layering.Work work : works) {
             Optional<Step> step = work.step();
             if (step.isEmpty() || work.kind() == Layering.Kind.SCAFFOLD) {
@@ -149,7 +150,7 @@ final class EfficientBuilder {
         if (target.cells().isEmpty()) {
             return;
         }
-        LOGGER.info("efficient site {}: a hand will bring {}", shortId(), needs());
+        LOGGER.info("efficient site {}: up to {} piece(s) a hand", shortId(), SLICE_PER_HAND);
         staff();
     }
 
@@ -172,7 +173,7 @@ final class EfficientBuilder {
         return changed;
     }
 
-    /** What a hand that is here does next: a shot of the plan, or waiting for one. */
+    /** What a hand that is here does next: a shot of its own slice of the plan, in the order the plan lays it. */
     Workload.Within.Turn hand(ServerLevel level, PresenceNode hand) {
         if (closed || complete()) {
             return Workload.Within.LEAVE;
@@ -183,25 +184,28 @@ final class EfficientBuilder {
         }
         int unsupported = 0;
         int broke = 0;
-        for (Layering.Work work : works) {
-            if (finished.contains(work.id()) || claimed.contains(work.id())) {
+        boolean mine = false;
+        for (int id : hand.slice()) {
+            Layering.Work work = byId.get(id);
+            if (work == null || finished.contains(id) || claimed.contains(id)) {
                 continue;
             }
+            mine = true;
             Optional<Step> maybe = work.step();
             if (maybe.isEmpty() || work.kind() == Layering.Kind.SCAFFOLD) {
-                finished.add(work.id());
+                finished.add(id);
                 continue;
             }
             Step step = maybe.get();
             if (work.kind() == Layering.Kind.JOIN) {
                 Joint joint = work.joint().orElse(null);
                 if (joint == null || joined.contains(joint)) {
-                    finished.add(work.id());
+                    finished.add(id);
                     continue;
                 }
             } else if (satisfied(level, step)) {
                 latch(level, step);
-                finished.add(work.id());
+                finished.add(id);
                 continue;
             }
             if (!stands(level, step)) {
@@ -213,7 +217,7 @@ final class EfficientBuilder {
                 job = step.job(level, target, Stances.WHEREVER, latched);
             } catch (RuntimeException broken) {
                 if (broke++ == 0) {
-                    LOGGER.warn("efficient site {}: piece {} will not address", shortId(), work.id(), broken);
+                    LOGGER.warn("efficient site {}: piece {} will not address", shortId(), id, broken);
                 }
                 continue;
             }
@@ -225,7 +229,7 @@ final class EfficientBuilder {
             if (!hand.canPay(cost)) {
                 continue;
             }
-            claimed.add(work.id());
+            claimed.add(id);
             BlockPos stance = hand.stance() == null ? anchor : hand.stance();
             hand.paid();
             return new Workload.Within.Turn.Piece(new ShotNode(this, hand, work, job, stance, cost, level));
@@ -234,6 +238,11 @@ final class EfficientBuilder {
             toldWhyAt = level.getGameTime();
             LOGGER.info("efficient site {}: nothing up, finished={} claimed={} unsupported={} broken={}",
                 shortId(), finished.size(), claimed.size(), unsupported, broke);
+        }
+        // Its own run of the plan is built: this hand is done, and another takes the next run.
+        if (!mine) {
+            rest(40);
+            return Workload.Within.LEAVE;
         }
         hand.waited(level);
         if (hand.bored(level)) {
@@ -427,9 +436,14 @@ final class EfficientBuilder {
         int wanted = Math.min(EfficientConstruction.settings().workersPerSite(), Math.max(1, stances.size()));
         int added = 0;
         while (present.size() < wanted && added < HANDS_A_PASS) {
+            // Each hand is given its own run of the plan, so what it is asked to carry is exactly what it will lay.
+            List<Integer> slice = nextSlice();
+            if (slice.isEmpty()) {
+                return;
+            }
             BlockPos stance = stances.isEmpty() ? null : stances.get(asked % stances.size());
             asked++;
-            PresenceNode node = new PresenceNode(this, stance);
+            PresenceNode node = new PresenceNode(this, stance, slice);
             present.put(node.id(), node);
             askedAt.put(node.id(), level.getGameTime());
             asks.submit(level.dimension(), Grown.of(node), this::ended);
@@ -438,6 +452,39 @@ final class EfficientBuilder {
         if (added > 0) {
             LOGGER.info("efficient site {}: asked for {} hand(s), {} at the site", shortId(), added, present.size());
         }
+    }
+
+    /**
+     * The next run of the plan nobody has taken: collected in the plan's own order, so a hand's run can be built
+     * front to back, and wrapping round once everything behind has been handed out.
+     */
+    private List<Integer> nextSlice() {
+        if (works.isEmpty()) {
+            return List.of();
+        }
+        List<Integer> slice = new ArrayList<>();
+        // Runs given up by a hand that never came are taken first, or they would wait for the cursor to come round.
+        Iterator<Integer> given = abandoned.iterator();
+        while (given.hasNext() && slice.size() < SLICE_PER_HAND) {
+            int id = given.next();
+            given.remove();
+            if (!finished.contains(id)) {
+                slice.add(id);
+            }
+        }
+        int scanned = 0;
+        while (slice.size() < SLICE_PER_HAND && scanned < works.size()) {
+            if (sliceAt >= works.size()) {
+                sliceAt = 0;
+            }
+            Layering.Work work = works.get(sliceAt++);
+            scanned++;
+            if (finished.contains(work.id())) {
+                continue;
+            }
+            slice.add(work.id());
+        }
+        return slice;
     }
 
     /** Holds the next asking back, so a site nothing can be done at does not ask again in the same breath. */
@@ -472,7 +519,10 @@ final class EfficientBuilder {
         }
         for (UUID node : stale) {
             asks.withdraw(node);
-            present.remove(node);
+            PresenceNode gone = present.remove(node);
+            if (gone != null) {
+                abandoned.addAll(gone.slice());
+            }
             askedAt.remove(node);
             LOGGER.info("efficient site {}: a hand never came; asking again", shortId());
         }
@@ -500,13 +550,13 @@ final class EfficientBuilder {
         return at;
     }
 
-    /** The stay a resident is kept in while it is on the site. It carries the basket the shots spend. */
-    NodeSpec staySpec(PresenceNode node, @Nullable BlockPos stance) {
+    /** The stay a resident is kept in while it is on the site. It carries exactly what its own run will spend. */
+    NodeSpec staySpec(PresenceNode node, @Nullable BlockPos stance, List<Integer> slice) {
         BlockPos where = stance == null ? anchor : stance;
         Stances footing = stance == null ? Stances.WHEREVER : Stances.at(standing, stance);
         return NodeSpec.of(UUID.randomUUID(), BuildContent.ID, new WorkSite.AtBlock(target.cell(where)), footing,
                 node)
-            .needs(needs())
+            .needs(needs(slice))
             .vocation(BuildContent.trade())
             .gesture(WorkGesture.SWING)
             .focus(where)
@@ -515,36 +565,38 @@ final class EfficientBuilder {
             .done();
     }
 
-    // What a hand coming now would usefully bring: the kinds the next stretch of the plan spends most of, in a
-    // basket one resident can gather and carry. The site's shots have no reservation of their own, so what they
-    // spend has to be in the pack already.
-    List<Need> needs() {
+    // What one hand's run of the plan costs, in the kinds and counts it will actually lay. The site's shots have no
+    // reservation of their own, so this is what has to be in the pack when the run is built.
+    List<Need> needs(List<Integer> slice) {
         ServerLevel level = standing;
-        if (level == null) {
+        if (level == null || slice.isEmpty()) {
             return List.of();
         }
         Map<ItemSpec, Long> wanted = new LinkedHashMap<>();
-        int looked = 0;
-        for (Layering.Work work : works) {
-            if (finished.contains(work.id()) || work.kind() == Layering.Kind.JOIN) {
+        for (int id : slice) {
+            Layering.Work work = byId.get(id);
+            if (work == null || finished.contains(id) || work.kind() == Layering.Kind.JOIN) {
                 continue;
             }
             Optional<Step> maybe = work.step();
             if (maybe.isEmpty()) {
                 continue;
             }
-            BuildJob job = maybe.get().job(level, target, Stances.WHEREVER, latched);
-            for (Need need : job.cost()) {
-                wanted.merge(need.spec(), need.count(), Long::sum);
-            }
-            if (++looked >= ASKED_WORKS) {
-                break;
+            try {
+                BuildJob job = maybe.get().job(level, target, Stances.WHEREVER, latched);
+                for (Need need : job.cost()) {
+                    wanted.merge(need.spec(), need.count(), Long::sum);
+                }
+            } catch (RuntimeException broken) {
+                // A piece that will not address is left out of the basket and skipped when the run is built.
+                LOGGER.warn("efficient site {}: piece {} will not address", shortId(), id, broken);
             }
         }
         return wanted.entrySet().stream()
             .sorted(Map.Entry.<ItemSpec, Long>comparingByValue().reversed())
-            .limit(BASKET_KINDS)
-            .map(entry -> new Need(entry.getKey(), Math.min(entry.getValue(), BASKET_PER_KIND), true))
+            .limit(EfficientConstruction.settings().basketKinds())
+            .map(entry -> new Need(entry.getKey(),
+                Math.min(entry.getValue(), EfficientConstruction.settings().basketItemsPerKind()), true))
             .toList();
     }
 
