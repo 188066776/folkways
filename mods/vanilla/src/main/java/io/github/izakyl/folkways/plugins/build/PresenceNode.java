@@ -81,6 +81,14 @@ final class PresenceNode implements Node, Workload.Within {
         site.leave(this);
     }
 
+    // Every shot handed to this stay comes back here, taken or dropped.
+    @Override
+    public void ended(ServerLevel level, Node piece, Ending how) {
+        if (piece instanceof ShotNode shot) {
+            site.dropped(shot, how);
+        }
+    }
+
     boolean arrived() {
         return arrived;
     }

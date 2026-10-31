@@ -72,4 +72,12 @@ final class ShotNode implements Node {
     public void ended(ServerLevel level, Ending how) {
         site.release(work);
     }
+
+    Layering.Work work() {
+        return work;
+    }
+
+    BlockPos focus() {
+        return job.focus().cell();
+    }
 }

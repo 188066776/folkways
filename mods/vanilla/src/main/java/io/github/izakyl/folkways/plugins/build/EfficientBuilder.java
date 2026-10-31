@@ -72,6 +72,7 @@ final class EfficientBuilder {
     private boolean closed;
     private long staffAt = Long.MIN_VALUE;
     private long lastShotAt = Long.MIN_VALUE;
+    private long toldWhyAt = Long.MIN_VALUE;
     private int asked;
     private boolean toldFirstShot;
     private boolean dirty;
@@ -156,6 +157,9 @@ final class EfficientBuilder {
             rest(200);
             return Workload.Within.LEAVE;
         }
+        int done = 0;
+        int unsupported = 0;
+        int broke = 0;
         for (Layering.Work work : works) {
             if (finished.contains(work.id()) || claimed.contains(work.id())) {
                 continue;
@@ -177,15 +181,29 @@ final class EfficientBuilder {
                 continue;
             }
             if (!stands(level, step)) {
+                unsupported++;
                 continue;
             }
-            BuildJob job = step.job(level, target, Stances.WHEREVER, latched);
+            BuildJob job;
+            try {
+                job = step.job(level, target, Stances.WHEREVER, latched);
+            } catch (RuntimeException broken) {
+                if (broke++ == 0) {
+                    LOGGER.warn("efficient site {}: piece {} will not address", shortId(), work.id(), broken);
+                }
+                continue;
+            }
             List<Need> cost = work.kind() == Layering.Kind.JOIN ? joinCost(level, work) : job.cost();
             if (cost == null) {
                 continue;
             }
             claimed.add(work.id());
             return new Workload.Within.Turn.Piece(new ShotNode(this, work, job, hand.stance(), cost, level));
+        }
+        if (level.getGameTime() - toldWhyAt >= 200L) {
+            toldWhyAt = level.getGameTime();
+            LOGGER.info("efficient site {}: nothing up — finished={} claimed={} waited={} unsupported={} "
+                + "broken={}", shortId(), finished.size(), claimed.size(), done, unsupported, broke);
         }
         return Workload.Within.WAIT;
     }
@@ -223,6 +241,14 @@ final class EfficientBuilder {
     /** The shot was given up before it was fired: the piece is up for another hand. */
     void release(Layering.Work work) {
         claimed.remove(work.id());
+    }
+
+    /** The core has handed a shot back: the piece is free again, and the site says what became of it. */
+    void dropped(ShotNode shot, Ending how) {
+        claimed.remove(shot.work().id());
+        if (!(how instanceof Ending.Done)) {
+            LOGGER.info("efficient site {}: a shot at {} came back {}", shortId(), shot.focus(), how);
+        }
     }
 
     private List<ItemStack> lay(ServerLevel level, BuildJob job) {
