@@ -213,6 +213,9 @@ final class BuildSite {
 
     private final UUID order;
     private final Asks asks;
+    // Set only when the efficient-construction add-on is installed: the site then raises itself.
+    @Nullable
+    private EfficientBuilder efficient;
     private final Emptying emptying;
     private final BuildTarget target;
     private final TemporaryScaffolds temporary;
@@ -280,6 +283,11 @@ final class BuildSite {
     }
 
     void start(ServerLevel level, Set<BlockPos> met, Set<Joint> metJoints) {
+        if (EfficientConstruction.active()) {
+            efficient = new EfficientBuilder(order, asks, target, latched, joined, refused);
+            efficient.start(level, met, metJoints);
+            return;
+        }
         dimension = level.dimension();
         standing = level;
         met.forEach(cell -> latched.add(cell.offset(target.storageOrigin())));
@@ -1450,6 +1458,9 @@ final class BuildSite {
      * any piece came or went.
      */
     boolean tick(ServerLevel level) {
+        if (efficient != null) {
+            return efficient.tick(level);
+        }
         if (closed) {
             return false;
         }
@@ -1623,6 +1634,9 @@ final class BuildSite {
 
     /** Every cell met, every joint made, every piece ended: scaffolds left over included. */
     boolean complete() {
+        if (efficient != null) {
+            return efficient.complete();
+        }
         return !closed && stays.isEmpty() && live.isEmpty() && held.isEmpty() && joints.isEmpty()
             && latched.size() == target.cells().size() && joined.containsAll(target.joints()) && temporary.isEmpty();
     }
@@ -1683,6 +1697,9 @@ final class BuildSite {
 
     /** Stops hearing and lifts the storage exclusions, the colony closing. */
     void forget() {
+        if (efficient != null) {
+            efficient.close();
+        }
         closed = true;
         emptying.close();
         live.clear();
