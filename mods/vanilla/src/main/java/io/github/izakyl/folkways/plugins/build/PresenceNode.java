@@ -28,6 +28,7 @@ final class PresenceNode implements Node, Workload.Within {
     private final BlockPos stance;
     private final NodeSpec spec;
     private boolean arrived;
+    private boolean drained;
     private long swungAt = Long.MIN_VALUE;
 
     PresenceNode(EfficientBuilder site, BlockPos stance) {
@@ -51,9 +52,21 @@ final class PresenceNode implements Node, Workload.Within {
         if (!arrived) {
             arrived = true;
             site.touched();
-            site.handArrived(this);
+            site.handArrived(this, who);
+        }
+        // This hand's own basket is spent: it goes back for another. What another hand could not carry says
+        // nothing about this one.
+        if (drained) {
+            drained = false;
+            site.rest(100);
+            return Workload.Within.LEAVE;
         }
         return site.hand(level, this);
+    }
+
+    /** The shot this hand was given came back for want of goods: its basket, not the site's, is spent. */
+    void drain() {
+        drained = true;
     }
 
     // The resident keeps at it while it stands there: the work itself is the site's.

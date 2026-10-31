@@ -60,6 +60,9 @@ final class EfficientBuilder {
     /** How far into the plan the basket a hand carries is reckoned, so asking does not cost the whole plan. */
     private static final int ASKED_WORKS = 64;
 
+    /** How long a hand may be asked for and not come before the asking is taken back and made again. */
+    private static final int ASK_TICKS = 1200;
+
     /** How many kinds of material one hand carries, and how many of each, before the trip is too big to fill. */
     private static final int BASKET_KINDS = 4;
     private static final long BASKET_PER_KIND = 16L;
@@ -75,6 +78,7 @@ final class EfficientBuilder {
     private final Set<Integer> finished = new HashSet<>();
     private final Set<Integer> claimed = new HashSet<>();
     private final Map<UUID, PresenceNode> present = new LinkedHashMap<>();
+    private final Map<UUID, Long> askedAt = new LinkedHashMap<>();
     private final List<BlockPos> stances = new ArrayList<>();
 
     private boolean closed;
@@ -84,7 +88,6 @@ final class EfficientBuilder {
     private int asked;
     private boolean toldFirstShot;
     private boolean dirty;
-    private boolean drained;
     private BlockPos anchor = BlockPos.ZERO;
     private ServerLevel standing;
 
@@ -151,6 +154,7 @@ final class EfficientBuilder {
         if (nothingLeft()) {
             return false;
         }
+        forgetHandsThatNeverCame(level);
         if (!present.isEmpty() && arrived() == 0 && level.getGameTime() % 200L == 0L) {
             LOGGER.info("efficient site {}: {} hand(s) asked, none here yet", shortId(), present.size());
         }
@@ -167,13 +171,6 @@ final class EfficientBuilder {
         }
         if (claimed.isEmpty() && level.getGameTime() - lastShotAt > PATIENCE_TICKS) {
             rest(200);
-            return Workload.Within.LEAVE;
-        }
-        // A hand that spent its basket goes back for another: the site's shots draw from what is carried, not from
-        // a reservation of the plan's.
-        if (drained) {
-            drained = false;
-            rest(100);
             return Workload.Within.LEAVE;
         }
         int unsupported = 0;
@@ -218,11 +215,11 @@ final class EfficientBuilder {
             }
             claimed.add(work.id());
             BlockPos stance = hand.stance() == null ? anchor : hand.stance();
-            return new Workload.Within.Turn.Piece(new ShotNode(this, work, job, stance, cost, level));
+            return new Workload.Within.Turn.Piece(new ShotNode(this, hand, work, job, stance, cost, level));
         }
         if (level.getGameTime() - toldWhyAt >= 200L) {
             toldWhyAt = level.getGameTime();
-            LOGGER.info("efficient site {}: nothing up — finished={} claimed={} unsupported={} broken={}",
+            LOGGER.info("efficient site {}: nothing up 鈥?finished={} claimed={} unsupported={} broken={}",
                 shortId(), finished.size(), claimed.size(), unsupported, broke);
         }
         return Workload.Within.WAIT;
@@ -249,6 +246,11 @@ final class EfficientBuilder {
                 finished.add(work.id());
             }
         } else {
+            // Nobody is laid into a wall: a body standing where the shot goes is stepped aside, and a shot that
+            // cannot be stepped clear waits rather than sealing someone in.
+            if (!Bystanders.clear(level, fill(job), stances)) {
+                return Outcome.failed(BuildRefusal.OCCUPIED);
+            }
             List<ItemStack> drops = lay(level, job);
             work.step().ifPresent(step -> latch(level, step));
             drops.forEach(stack -> Block.popResource(level, job.focus().cell(), stack));
@@ -273,11 +275,23 @@ final class EfficientBuilder {
     void dropped(ShotNode shot, Ending how) {
         claimed.remove(shot.work().id());
         if (how instanceof Ending.Failed failed && failed.why() == LaborRefusal.GOODS_GONE) {
-            drained = true;
+            shot.hand().drain();
         }
         if (!(how instanceof Ending.Done)) {
             LOGGER.info("efficient site {}: a shot at {} came back {}", shortId(), shot.focus(), how);
         }
+    }
+
+    // The cells of a shot that are still to be filled, as the world stands now.
+    private Map<BlockPos, BlockState> fill(BuildJob job) {
+        Map<BlockPos, BlockState> after = new LinkedHashMap<>();
+        job.after().forEach((pos, state) -> {
+            BlockPos at = pos.cell();
+            if (!latched.contains(at)) {
+                after.put(at, state);
+            }
+        });
+        return after;
     }
 
     private List<ItemStack> lay(ServerLevel level, BuildJob job) {
@@ -288,13 +302,7 @@ final class EfficientBuilder {
                 before.put(at, level.getBlockState(at));
             }
         });
-        Map<BlockPos, BlockState> after = new LinkedHashMap<>();
-        job.after().forEach((pos, state) -> {
-            BlockPos at = pos.cell();
-            if (!latched.contains(at)) {
-                after.put(at, state);
-            }
-        });
+        Map<BlockPos, BlockState> after = fill(job);
         if (after.isEmpty()) {
             return List.of();
         }
@@ -405,6 +413,7 @@ final class EfficientBuilder {
             asked++;
             PresenceNode node = new PresenceNode(this, stance);
             present.put(node.id(), node);
+            askedAt.put(node.id(), level.getGameTime());
             asks.submit(level.dimension(), Grown.of(node), this::ended);
             added++;
         }
@@ -423,10 +432,32 @@ final class EfficientBuilder {
 
     void ended(UUID node, Ending how) {
         present.remove(node);
+        askedAt.remove(node);
     }
 
     void leave(PresenceNode node) {
         present.remove(node.id());
+        askedAt.remove(node.id());
+    }
+
+    // A hand asked for long ago that has never come is a place on the site nobody is using. The asking is taken
+    // back, so the colony may send someone who can actually get there. The asking is collected first and the map
+    // changed after, since taking one back may answer at once.
+    private void forgetHandsThatNeverCame(ServerLevel level) {
+        long now = level.getGameTime();
+        List<UUID> stale = new ArrayList<>();
+        for (Map.Entry<UUID, PresenceNode> entry : present.entrySet()) {
+            Long since = askedAt.get(entry.getKey());
+            if (since != null && !entry.getValue().arrived() && now - since > ASK_TICKS) {
+                stale.add(entry.getKey());
+            }
+        }
+        for (UUID node : stale) {
+            asks.withdraw(node);
+            present.remove(node);
+            askedAt.remove(node);
+            LOGGER.info("efficient site {}: a hand never came; asking again", shortId());
+        }
     }
 
     // A resident has just come: whatever kept the site idle until now is not this one's to answer for.
@@ -434,8 +465,13 @@ final class EfficientBuilder {
         lastShotAt = standing == null ? lastShotAt : standing.getGameTime();
     }
 
-    void handArrived(PresenceNode node) {
-        LOGGER.info("efficient site {}: a hand is here", shortId());
+    void handArrived(PresenceNode node, Worker who) {
+        int stacks = 0;
+        Container pack = who.pack();
+        for (int slot = 0; slot < pack.getContainerSize(); slot++) {
+            stacks += pack.getItem(slot).isEmpty() ? 0 : 1;
+        }
+        LOGGER.info("efficient site {}: a hand is here with {} stack(s)", shortId(), stacks);
     }
 
     private int arrived() {
@@ -501,8 +537,12 @@ final class EfficientBuilder {
     /** Gives the order up: every hand is turned away and the site hears no more. */
     void close() {
         closed = true;
-        present.keySet().forEach(asks::withdraw);
+        // Withdrawing may answer at once and change the map, so the ids are copied first.
+        for (UUID node : List.copyOf(present.keySet())) {
+            asks.withdraw(node);
+        }
         present.clear();
+        askedAt.clear();
     }
 
     // Where a resident can stand and still be on the site: room to stand, room to breathe, floor underfoot, and
@@ -521,19 +561,28 @@ final class EfficientBuilder {
         if (min == null || max == null) {
             return found;
         }
-        collect(level, min, max, found);
+        // Outside the footprint first: standing room inside is the first thing a finished wall takes away, and a
+        // hand that cannot walk to its place is a place on the site nobody is using.
+        collect(level, min.offset(-2, -1, -2), max.offset(2, 1, 2), min, max, true, found);
         if (found.isEmpty()) {
-            collect(level, min.offset(-2, -1, -2), max.offset(2, 1, 2), found);
+            collect(level, min, max, min, max, false, found);
         }
         return found;
     }
 
-    private void collect(ServerLevel level, BlockPos min, BlockPos max, List<BlockPos> into) {
+    private void collect(ServerLevel level, BlockPos min, BlockPos max, BlockPos insideMin, BlockPos insideMax,
+            boolean onlyOutside, List<BlockPos> into) {
         for (BlockPos cell : BlockPos.betweenClosed(min, max)) {
             if (into.size() >= 16) {
                 return;
             }
             BlockPos at = cell.immutable();
+            boolean inside = at.getX() >= insideMin.getX() && at.getX() <= insideMax.getX()
+                && at.getY() >= insideMin.getY() && at.getY() <= insideMax.getY()
+                && at.getZ() >= insideMin.getZ() && at.getZ() <= insideMax.getZ();
+            if (onlyOutside && inside) {
+                continue;
+            }
             if (target.occupies(level, at) || target.cells().containsKey(at)) {
                 continue;
             }

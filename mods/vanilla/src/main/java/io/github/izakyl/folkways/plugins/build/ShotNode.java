@@ -27,13 +27,15 @@ import net.minecraft.server.level.ServerLevel;
 final class ShotNode implements Node {
 
     private final EfficientBuilder site;
+    private final PresenceNode hand;
     private final Layering.Work work;
     private final BuildJob job;
     private final NodeSpec spec;
 
-    ShotNode(EfficientBuilder site, Layering.Work work, BuildJob job, BlockPos stance, List<Need> cost,
-            ServerLevel level) {
+    ShotNode(EfficientBuilder site, PresenceNode hand, Layering.Work work, BuildJob job, BlockPos stance,
+            List<Need> cost, ServerLevel level) {
         this.site = site;
+        this.hand = hand;
         this.work = work;
         this.job = job;
         this.spec = NodeSpec.of(UUID.randomUUID(), BuildContent.ID,
@@ -65,7 +67,8 @@ final class ShotNode implements Node {
 
     @Override
     public Recourse failing(ServerLevel level, RefusalKind why) {
-        return Recourse.FAIL;
+        // Someone standing where the shot goes is a moment's wait, not a reason to give the piece up.
+        return Recourse.waitFor(20);
     }
 
     @Override
@@ -75,6 +78,10 @@ final class ShotNode implements Node {
 
     Layering.Work work() {
         return work;
+    }
+
+    PresenceNode hand() {
+        return hand;
     }
 
     BlockPos focus() {
