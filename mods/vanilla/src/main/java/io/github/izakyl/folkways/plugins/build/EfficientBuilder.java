@@ -59,6 +59,9 @@ final class EfficientBuilder {
     /** How many of one material one hand is asked to bring in a trip, before the stack setting multiplies it. */
     private static final long BASKET_PER_KIND = 16L;
 
+    /** How far into the plan the basket for a hand is reckoned, so asking does not cost the whole plan each time. */
+    private static final int ASKED_WORKS = 64;
+
     private final UUID order;
     private final BuildSite.Asks asks;
     private final BuildTarget target;
@@ -124,6 +127,10 @@ final class EfficientBuilder {
         anchor = target.cells().keySet().stream().findFirst().orElse(BlockPos.ZERO);
         LOGGER.info("efficient site {}: {} cell(s), {} piece(s), {} stance(s)", shortId(),
             target.cells().size(), works.size(), stances.size());
+        if (target.cells().isEmpty()) {
+            return;
+        }
+        LOGGER.info("efficient site {}: a hand is asked for {}", shortId(), needs());
         staff();
     }
 
@@ -427,16 +434,33 @@ final class EfficientBuilder {
     }
 
     // What a hand coming now would usefully bring: the kinds the rest of the plan spends most of, in a basket one
-    // resident can gather and carry. Asking for a whole stack of everything the plan will ever need is a basket the
-    // colony may never be able to fill, and a hand that never comes builds nothing.
+    // resident can gather and carry.
+    //
+    // A laying step carries no cost of its own: what a shot spends is read off the world when the job is made, by
+    // {@code Step.job}. Asking a step for its cost directly gives nothing, and a hand asked to bring nothing walks
+    // to the site empty. So the basket is reckoned from the jobs themselves, over the next stretch of the plan.
     List<Need> needs() {
+        ServerLevel level = standing;
+        if (level == null) {
+            return List.of();
+        }
         Map<ItemSpec, Long> wanted = new LinkedHashMap<>();
+        int looked = 0;
         for (Layering.Work work : works) {
             if (finished.contains(work.id())) {
                 continue;
             }
-            work.step().ifPresent(step -> step.cost()
-                .forEach(need -> wanted.merge(need.spec(), need.count(), Long::sum)));
+            Optional<Step> maybe = work.step();
+            if (maybe.isEmpty() || work.kind() == Layering.Kind.JOIN) {
+                continue;
+            }
+            BuildJob job = maybe.get().job(level, target, Stances.WHEREVER, latched);
+            for (Need need : job.cost()) {
+                wanted.merge(need.spec(), need.count(), Long::sum);
+            }
+            if (++looked >= ASKED_WORKS) {
+                break;
+            }
         }
         long cap = BASKET_PER_KIND * EfficientConstruction.settings().materialStacks();
         return wanted.entrySet().stream()
