@@ -60,11 +60,19 @@ final class EfficientBuilder {
     /** How far into the plan the basket a hand carries is reckoned, so asking does not cost the whole plan. */
     private static final int ASKED_WORKS = 64;
 
-    /** How long a hand may be asked for and not come before the asking is taken back and made again. */
-    private static final int ASK_TICKS = 1200;
+    /**
+     * How long a hand may be asked for and not come before the asking is taken back and made again. This is a
+     * backstop for a journey that never ends, not a travel budget: a resident walking to a site a hundred blocks
+     * out takes minutes, and taking the asking back under it only sends another resident out behind it.
+     */
+    private static final int ASK_TICKS = 6000;
 
-    /** How many kinds of material one hand carries, and how many of each, before the trip is too big to fill. */
-    private static final int BASKET_KINDS = 8;
+    /**
+     * How many kinds of material one hand carries, and how many of each. Kept small on purpose: the colony
+     * reserves a node's needs in full before it sends anyone, and eight hands asking for the same wide basket
+     * cannot all be filled out of one store. A slim basket is filled for everyone, and the hands work side by side.
+     */
+    private static final int BASKET_KINDS = 2;
     private static final long BASKET_PER_KIND = 16L;
 
     private final UUID order;
