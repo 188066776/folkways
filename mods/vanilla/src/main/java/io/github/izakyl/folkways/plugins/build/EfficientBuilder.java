@@ -64,7 +64,7 @@ final class EfficientBuilder {
     private static final int ASK_TICKS = 1200;
 
     /** How many kinds of material one hand carries, and how many of each, before the trip is too big to fill. */
-    private static final int BASKET_KINDS = 4;
+    private static final int BASKET_KINDS = 8;
     private static final long BASKET_PER_KIND = 16L;
 
     private final UUID order;
@@ -213,14 +213,24 @@ final class EfficientBuilder {
             if (cost == null) {
                 continue;
             }
+            // Only what this hand actually carries: a piece it cannot pay for would come back for want of goods.
+            if (!hand.canPay(cost)) {
+                continue;
+            }
             claimed.add(work.id());
             BlockPos stance = hand.stance() == null ? anchor : hand.stance();
+            hand.paid();
             return new Workload.Within.Turn.Piece(new ShotNode(this, hand, work, job, stance, cost, level));
         }
         if (level.getGameTime() - toldWhyAt >= 200L) {
             toldWhyAt = level.getGameTime();
-            LOGGER.info("efficient site {}: nothing up 鈥?finished={} claimed={} unsupported={} broken={}",
+            LOGGER.info("efficient site {}: nothing up, finished={} claimed={} unsupported={} broken={}",
                 shortId(), finished.size(), claimed.size(), unsupported, broke);
+        }
+        hand.waited(level);
+        if (hand.bored(level)) {
+            rest(100);
+            return Workload.Within.LEAVE;
         }
         return Workload.Within.WAIT;
     }

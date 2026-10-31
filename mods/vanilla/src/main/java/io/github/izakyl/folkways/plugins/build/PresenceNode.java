@@ -1,16 +1,22 @@
 package io.github.izakyl.folkways.plugins.build;
 
+import io.github.izakyl.folkways.core.api.terms.Goods;
+import io.github.izakyl.folkways.core.api.terms.ItemSpec;
 import io.github.izakyl.folkways.core.api.terms.RefusalKind;
 import io.github.izakyl.folkways.core.api.work.Ending;
+import io.github.izakyl.folkways.core.api.work.Need;
 import io.github.izakyl.folkways.core.api.work.Node;
 import io.github.izakyl.folkways.core.api.work.NodeSpec;
 import io.github.izakyl.folkways.core.api.work.Outcome;
 import io.github.izakyl.folkways.core.api.work.Recourse;
 import io.github.izakyl.folkways.core.api.work.Worker;
 import io.github.izakyl.folkways.core.api.work.Workload;
+import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.Container;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.item.ItemStack;
 
 /**
  * A resident standing on a site that raises itself: what it is here for is being here, carrying the basket, and
@@ -24,11 +30,16 @@ final class PresenceNode implements Node, Workload.Within {
 
     private static final int SWING_TICKS = 10;
 
+    /** Long enough with nothing this hand can pay for: it is better sent back for a basket that fits what is left. */
+    private static final int BORED_TICKS = 200;
+
     private final EfficientBuilder site;
     private final BlockPos stance;
     private final NodeSpec spec;
     private boolean arrived;
     private boolean drained;
+    private Worker who;
+    private long waitingSince = Long.MIN_VALUE;
     private long swungAt = Long.MIN_VALUE;
 
     PresenceNode(EfficientBuilder site, BlockPos stance) {
@@ -51,6 +62,7 @@ final class PresenceNode implements Node, Workload.Within {
     public Workload.Within.Turn next(ServerLevel level, Worker who) {
         if (!arrived) {
             arrived = true;
+            this.who = who;
             site.touched();
             site.handArrived(this, who);
         }
@@ -62,6 +74,48 @@ final class PresenceNode implements Node, Workload.Within {
             return Workload.Within.LEAVE;
         }
         return site.hand(level, this);
+    }
+
+    /**
+     * Whether this hand carries what a piece costs. A piece needing what this one did not bring is not handed to
+     * it: the core would draw nothing, the shot would come back for want of goods, and the site would be no further
+     * on. The next basket is reckoned from what is still up, so what is left out this time comes in with another.
+     */
+    boolean canPay(List<Need> cost) {
+        if (who == null) {
+            return false;
+        }
+        Container pack = who.pack();
+        for (Need need : cost) {
+            long have = 0L;
+            for (int slot = 0; slot < pack.getContainerSize(); slot++) {
+                ItemStack stack = pack.getItem(slot);
+                if (!stack.isEmpty() && Goods.matches(stack, need.spec())) {
+                    have += stack.getCount();
+                }
+            }
+            if (have < need.count()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** A shot was handed over: the hand is not idle. */
+    void paid() {
+        waitingSince = Long.MIN_VALUE;
+    }
+
+    /** Nothing up could be paid for with what this hand carries. */
+    void waited(ServerLevel level) {
+        if (waitingSince == Long.MIN_VALUE) {
+            waitingSince = level.getGameTime();
+        }
+    }
+
+    /** Long enough with nothing it can build: it is better sent back for a basket that fits what is left. */
+    boolean bored(ServerLevel level) {
+        return waitingSince != Long.MIN_VALUE && level.getGameTime() - waitingSince > BORED_TICKS;
     }
 
     /** The shot this hand was given came back for want of goods: its basket, not the site's, is spent. */
