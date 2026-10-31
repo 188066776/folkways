@@ -13,11 +13,12 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionHand;
 
 /**
- * A resident standing on a site that raises itself: what it is here for is being here and looking busy, not the
- * laying of any particular block.
+ * A resident standing on a site that raises itself: what it is here for is being here, carrying the basket, and
+ * looking busy, not the laying of any particular block.
  *
- * <p>The stay itself carries nothing. Materials reach a piece only when the core commits it, so each block is handed
- * to the resident as a shot of its own ({@link ShotNode}) and the goods come with that shot.
+ * <p>The stay asks the colony for the materials the next stretch of the plan spends and carries them in its pack.
+ * Each block is then handed to the resident as a shot of its own ({@link ShotNode}), and that shot draws what it
+ * costs from the pack. A stay whose basket is spent goes back for another.
  */
 final class PresenceNode implements Node, Workload.Within {
 

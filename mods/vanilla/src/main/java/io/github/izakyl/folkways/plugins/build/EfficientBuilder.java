@@ -126,6 +126,8 @@ final class EfficientBuilder {
                 continue;
             }
             if (work.kind() != Layering.Kind.JOIN && satisfied(level, step.get())) {
+                // What the world already holds is met as well, or the site would never come to its end.
+                latch(level, step.get());
                 finished.add(work.id());
             }
         }
@@ -174,7 +176,6 @@ final class EfficientBuilder {
             rest(100);
             return Workload.Within.LEAVE;
         }
-        int done = 0;
         int unsupported = 0;
         int broke = 0;
         for (Layering.Work work : works) {
@@ -194,6 +195,7 @@ final class EfficientBuilder {
                     continue;
                 }
             } else if (satisfied(level, step)) {
+                latch(level, step);
                 finished.add(work.id());
                 continue;
             }
@@ -215,12 +217,13 @@ final class EfficientBuilder {
                 continue;
             }
             claimed.add(work.id());
-            return new Workload.Within.Turn.Piece(new ShotNode(this, work, job, hand.stance(), cost, level));
+            BlockPos stance = hand.stance() == null ? anchor : hand.stance();
+            return new Workload.Within.Turn.Piece(new ShotNode(this, work, job, stance, cost, level));
         }
         if (level.getGameTime() - toldWhyAt >= 200L) {
             toldWhyAt = level.getGameTime();
-            LOGGER.info("efficient site {}: nothing up — finished={} claimed={} waited={} unsupported={} "
-                + "broken={}", shortId(), finished.size(), claimed.size(), done, unsupported, broke);
+            LOGGER.info("efficient site {}: nothing up — finished={} claimed={} unsupported={} broken={}",
+                shortId(), finished.size(), claimed.size(), unsupported, broke);
         }
         return Workload.Within.WAIT;
     }
@@ -228,24 +231,30 @@ final class EfficientBuilder {
     /** Fires the shot the hand was given: what the goods it was handed pay for lands in the world. */
     Outcome shoot(Layering.Work work, BuildJob job, ServerLevel level, Worker who) {
         claimed.remove(work.id());
-        finished.add(work.id());
         dirty = true;
         lastShotAt = level.getGameTime();
         if (work.kind() == Layering.Kind.JOIN) {
             Joint joint = work.joint().orElse(null);
+            boolean made = false;
             if (joint != null) {
                 Joints.Joining joining = Joints.joiner().join(level, joint.from(), joint.to(), who.supplied());
                 if (joining.joined()) {
                     joined.add(joint);
+                    made = true;
                 }
                 joining.left().forEach(stack -> Block.popResource(level, joint.from(), stack));
+            }
+            // A turn that did not join is not done: it is up for another hand, not marked behind the site's back.
+            if (made) {
+                finished.add(work.id());
             }
         } else {
             List<ItemStack> drops = lay(level, job);
             work.step().ifPresent(step -> latch(level, step));
             drops.forEach(stack -> Block.popResource(level, job.focus().cell(), stack));
+            finished.add(work.id());
         }
-        if (!toldFirstShot) {
+        if (!toldFirstShot && !finished.isEmpty()) {
             toldFirstShot = true;
             LOGGER.info("efficient site {}: first block at {} ({} piece(s) left)", shortId(),
                 job.focus().cell(), works.size() - finished.size());
